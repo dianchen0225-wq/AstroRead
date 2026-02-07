@@ -1,0 +1,32 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "AstroRead阅读器模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "AstroRead阅读器入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "AstroRead"
+    },
+    {
+      "name": "app_name",
+      "value": "AstroRead"
+    },
+    {
+      "name": "permission_internet_reason",
+      "value": "用于搜索和下载书籍内容"
+    },
+    {
+      "name": "permission_read_storage_reason",
+      "value": "需要访问媒体文件"
+    },
+    {
+      "name": "permission_write_storage_reason",
+      "value": "需要保存媒体文件"
+    }
+  ]
+}

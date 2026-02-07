@@ -1,0 +1,10 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "AstroRead 入口模块 - 纯血鸿蒙 OpenHarmony Next",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}
+

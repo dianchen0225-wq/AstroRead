@@ -1,0 +1,32 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "AstroRead Reader Module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "AstroRead Reader Entry"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "AstroRead"
+    },
+    {
+      "name": "app_name",
+      "value": "AstroRead"
+    },
+    {
+      "name": "permission_internet_reason",
+      "value": "Used for searching and downloading book content"
+    },
+    {
+      "name": "permission_read_storage_reason",
+      "value": "Required for accessing media files"
+    },
+    {
+      "name": "permission_write_storage_reason",
+      "value": "Required for saving media files"
+    }
+  ]
+}
