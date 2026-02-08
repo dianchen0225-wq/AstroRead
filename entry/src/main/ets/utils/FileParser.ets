@@ -19,8 +19,8 @@ export class FileParser {
       await fileIo.read(file.fd, buffer);
       await fileIo.close(file.fd);
       
-      const decoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
-      const content = decoder.decodeWithStream(new Uint8Array(buffer), { stream: false });
+      const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+      const content = decoder.decodeToString(new Uint8Array(buffer), { stream: false });
       
       // 按章节分割（支持多种章节标题格式）
       const chapterPattern = /(?:^|\n)(?:第[一二三四五六七八九十百千万\d]+章|第\d+章|Chapter \d+|CHAPTER \d+)[^\n]*/g;
@@ -97,8 +97,8 @@ export class FileParser {
       await fileIo.read(file.fd, buffer, { offset: chapterStart, length: chapterEnd - chapterStart });
       await fileIo.close(file.fd);
       
-      const decoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
-      return decoder.decodeWithStream(new Uint8Array(buffer), { stream: false });
+      const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+      return decoder.decodeToString(new Uint8Array(buffer), { stream: false });
     } catch (error) {
       console.error('Failed to read chapter from TXT:', error);
       throw (error instanceof Error ? error : new Error(String(error)));

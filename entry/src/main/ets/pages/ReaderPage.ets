@@ -6,7 +6,7 @@ import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { ChapterViewModel } from '../viewmodel/ChapterViewModel';
 import { BookViewModel } from '../viewmodel/BookViewModel';
 import { ThemeManager } from '../styles/ThemeManager';
-import { AppTheme } from '../styles/Theme';
+import { AppTheme, AppColors, AppTypography } from '../styles/Theme';
 
 /**
  * 阅读器页面 - 重构版本
@@ -273,7 +273,7 @@ export struct ReaderPage {
               Button('上一章')
                 .type(ButtonType.Normal)
                 .enabled(this.currentChapterIndex > 0)
-                .backgroundColor(this.currentTheme.colors.PRIMARY)
+                .backgroundColor(AppColors.PRIMARY)
                 .fontColor('#FFFFFF')
                 .onClick(() => {
                   this.goToPrevChapter();
@@ -287,7 +287,7 @@ export struct ReaderPage {
               Button('下一章')
                 .type(ButtonType.Normal)
                 .enabled(this.currentChapterIndex < this.chapters.length - 1)
-                .backgroundColor(this.currentTheme.colors.PRIMARY)
+                .backgroundColor(AppColors.PRIMARY)
                 .fontColor('#FFFFFF')
                 .onClick(() => {
                   this.goToNextChapter();
@@ -308,10 +308,13 @@ export struct ReaderPage {
           LoadingProgress()
             .width(40)
             .height(40)
-            .color(this.currentTheme.colors.PRIMARY)
+            .color(AppColors.PRIMARY)
           Text('加载中...')
             .margin({ top: 16 })
-            .captionText()
+            .fontSize(AppTypography.CAPTION.size)
+            .fontWeight(AppTypography.CAPTION.weight)
+            .fontColor(this.currentTheme.textTertiary)
+            .lineHeight(AppTypography.CAPTION.lineHeight)
         }
         .width('100%')
         .height('100%')

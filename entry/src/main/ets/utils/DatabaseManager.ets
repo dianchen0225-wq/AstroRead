@@ -13,7 +13,6 @@ import { Bookmark } from '../models/Bookmark';
 export class DatabaseManager {
   private rdbStore: relationalStore.RdbStore | null = null;
   private readonly dbName: string = 'AstroRead.db';
-  // private readonly dbVersion: number = 1;
 
   /**
    * 初始化数据库
@@ -248,6 +247,7 @@ export class DatabaseManager {
           console.error('Failed to rollback transaction:', rollbackError);
         }
       }
+      throw new Error(String(error)); // 重新抛出异常，让调用方处理
     }
   }
 
@@ -501,7 +501,7 @@ export class DatabaseManager {
       return await this.getOrCreateReadConfig();
     } catch (error) {
       console.error('Failed to get or create read config:', error);
-      throw error instanceof Error ? error : new Error(String(error));
+      throw new Error(String(error));
     }
   }
 
@@ -604,91 +604,6 @@ export class DatabaseManager {
   }
 
   /**
-   * 批量删除书籍
-   */
-  async batchDeleteBooks(bookIds: string[]): Promise<void> {
-    if (this.rdbStore === null || bookIds.length === 0) {
-      return;
-    }
-
-    try {
-      for (const bookId of bookIds) {
-        await this.deleteBook(bookId);
-      }
-    } catch (error) {
-      console.error('Failed to batch delete books:', error);
-    }
-  }
-
-  /**
-   * 根据分类查询书籍
-   */
-  async getBooksByCategory(categoryId: string): Promise<Book[]> {
-    if (this.rdbStore === null) {
-      return [];
-    }
-
-    try {
-      const predicates = new relationalStore.RdbPredicates('book_category_relation');
-      predicates.equalTo('category_id', categoryId);
-      
-      const resultSet = await this.rdbStore.query(predicates, ['book_id']);
-      const bookIds: string[] = [];
-      
-      while (resultSet.goToNextRow()) {
-        const bookId = resultSet.getString(resultSet.getColumnIndex('book_id'));
-        if (bookId) {
-          bookIds.push(bookId);
-        }
-      }
-      resultSet.close();
-
-      if (bookIds.length === 0) {
-        return [];
-      }
-
-      const bookPredicates = new relationalStore.RdbPredicates('book');
-      bookPredicates.in('id', bookIds);
-      bookPredicates.orderByDesc('last_update_time');
-
-      const bookResultSet = await this.rdbStore.query(bookPredicates, ['*']);
-      const books: Book[] = [];
-
-      while (bookResultSet.goToNextRow()) {
-        books.push(this.parseBook(bookResultSet));
-      }
-      bookResultSet.close();
-
-      return books;
-    } catch (error) {
-      console.error('Failed to get books by category:', error);
-      return [];
-    }
-  }
-
-  /**
-   * 添加分类
-   */
-  async addCategory(category: BookCategory): Promise<void> {
-    if (this.rdbStore === null) {
-      return;
-    }
-
-    try {
-      const valueBucket: relationalStore.ValuesBucket = {
-        'id': category.id,
-        'name': category.name,
-        'sort': category.sort,
-        'create_time': category.createTime
-      };
-
-      await this.rdbStore.insert('book_category', valueBucket);
-    } catch (error) {
-      console.error('Failed to add category:', error);
-    }
-  }
-
-  /**
    * 获取所有分类
    */
   async getAllCategories(): Promise<BookCategory[]> {
@@ -696,10 +611,10 @@ export class DatabaseManager {
       return [];
     }
 
-    try {
-      const predicates = new relationalStore.RdbPredicates('book_category');
-      predicates.orderByAsc('sort');
+    const predicates = new relationalStore.RdbPredicates('book_category');
+    predicates.orderByAsc('sort');
 
+    try {
       const resultSet = await this.rdbStore.query(predicates, ['*']);
       const categories: BookCategory[] = [];
 
@@ -712,12 +627,34 @@ export class DatabaseManager {
         };
         categories.push(category);
       }
-      resultSet.close();
 
+      resultSet.close();
       return categories;
     } catch (error) {
-      console.error('Failed to get all categories:', error);
+      console.error('Failed to query categories:', error);
       return [];
+    }
+  }
+
+  /**
+   * 添加分类
+   */
+  async addCategory(category: BookCategory): Promise<void> {
+    if (this.rdbStore === null) {
+      return;
+    }
+
+    const valueBucket: relationalStore.ValuesBucket = {
+      'id': category.id,
+      'name': category.name,
+      'sort': category.sort,
+      'create_time': category.createTime
+    };
+
+    try {
+      await this.rdbStore.insert('book_category', valueBucket);
+    } catch (error) {
+      console.error('Failed to add category:', error);
     }
   }
 
@@ -746,12 +683,12 @@ export class DatabaseManager {
       return;
     }
 
-    try {
-      const valueBucket: relationalStore.ValuesBucket = {
-        'book_id': bookId,
-        'category_id': categoryId
-      };
+    const valueBucket: relationalStore.ValuesBucket = {
+      'book_id': bookId,
+      'category_id': categoryId
+    };
 
+    try {
       await this.rdbStore.insert('book_category_relation', valueBucket);
     } catch (error) {
       console.error('Failed to add book to category:', error);
@@ -777,159 +714,67 @@ export class DatabaseManager {
   }
 
   /**
-   * 插入或更新章节
+   * 根据分类获取书籍
    */
-  async upsertChapter(chapter: Chapter): Promise<void> {
+  async getBooksByCategory(categoryId: string): Promise<Book[]> {
     if (this.rdbStore === null) {
-      return;
+      return [];
     }
 
     try {
-      const valueBucket: relationalStore.ValuesBucket = {
-        'id': chapter.id,
-        'book_id': chapter.bookId,
-        'title': chapter.title,
-        'url': chapter.url,
-        'order': chapter.order,
-        'is_vip': chapter.isVip ? 1 : 0
-      };
+      // 查询分类关联表中的书籍ID
+      const relationPredicates = new relationalStore.RdbPredicates('book_category_relation');
+      relationPredicates.equalTo('category_id', categoryId);
+      const relationResultSet = await this.rdbStore.query(relationPredicates, ['book_id']);
 
-      await this.rdbStore.insert('chapter', valueBucket);
-    } catch (error) {
-      console.error('Failed to upsert chapter:', error);
-    }
-  }
-
-  /**
-   * 批量插入章节
-   */
-  async batchUpsertChapters(chapters: Chapter[]): Promise<void> {
-    if (this.rdbStore === null || chapters.length === 0) {
-      return;
-    }
-
-    try {
-      for (const chapter of chapters) {
-        await this.upsertChapter(chapter);
+      const bookIds: string[] = [];
+      while (relationResultSet.goToNextRow()) {
+        const bookId = relationResultSet.getString(relationResultSet.getColumnIndex('book_id'));
+        if (bookId) {
+          bookIds.push(bookId);
+        }
       }
-    } catch (error) {
-      console.error('Failed to batch upsert chapters:', error);
-    }
-  }
+      relationResultSet.close();
 
-  /**
-   * 获取书籍的章节列表
-   */
-  async getChaptersByBookId(bookId: string): Promise<Chapter[]> {
-    if (this.rdbStore === null) {
-      return [];
-    }
-
-    try {
-      const predicates = new relationalStore.RdbPredicates('chapter');
-      predicates.equalTo('book_id', bookId);
-      predicates.orderByAsc('order');
-
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
-      const chapters: Chapter[] = [];
-
-      while (resultSet.goToNextRow()) {
-        const chapter: Chapter = {
-          id: resultSet.getString(resultSet.getColumnIndex('id')) || '',
-          bookId: resultSet.getString(resultSet.getColumnIndex('book_id')) || '',
-          title: resultSet.getString(resultSet.getColumnIndex('title')) || '',
-          url: resultSet.getString(resultSet.getColumnIndex('url')) || '',
-          order: resultSet.getLong(resultSet.getColumnIndex('order')) || 0,
-          isVip: resultSet.getLong(resultSet.getColumnIndex('is_vip')) === 1
-        };
-        chapters.push(chapter);
+      if (bookIds.length === 0) {
+        return [];
       }
-      resultSet.close();
 
-      return chapters;
-    } catch (error) {
-      console.error('Failed to get chapters by book id:', error);
-      return [];
-    }
-  }
+      // 根据书籍ID查询书籍信息
+      const bookPredicates = new relationalStore.RdbPredicates('book');
+      bookPredicates.in('id', bookIds);
+      bookPredicates.orderByDesc('last_update_time');
 
-  /**
-   * 添加书签
-   */
-  async addBookmark(bookmark: Bookmark): Promise<void> {
-    if (this.rdbStore === null) {
-      return;
-    }
+      const bookResultSet = await this.rdbStore.query(bookPredicates, ['*']);
+      const books: Book[] = [];
 
-    try {
-      const valueBucket: relationalStore.ValuesBucket = {
-        'id': bookmark.id,
-        'book_id': bookmark.bookId,
-        'chapter_id': bookmark.chapterId,
-        'chapter_title': bookmark.chapterTitle,
-        'content': bookmark.content,
-        'create_time': bookmark.createTime
-      };
-
-      await this.rdbStore.insert('bookmark', valueBucket);
-    } catch (error) {
-      console.error('Failed to add bookmark:', error);
-    }
-  }
-
-  /**
-   * 获取书籍的所有书签
-   */
-  async getBookmarksByBookId(bookId: string): Promise<Bookmark[]> {
-    if (this.rdbStore === null) {
-      return [];
-    }
-
-    try {
-      const predicates = new relationalStore.RdbPredicates('bookmark');
-      predicates.equalTo('book_id', bookId);
-      predicates.orderByDesc('create_time');
-
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
-      const bookmarks: Bookmark[] = [];
-
-      while (resultSet.goToNextRow()) {
-        const bookmark: Bookmark = {
-          id: resultSet.getString(resultSet.getColumnIndex('id')) || '',
-          bookId: resultSet.getString(resultSet.getColumnIndex('book_id')) || '',
-          chapterId: resultSet.getString(resultSet.getColumnIndex('chapter_id')) || '',
-          chapterTitle: resultSet.getString(resultSet.getColumnIndex('chapter_title')) || '',
-          content: resultSet.getString(resultSet.getColumnIndex('content')) || '',
-          createTime: resultSet.getLong(resultSet.getColumnIndex('create_time')) || 0
-        };
-        bookmarks.push(bookmark);
+      while (bookResultSet.goToNextRow()) {
+        const book = this.parseBook(bookResultSet);
+        books.push(book);
       }
-      resultSet.close();
 
-      return bookmarks;
+      bookResultSet.close();
+      return books;
     } catch (error) {
-      console.error('Failed to get bookmarks by book id:', error);
+      console.error('Failed to get books by category:', error);
       return [];
     }
   }
 
   /**
-   * 删除书签
+   * 关闭数据库连接
    */
-  async deleteBookmark(bookmarkId: string): Promise<void> {
-    if (this.rdbStore === null) {
-      return;
-    }
-
-    try {
-      const predicates = new relationalStore.RdbPredicates('bookmark');
-      predicates.equalTo('id', bookmarkId);
-      await this.rdbStore.delete(predicates);
-    } catch (error) {
-      console.error('Failed to delete bookmark:', error);
+  async close(): Promise<void> {
+    if (this.rdbStore !== null) {
+      try {
+        await this.rdbStore.close();
+        this.rdbStore = null;
+      } catch (error) {
+        console.error('Failed to close database:', error);
+      }
     }
   }
 }
 
-// 单例实例
+// 导出数据库管理器实例
 export const databaseManager = new DatabaseManager();

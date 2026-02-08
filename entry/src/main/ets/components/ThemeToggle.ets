@@ -4,7 +4,7 @@
  */
 
 import { ThemeManager } from '../styles/ThemeManager';
-import { ThemeType, AppTheme } from '../styles/Theme';
+import { ThemeType, AppTheme, AppShadows } from '../styles/Theme';
 
 @Component
 export struct ThemeToggle {
@@ -44,10 +44,10 @@ export struct ThemeToggle {
     .backgroundColor(this.currentTheme.surfaceColor)
     .borderRadius(18)
     .shadow({
-      radius: 2,
-      color: this.currentTheme.shadows.SM.color,
-      offsetX: 0,
-      offsetY: 1
+      radius: AppShadows.SM.radius,
+      color: AppShadows.SM.color,
+      offsetX: AppShadows.SM.offsetX,
+      offsetY: AppShadows.SM.offsetY
     })
     .onClick(() => {
       this.themeManager.toggleTheme();

@@ -95,8 +95,8 @@ export class BackupManager {
       await fileIo.read(file.fd, buffer);
       await fileIo.close(file.fd);
 
-      const decoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
-      const content = decoder.decodeWithStream(new Uint8Array(buffer), { stream: false });
+      const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+      const content = decoder.decodeToString(new Uint8Array(buffer), { stream: false });
       const backupData: BackupData = JSON.parse(content);
 
       // 恢复数据

@@ -1,24 +1,14 @@
 import { BookSource } from '../models/BookSource';
-import prompt from '@ohos.promptAction';
+import { UIContext, PromptAction } from '@kit.ArkUI';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { BookSourceViewModel } from '../viewmodel/BookSourceViewModel';
 import { ThemeManager } from '../styles/ThemeManager';
-import { AppTheme } from '../styles/Theme';
-import { 
-  primaryButton, 
-  secondaryButton, 
-  textButton, 
-  cardStyle, 
-  surfaceCard,
-  titleText,
-  subtitleText,
-  bodyText,
-  captionText,
-  responsiveRow
-} from '../styles/ComponentStyles';
+import { AppTheme, ThemeType } from '../styles/Theme';
+import { AppColors, AppBorderRadius, AppShadows } from '../styles/Theme';
 
 /**
- * 书源管理页面 - 重构版本
- * 集成主题系统，替换硬编码颜色值为主题变量
+ * 书源管理页面 - 优化版本
+ * 使用本地图标资源，改进状态提示系统
  */
 @Component
 export struct BookSourcePage {
@@ -33,6 +23,7 @@ export struct BookSourcePage {
   @State isImporting: boolean = false;
   @State isToggling: boolean = false;
   @State currentTheme: AppTheme = this.themeManager.currentTheme;
+  @State pageState: 'loading' | 'empty' | 'hasSources' = 'loading';
 
   aboutToAppear(): void {
     // 注册主题变更监听
@@ -48,14 +39,42 @@ export struct BookSourcePage {
   }
 
   /**
+   * 显示Toast消息（使用新API替代废弃的showToast）
+   */
+  private showToast(message: string, duration: number = 2000): void {
+    try {
+      const uiContext: UIContext = this.getUIContext();
+      const promptAction: PromptAction = uiContext.getPromptAction();
+      
+      promptAction.openToast({
+        message: message,
+        duration: duration
+      }).catch((error: BusinessError) => {
+        console.error(`显示Toast失败，错误码：${error.code}, 错误信息：${error.message}`);
+      });
+    } catch (error) {
+      console.error('获取UIContext失败:', error);
+    }
+  }
+
+  /**
    * 加载书源列表 - 使用 ViewModel
    */
   async loadBookSources(): Promise<void> {
     this.isLoading = true;
+    this.pageState = 'loading';
     try {
       this.bookSources = await this.bookSourceViewModel.loadEnabledBookSources();
+      
+      // 更新页面状态
+      if (this.bookSources.length > 0) {
+        this.pageState = 'hasSources';
+      } else {
+        this.pageState = 'empty';
+      }
     } catch (error) {
       console.error('Failed to load book sources:', error);
+      this.pageState = 'empty';
     } finally {
       this.isLoading = false;
     }
@@ -74,7 +93,7 @@ export struct BookSourcePage {
     } catch (error) {
       console.error('Failed to toggle book source:', error);
       await this.loadBookSources();
-      prompt.showToast({ message: '切换失败，请重试' });
+      this.showToast('切换失败，请重试');
     } finally {
       this.isToggling = false;
     }
@@ -87,10 +106,10 @@ export struct BookSourcePage {
     try {
       await this.bookSourceViewModel.deleteBookSource(bookSource.id);
       await this.loadBookSources();
-      prompt.showToast({ message: '删除成功' });
+      this.showToast('删除成功');
     } catch (error) {
       console.error('Failed to delete book source:', error);
-      prompt.showToast({ message: '删除失败，请重试' });
+      this.showToast('删除失败，请重试');
     }
   }
 
@@ -122,10 +141,7 @@ export struct BookSourcePage {
       setTimeout(() => {
         if (this.showImportDialog) {
           if (result.success) {
-            prompt.showToast({
-              message: result.message,
-              duration: 2000
-            });
+            this.showToast(result.message, 2000);
             
             this.loadBookSources();
             
@@ -149,6 +165,111 @@ export struct BookSourcePage {
     }
   }
 
+  /**
+   * 构建状态指示器
+   */
+  @Builder
+  buildStateIndicator() {
+    Column() {
+      if (this.pageState === 'loading') {
+        this.buildLoadingState();
+      } else if (this.pageState === 'empty') {
+        this.buildEmptyState();
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .animation({
+      duration: 300,
+      curve: Curve.EaseOut
+    })
+  }
+
+  /**
+   * 构建加载状态
+   */
+  @Builder
+  buildLoadingState() {
+    Column() {
+      Stack() {
+        Circle({ width: 120, height: 120 })
+          .fill(this.currentTheme.surfaceColor)
+          .shadow({
+            radius: AppShadows.MD.radius,
+            color: AppShadows.MD.color,
+            offsetX: AppShadows.MD.offsetX,
+            offsetY: AppShadows.MD.offsetY
+          })
+        
+        LoadingProgress()
+          .width(48)
+          .height(48)
+          .color(AppColors.PRIMARY)
+      }
+      .margin({ bottom: 32 })
+
+      Text('加载中...')
+        .fontSize(20)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTheme.textPrimary)
+
+      Text('正在加载书源列表')
+        .margin({ top: 8 })
+        .fontSize(14)
+        .fontColor(this.currentTheme.textTertiary)
+    }
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  /**
+   * 构建空状态
+   */
+  @Builder
+  buildEmptyState() {
+    Column() {
+      Stack() {
+        Circle({ width: 120, height: 120 })
+          .fill(this.currentTheme.surfaceColor)
+          .shadow({
+            radius: AppShadows.MD.radius,
+            color: AppShadows.MD.color,
+            offsetX: AppShadows.MD.offsetX,
+            offsetY: AppShadows.MD.offsetY
+          })
+        
+        Image($r('app.media.ic_book_source'))
+          .width(48)
+          .height(48)
+          .fillColor(this.currentTheme.textTertiary)
+      }
+      .margin({ bottom: 32 })
+
+      Text('暂无书源')
+        .fontSize(20)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTheme.textPrimary)
+
+      Text('点击导入按钮添加书源')
+        .margin({ top: 8 })
+        .fontSize(14)
+        .fontColor(this.currentTheme.textTertiary)
+
+      Button('导入书源')
+        .margin({ top: 24 })
+        .height(40)
+        .padding({ left: 24, right: 24 })
+        .fontSize(14)
+        .fontColor('#FFFFFF')
+        .backgroundColor(AppColors.PRIMARY)
+        .borderRadius(20)
+        .onClick(() => {
+          this.showImportDialog = true;
+        })
+    }
+    .alignItems(HorizontalAlign.Center)
+  }
+
   build() {
     Column() {
       // 标题栏
@@ -159,7 +280,7 @@ export struct BookSourcePage {
           .fontColor(this.currentTheme.textPrimary)
 
         Button('导入')
-          .backgroundColor(this.currentTheme.colors.PRIMARY)
+          .backgroundColor(AppColors.PRIMARY)
           .fontColor('#FFFFFF')
           .borderRadius(8)
           .padding({ left: 16, right: 16, top: 8, bottom: 8 })
@@ -172,46 +293,14 @@ export struct BookSourcePage {
       .height(64)
       .backgroundColor(this.currentTheme.surfaceColor)
       .shadow({
-        radius: this.currentTheme.shadows.SM.radius,
-        color: this.currentTheme.shadows.SM.color,
-        offsetX: this.currentTheme.shadows.SM.offsetX,
-        offsetY: this.currentTheme.shadows.SM.offsetY
+        radius: AppShadows.SM.radius,
+        color: AppShadows.SM.color,
+        offsetX: AppShadows.SM.offsetX,
+        offsetY: AppShadows.SM.offsetY
       })
 
-      // 书源列表
-      if (this.isLoading) {
-        Column() {
-          LoadingProgress()
-            .width(48)
-            .height(48)
-            .color(this.currentTheme.colors.PRIMARY)
-          Text('加载中...')
-            .margin({ top: 16 })
-            .fontSize(14)
-            .fontColor(this.currentTheme.textTertiary)
-        }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-      } else if (this.bookSources.length === 0) {
-        Column() {
-          Image('https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=empty%20book%20source%20list%20illustration%2C%20minimal%20style&image_size=square')
-            .width(120)
-            .height(120)
-            .margin({ bottom: 16 })
-          Text('暂无书源')
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.currentTheme.textSecondary)
-          Text('点击导入按钮添加书源')
-            .margin({ top: 8 })
-            .fontSize(14)
-            .fontColor(this.currentTheme.textTertiary)
-        }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-      } else {
+      // 内容区域
+      if (this.pageState === 'hasSources') {
         List() {
           ForEach(this.bookSources, (source: BookSource) => {
             ListItem() {
@@ -237,6 +326,8 @@ export struct BookSourcePage {
           startMargin: 20,
           endMargin: 20
         })
+      } else {
+        this.buildStateIndicator()
       }
 
       // 导入对话框
@@ -266,7 +357,7 @@ export struct BookSourcePage {
             })
             .width('100%')
             .height(120)
-            .borderRadius(this.currentTheme.borderRadius.MD)
+            .borderRadius(AppBorderRadius.MD)
             .backgroundColor(this.currentTheme.surfaceColor)
             .padding(12)
             .margin({ bottom: 16 })
@@ -283,7 +374,7 @@ export struct BookSourcePage {
             if (this.importError) {
               Text(this.importError)
                 .fontSize(14)
-                .fontColor(this.currentTheme.colors.ERROR)
+                .fontColor(AppColors.ERROR)
                 .margin({ bottom: 16 })
             }
 
@@ -292,7 +383,7 @@ export struct BookSourcePage {
                 .width('48%')
                 .height(40)
                 .margin({ right: '4%' })
-                .borderRadius(this.currentTheme.borderRadius.MD)
+                .borderRadius(AppBorderRadius.MD)
                 .backgroundColor(this.currentTheme.surfaceColor)
                 .fontColor(this.currentTheme.textPrimary)
                 .onClick(() => {
@@ -303,8 +394,8 @@ export struct BookSourcePage {
               Button('导入')
                 .width('48%')
                 .height(40)
-                .borderRadius(this.currentTheme.borderRadius.MD)
-                .backgroundColor(this.isImporting ? this.currentTheme.surfaceColor : this.currentTheme.colors.PRIMARY)
+                .borderRadius(AppBorderRadius.MD)
+                .backgroundColor(this.isImporting ? this.currentTheme.surfaceColor : AppColors.PRIMARY)
                 .fontColor('#FFFFFF')
                 .onClick(() => {
                   if (!this.isImporting) {
@@ -316,12 +407,12 @@ export struct BookSourcePage {
           .width('80%')
           .padding(20)
           .backgroundColor(this.currentTheme.cardColor)
-          .borderRadius(this.currentTheme.borderRadius.LG)
+          .borderRadius(AppBorderRadius.LG)
           .shadow({ 
-            radius: this.currentTheme.shadows.LG.radius, 
-            color: this.currentTheme.shadows.LG.color, 
-            offsetX: this.currentTheme.shadows.LG.offsetX, 
-            offsetY: this.currentTheme.shadows.LG.offsetY 
+            radius: AppShadows.LG.radius, 
+            color: AppShadows.LG.color, 
+            offsetX: AppShadows.LG.offsetX, 
+            offsetY: AppShadows.LG.offsetY 
           })
           .animation({
             duration: 300,
@@ -344,7 +435,7 @@ export struct BookSourcePage {
 }
 
 /**
- * 书源列表项组件 - 重构版本
+ * 书源列表项组件 - 优化版本
  */
 @Component
 struct BookSourceItem {
@@ -384,7 +475,7 @@ struct BookSourceItem {
   };
   public onToggle: (targetEnabled: boolean) => void = () => {};
   public onDelete: (source: BookSource) => void = () => {};
-  public currentTheme: AppTheme;
+  public currentTheme: AppTheme = new AppTheme(ThemeType.LIGHT);
 
   build() {
     Row() {
@@ -408,17 +499,17 @@ struct BookSourceItem {
             .fontSize(10)
             .fontColor('#FFFFFF')
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .backgroundColor(this.currentTheme.colors.PRIMARY)
+            .backgroundColor(AppColors.PRIMARY)
             .borderRadius(4)
             .margin({ right: 8 })
 
           Text(this.source.enabled ? '已启用' : '已禁用')
             .fontSize(10)
-            .fontColor(this.source.enabled ? this.currentTheme.colors.SUCCESS : this.currentTheme.colors.WARNING)
+            .fontColor(this.source.enabled ? AppColors.SUCCESS : AppColors.WARNING)
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
             .backgroundColor(this.source.enabled ? 
-              this.currentTheme.colors.SUCCESS + '20' : 
-              this.currentTheme.colors.WARNING + '20')
+              AppColors.SUCCESS + '20' : 
+              AppColors.WARNING + '20')
             .borderRadius(4)
         }
         .margin({ top: 8 })
@@ -432,7 +523,7 @@ struct BookSourceItem {
           .fontSize(12)
           .margin({ bottom: 8 })
           .borderRadius(16)
-          .backgroundColor(this.source.enabled ? this.currentTheme.colors.WARNING : this.currentTheme.colors.SUCCESS)
+          .backgroundColor(this.source.enabled ? AppColors.WARNING : AppColors.SUCCESS)
           .fontColor('#FFFFFF')
           .onClick(() => {
             this.onToggle(!this.source.enabled);
@@ -443,7 +534,7 @@ struct BookSourceItem {
           .height(32)
           .fontSize(12)
           .borderRadius(16)
-          .backgroundColor(this.currentTheme.colors.ERROR)
+          .backgroundColor(AppColors.ERROR)
           .fontColor('#FFFFFF')
           .onClick(() => {
             this.onDelete(this.source);

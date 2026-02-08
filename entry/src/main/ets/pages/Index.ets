@@ -3,11 +3,19 @@ import { HomePage } from './HomePage';
 import { SearchPage } from './SearchPage';
 import { SettingsPage } from './SettingsPage';
 import { ThemeManager } from '../styles/ThemeManager';
-import { AppTheme } from '../styles/Theme';
+import { AppTheme, AppColors } from '../styles/Theme';
 
 /**
- * 主页面 - 使用Tab导航
- * 集成主题系统，支持动态主题切换
+ * 页面配置接口
+ */
+interface PageConfig {
+  name: string;
+  icon: Resource;
+}
+
+/**
+ * 主页面 - 使用自定义Tab导航
+ * 极简图标 + 文字风格，轻质感设计
  */
 @Entry
 @Component
@@ -16,6 +24,14 @@ export struct Index {
   @State currentTheme: AppTheme = ThemeManager.getInstance().currentTheme;
   
   private themeManager: ThemeManager = ThemeManager.getInstance();
+  
+  // 页面配置数组
+  private pages: PageConfig[] = [
+    { name: '书架', icon: $r('app.media.ic_bookshelf_line') },
+    { name: '搜索', icon: $r('app.media.ic_search_line') },
+    { name: '书源', icon: $r('app.media.ic_book_source_line') },
+    { name: '设置', icon: $r('app.media.ic_settings_line') }
+  ];
 
   aboutToAppear(): void {
     // 注册主题变更监听
@@ -29,54 +45,73 @@ export struct Index {
     this.themeManager.offThemeChange(() => {});
   }
 
-  onTabChange(index: number) {
-    this.currentIndex = index;
-  }
-
   build() {
     Column() {
-      Tabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
-        // 书架
-        TabContent() {
+      // 页面内容区域
+      Column() {
+        if (this.currentIndex === 0) {
           HomePage()
-        }
-        .tabBar({
-          text: '书架',
-          icon: '\ue715'
-        })
-
-        // 搜索
-        TabContent() {
+        } else if (this.currentIndex === 1) {
           SearchPage()
-        }
-        .tabBar({
-          text: '搜索',
-          icon: '\ue68b'
-        })
-
-        // 书源
-        TabContent() {
+        } else if (this.currentIndex === 2) {
           BookSourcePage()
-        }
-        .tabBar({
-          text: '书源',
-          icon: '\ue674'
-        })
-
-        // 设置
-        TabContent() {
+        } else if (this.currentIndex === 3) {
           SettingsPage()
         }
-        .tabBar({
-          text: '设置',
-          icon: '\ue693'
+      }
+      .width('100%')
+      .layoutWeight(1)
+
+      // 底部导航栏
+      Row() {
+        ForEach(this.pages, (item: PageConfig, index: number) => {
+          Column() {
+            // 图标
+            Image(item.icon)
+              .width(24)
+              .height(24)
+              .fillColor(this.currentIndex === index ? AppColors.PRIMARY : this.currentTheme.textTertiary)
+              .margin({ bottom: 4 })
+
+            // 文字
+            Text(item.name)
+              .fontSize(10)
+              .fontWeight(this.currentIndex === index ? FontWeight.Medium : FontWeight.Normal)
+              .fontColor(this.currentIndex === index ? AppColors.PRIMARY : this.currentTheme.textTertiary)
+
+            // 选中指示条
+            if (this.currentIndex === index) {
+              Column() {
+                // 空列用于指示条
+              }
+              .width(24)
+              .height(3)
+              .backgroundColor(AppColors.PRIMARY)
+              .borderRadius(2)
+              .margin({ top: 6 })
+            }
+          }
+          .width('25%') // 等分4个标签
+          .height(56)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .backgroundColor('transparent')
+          .onClick(() => {
+            this.currentIndex = index;
+          })
+          .animation({
+            duration: 200,
+            curve: Curve.EaseOut
+          })
         })
       }
       .width('100%')
-      .height('100%')
-      .backgroundColor(this.currentTheme.backgroundColor)
-      .onChange((index: number) => {
-        this.onTabChange(index);
+      .height(56)
+      .backgroundColor(this.currentTheme.surfaceColor)
+      .border({
+        width: { top: 1 },
+        color: this.currentTheme.borderColor,
+        style: BorderStyle.Solid
       })
     }
     .width('100%')

@@ -2,17 +2,8 @@ import { ReadConfig } from '../models/ReadConfig';
 import { DEFAULT_READ_CONFIG } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { ThemeManager } from '../styles/ThemeManager';
-import { AppTheme } from '../styles/Theme';
+import { AppTheme, AppColors, AppShadows } from '../styles/Theme';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { 
-  titleText,
-  subtitleText,
-  bodyText,
-  captionText,
-  cardStyle,
-  surfaceCard,
-  responsiveRow
-} from '../styles/ComponentStyles';
 
 /**
  * 设置页面 - 重构版本
@@ -59,22 +50,24 @@ export struct SettingsPage {
       // 标题栏
       Row() {
         Text('设置')
-          .titleText()
           .fontSize(24)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.currentTheme.textPrimary)
         
         Blank()
         
         // 主题切换按钮
         ThemeToggle()
       }
-      .responsiveRow()
+      .width('100%')
+      .padding({ left: 20, right: 20 })
       .height(64)
       .backgroundColor(this.currentTheme.surfaceColor)
       .shadow({
-        radius: this.currentTheme.shadows.SM.radius,
-        color: this.currentTheme.shadows.SM.color,
-        offsetX: this.currentTheme.shadows.SM.offsetX,
-        offsetY: this.currentTheme.shadows.SM.offsetY
+        radius: AppShadows.SM.radius,
+        color: AppShadows.SM.color,
+        offsetX: AppShadows.SM.offsetX,
+        offsetY: AppShadows.SM.offsetY
       })
 
       if (this.isLoading) {
@@ -82,10 +75,11 @@ export struct SettingsPage {
           LoadingProgress()
             .width(48)
             .height(48)
-            .color(this.currentTheme.colors.PRIMARY)
+            .color(AppColors.PRIMARY)
           Text('加载中...')
             .margin({ top: 16 })
-            .captionText()
+            .fontSize(14)
+            .fontColor(this.currentTheme.textTertiary)
         }
         .width('100%')
         .layoutWeight(1)
@@ -95,15 +89,17 @@ export struct SettingsPage {
           // 主题设置卡片
           Column() {
             Text('主题设置')
-              .subtitleText()
+              .fontSize(16)
               .fontWeight(FontWeight.Bold)
+              .fontColor(this.currentTheme.textPrimary)
               .margin({ bottom: 20, left: 4 })
 
             // 主题模式
             Row() {
               Text('主题模式')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               
               Blank()
               
@@ -121,8 +117,9 @@ export struct SettingsPage {
             // 跟随系统主题
             Row() {
               Text('跟随系统主题')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               
               Blank()
               
@@ -132,7 +129,7 @@ export struct SettingsPage {
               })
                 .width(50)
                 .height(30)
-                .selectedColor(this.currentTheme.colors.PRIMARY)
+                .selectedColor(AppColors.PRIMARY)
                 .onChange((isOn: boolean) => {
                   // TODO: 实现系统主题跟随功能
                 })
@@ -146,24 +143,35 @@ export struct SettingsPage {
               curve: Curve.EaseOut
             })
           }
-          .cardStyle()
+          .backgroundColor(this.currentTheme.cardColor)
+          .borderRadius(12)
+          .padding(16)
+          .shadow({
+            radius: 4,
+            color: 'rgba(0, 0, 0, 0.1)',
+            offsetX: 0,
+            offsetY: 2
+          })
           .margin({ top: 20, left: 20, right: 20 })
 
           // 阅读设置卡片
           Column() {
             Text('阅读设置')
-              .subtitleText()
+              .fontSize(16)
               .fontWeight(FontWeight.Bold)
+              .fontColor(this.currentTheme.textPrimary)
               .margin({ bottom: 20, left: 4 })
 
             // 字体大小
             Row() {
               Text('字体大小')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               Row() {
                 Text(`${this.readConfig.fontSize}sp`)
-                  .captionText()
+                  .fontSize(14)
+                  .fontColor(this.currentTheme.textTertiary)
                   .margin({ right: 12 })
                 Slider({
                   value: this.readConfig.fontSize,
@@ -173,9 +181,9 @@ export struct SettingsPage {
                 })
                 .width(120)
                 .height(40)
-                .blockColor(this.currentTheme.colors.PRIMARY)
+                .blockColor(AppColors.PRIMARY)
                 .trackColor(this.currentTheme.surfaceColor)
-                .selectedColor(this.currentTheme.colors.PRIMARY)
+                .selectedColor(AppColors.PRIMARY)
                 .onChange((value: number) => {
                   this.readConfigViewModel.updateFontSize(value).then(() => {
                     this.readConfig = this.readConfigViewModel.getCurrentConfig();
@@ -195,11 +203,13 @@ export struct SettingsPage {
             // 行间距
             Row() {
               Text('行间距')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               Row() {
                 Text(`${this.readConfig.lineSpacing}x`)
-                  .captionText()
+                  .fontSize(14)
+                  .fontColor(this.currentTheme.textTertiary)
                   .margin({ right: 12 })
                 Slider({
                   value: this.readConfig.lineSpacing,
@@ -209,9 +219,9 @@ export struct SettingsPage {
                 })
                 .width(120)
                 .height(40)
-                .blockColor(this.currentTheme.colors.PRIMARY)
+                .blockColor(AppColors.PRIMARY)
                 .trackColor(this.currentTheme.surfaceColor)
-                .selectedColor(this.currentTheme.colors.PRIMARY)
+                .selectedColor(AppColors.PRIMARY)
                 .onChange((value: number) => {
                   this.readConfigViewModel.updateLineSpacing(value).then(() => {
                     this.readConfig = this.readConfigViewModel.getCurrentConfig();
@@ -231,13 +241,14 @@ export struct SettingsPage {
             // 翻页模式
             Row() {
               Text('翻页模式')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               Button(this.getPageTurnModeText(this.readConfig.pageTurnMode))
                 .fontSize(14)
-                .fontColor(this.currentTheme.colors.PRIMARY)
+                .fontColor(AppColors.PRIMARY)
                 .fontWeight(FontWeight.Medium)
-                .backgroundColor(this.currentTheme.colors.PRIMARY + '10')
+                .backgroundColor(AppColors.PRIMARY + '10')
                 .padding({ left: 16, right: 16, top: 8, bottom: 8 })
                 .borderRadius(16)
                 .onClick(() => {
@@ -256,15 +267,16 @@ export struct SettingsPage {
             // 夜间模式
             Row() {
               Text('夜间模式')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               Toggle({ 
                 type: ToggleType.Switch, 
                 isOn: this.readConfig.isNightMode 
               })
                 .width(50)
                 .height(30)
-                .selectedColor(this.currentTheme.colors.PRIMARY)
+                .selectedColor(AppColors.PRIMARY)
                 .onChange((isOn: boolean) => {
                   this.readConfigViewModel.toggleNightMode(isOn).then(() => {
                     this.readConfig = this.readConfigViewModel.getCurrentConfig();
@@ -280,22 +292,33 @@ export struct SettingsPage {
               curve: Curve.EaseOut
             })
           }
-          .cardStyle()
+          .backgroundColor(this.currentTheme.cardColor)
+          .borderRadius(12)
+          .padding(16)
+          .shadow({
+            radius: 4,
+            color: 'rgba(0, 0, 0, 0.1)',
+            offsetX: 0,
+            offsetY: 2
+          })
           .margin({ top: 20, left: 20, right: 20 })
 
           // 关于卡片
           Column() {
             Text('关于')
-              .subtitleText()
+              .fontSize(16)
               .fontWeight(FontWeight.Bold)
+              .fontColor(this.currentTheme.textPrimary)
               .margin({ bottom: 20, left: 4 })
 
             Row() {
               Text('应用版本')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               Text('1.0.0')
-                .captionText()
+                .fontSize(14)
+                .fontColor(this.currentTheme.textTertiary)
             }
             .width('100%')
             .padding({ top: 16, bottom: 16, left: 20, right: 20 })
@@ -308,10 +331,12 @@ export struct SettingsPage {
 
             Row() {
               Text('开发者')
-                .bodyText()
+                .fontSize(16)
                 .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentTheme.textPrimary)
               Text('AstroRead Team')
-                .captionText()
+                .fontSize(14)
+                .fontColor(this.currentTheme.textTertiary)
             }
             .width('100%')
             .padding({ top: 16, bottom: 16, left: 20, right: 20 })
@@ -322,7 +347,15 @@ export struct SettingsPage {
               curve: Curve.EaseOut
             })
           }
-          .cardStyle()
+          .backgroundColor(this.currentTheme.cardColor)
+          .borderRadius(12)
+          .padding(16)
+          .shadow({
+            radius: 4,
+            color: 'rgba(0, 0, 0, 0.1)',
+            offsetX: 0,
+            offsetY: 2
+          })
           .margin({ top: 20, left: 20, right: 20, bottom: 20 })
         }
         .layoutWeight(1)

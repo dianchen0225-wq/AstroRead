@@ -103,9 +103,9 @@ export class NetworkManager {
             offset += chunk.length;
           }
           
-          // 使用util模块的TextDecoder
-          const decoder = new util.TextDecoder('utf-8');
-          const result = decoder.decode(mergedArray);
+          // 使用util模块的TextDecoder（使用新API替代废弃的decode方法）
+          const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+          const result = decoder.decodeToString(mergedArray, { stream: false });
           
           httpRequest.off('dataReceive');
           httpRequest.off('dataEnd');
