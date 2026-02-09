@@ -87,12 +87,12 @@ class SourceValidator {
     // 验证请求头格式 - 增强安全检查
     if (source.header) {
       try {
-        const headers = JSON.parse(source.header);
+        const headers: Record<string, string> = JSON.parse(source.header);
         if (typeof headers !== 'object' || headers === null) {
           errors.push('请求头格式无效');
         } else {
           // 验证headers key和value长度
-          const headerEntries = Object.entries(headers);
+          const headerEntries = Object.entries<string>(headers);
           for (let i = 0; i < headerEntries.length; i++) {
             const key = headerEntries[i][0];
             const value = headerEntries[i][1];
@@ -160,32 +160,51 @@ class SourceValidator {
         : undefined;
       
       // 使用Promise.race实现超时控制
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('请求超时')), this.REQUEST_TIMEOUT);
+      const timeoutPromise = new Promise<AvailabilityResult>((resolve) => {
+        setTimeout(() => {
+          resolve({
+            isAvailable: false,
+            responseTime: Date.now() - startTime,
+            error: '请求超时'
+          });
+        }, this.REQUEST_TIMEOUT);
       });
       
-      const requestPromise = networkManager.get(testUrl, headers);
-      
-      const response = await Promise.race([requestPromise, timeoutPromise]);
-      
-      const responseTime = Date.now() - startTime;
-      
-      if (response && response.length > 0) {
-        Logger.debug(this.TAG, `书源${this.sanitizeLogOutput(source.name)}验证成功，响应时间：${responseTime}ms`);
-        const result: AvailabilityResult = {
-          isAvailable: true,
-          responseTime: responseTime
-        };
-        return result;
-      } else {
-        Logger.warn(this.TAG, `书源${this.sanitizeLogOutput(source.name)}返回空内容`);
+      const requestPromise = networkManager.get(testUrl, headers).then((response: string) => {
+        const responseTime = Date.now() - startTime;
+        
+        if (response && response.length > 0) {
+          Logger.debug(this.TAG, `书源${this.sanitizeLogOutput(source.name)}验证成功，响应时间：${responseTime}ms`);
+          const result: AvailabilityResult = {
+            isAvailable: true,
+            responseTime: responseTime
+          };
+          return result;
+        } else {
+          Logger.warn(this.TAG, `书源${this.sanitizeLogOutput(source.name)}返回空内容`);
+          const result: AvailabilityResult = {
+            isAvailable: false,
+            responseTime: responseTime,
+            error: '响应内容为空'
+          };
+          return result;
+        }
+      }).catch((error: Error) => {
+        const responseTime = Date.now() - startTime;
+        const errorMessage = this.getSafeErrorMessage(error);
+        Logger.error(this.TAG, `书源${this.sanitizeLogOutput(source.name)}验证失败`);
+        
         const result: AvailabilityResult = {
           isAvailable: false,
           responseTime: responseTime,
-          error: '响应内容为空'
+          error: errorMessage
         };
         return result;
-      }
+      });
+      
+      const response = await Promise.race<AvailabilityResult>([requestPromise, timeoutPromise]);
+      
+      return response;
       
     } catch (error) {
       const responseTime = Date.now() - startTime;
@@ -244,7 +263,7 @@ class SourceValidator {
         
         // 短暂延迟，避免请求过于密集
         if (i < sourcesToValidate.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 2000)); // 增加到2秒延迟
+          await new Promise<void>(resolve => setTimeout(resolve, 2000)); // 增加到2秒延迟
         }
       } catch (error) {
         const errorMessage = this.getSafeErrorMessage(error);
@@ -488,8 +507,8 @@ class SourceValidator {
     // 检查请求头安全性
     if (source.header) {
       try {
-        const headers = JSON.parse(source.header);
-        const headerEntries = Object.entries(headers);
+        const headers: Record<string, string> = JSON.parse(source.header);
+        const headerEntries = Object.entries<string>(headers);
         for (let i = 0; i < headerEntries.length; i++) {
           const key = headerEntries[i][0];
           const value = headerEntries[i][1];
@@ -558,7 +577,7 @@ class SourceValidator {
    */
   private parseHeadersSafely(headersString: string): Record<string, string> {
     try {
-      const headers = JSON.parse(headersString);
+      const headers: Record<string, string> = JSON.parse(headersString);
       
       // 验证headers对象
       if (typeof headers !== 'object' || headers === null) {
@@ -567,7 +586,7 @@ class SourceValidator {
       
       const result: Record<string, string> = {};
       
-      const headerEntries = Object.entries(headers);
+      const headerEntries = Object.entries<string>(headers);
       for (let i = 0; i < headerEntries.length; i++) {
         const key = headerEntries[i][0];
         const value = headerEntries[i][1];
@@ -591,15 +610,18 @@ class SourceValidator {
   /**
    * 获取安全的错误信息 - 增强安全限制
    */
-  private getSafeErrorMessage(error: unknown): string {
-    if (error && typeof error === 'object' && 'message' in error) {
-      const message = String(error.message);
-      const safeMessage = this.sanitizeString(message);
-      return safeMessage.length > this.MAX_ERROR_MESSAGE_LENGTH ? 
-             safeMessage.substring(0, this.MAX_ERROR_MESSAGE_LENGTH) + '...' : safeMessage;
-    } else {
-      return '未知错误';
+  private getSafeErrorMessage(error: object): string {
+    if (error && typeof error === 'object') {
+      // 检查对象是否有message属性
+      const errorObj = error as Record<string, object>;
+      if (errorObj['message'] !== undefined) {
+        const message = String(errorObj['message']);
+        const safeMessage = this.sanitizeString(message);
+        return safeMessage.length > this.MAX_ERROR_MESSAGE_LENGTH ? 
+               safeMessage.substring(0, this.MAX_ERROR_MESSAGE_LENGTH) + '...' : safeMessage;
+      }
     }
+    return '未知错误';
   }
   
   /**
