@@ -19,6 +19,10 @@ class SourceImportManager {
   private readonly MAX_SOURCES_PER_BATCH = 20; // 降低批量处理数量
   private readonly MAX_ERROR_MESSAGE_LENGTH = 100; // 限制错误信息长度
   private readonly MAX_SOURCE_NAME_LENGTH = 100; // 限制书源名称长度
+  private readonly MAX_URL_LENGTH = 2048; // URL长度限制
+  private readonly MAX_HEADER_LENGTH = 5000; // 请求头长度限制
+  private readonly MAX_NESTING_DEPTH = 50; // 最大嵌套深度
+  private readonly MAX_LINE_COUNT = 10000; // 最大行数限制
 
   /**
    * 导入书源 - 增强安全验证
@@ -55,13 +59,14 @@ class SourceImportManager {
       }
       
       // 检查内容安全性
-      if (this.containsSuspiciousContent(content)) {
+      const safetyCheck = this.performContentSafetyCheck(content);
+      if (!safetyCheck.isSafe) {
         return {
           success: false,
-          message: '书源内容包含可疑代码',
+          message: safetyCheck.message || '书源内容包含可疑代码',
           importedCount: 0,
           totalCount: 0,
-          errors: ['检测到潜在的安全威胁']
+          errors: safetyCheck.errors || ['检测到潜在的安全威胁']
         };
       }
       
@@ -78,8 +83,8 @@ class SourceImportManager {
         };
       }
       
-      // 解析书源
-      const parsedSources = BookSourceParser.parseSources(content, detectedFormat);
+      // 安全解析书源
+      const parsedSources = await this.safeParseSources(content, detectedFormat);
       
       if (parsedSources.length === 0) {
         return {
@@ -140,6 +145,42 @@ class SourceImportManager {
         totalCount: 0,
         errors: [this.getSafeErrorMessage(error)]
       };
+    }
+  }
+  
+  /**
+   * 安全解析书源 - 新增安全防护层
+   */
+  private async safeParseSources(content: string, format: string): Promise<BookSource[]> {
+    try {
+      // 在解析前进行额外的安全检查
+      if (!this.isValidContentForParsing(content)) {
+        Logger.warn(this.TAG, '书源内容不符合解析要求');
+        return [];
+      }
+      
+      // 使用解析器解析书源
+      const parsedSources = BookSourceParser.parseSources(content, format);
+      
+      // 对解析结果进行后置安全检查
+      const safeSources: BookSource[] = [];
+      const sourcesLength = parsedSources.length;
+      for (let i = 0; i < sourcesLength; i++) {
+        const source = parsedSources[i];
+        if (this.isSafeSource(source)) {
+          safeSources.push(source);
+        }
+      }
+      
+      if (safeSources.length < parsedSources.length) {
+        Logger.warn(this.TAG, `过滤掉${parsedSources.length - safeSources.length}个不安全书源`);
+      }
+      
+      return safeSources;
+      
+    } catch (error) {
+      Logger.error(this.TAG, `安全解析书源失败：${this.getSafeErrorMessage(error)}`);
+      return [];
     }
   }
   
@@ -353,7 +394,8 @@ class SourceImportManager {
     if (!str) return '';
     
     // 移除控制字符和特殊字符
-    const cleaned = str.replace(/[\x00-\x1F\x7F]/g, '');
+    const cleaned = str.replace(/[\x00-\x1F\x7F-\x9F]/g, '')
+                      .replace(/[\u2000-\u206F\u2E00-\u2E7F]/g, '');
     
     // 限制字符串长度
     return cleaned.length > this.MAX_SOURCE_NAME_LENGTH ? 
@@ -361,25 +403,95 @@ class SourceImportManager {
   }
   
   /**
-   * 检查内容安全性 - 新增安全防护
+   * 执行内容安全检查 - 增强安全防护
+   */
+  private performContentSafetyCheck(content: string): SafetyCheckResult {
+    const errors: string[] = [];
+    
+    // 检查可疑脚本
+    if (this.containsSuspiciousContent(content)) {
+      errors.push('检测到可疑脚本代码');
+    }
+    
+    // 检查内容结构
+    if (!this.isValidContentStructure(content)) {
+      errors.push('内容结构不符合要求');
+    }
+    
+    // 检查编码
+    if (!this.isValidEncoding(content)) {
+      errors.push('内容编码不符合要求');
+    }
+    
+    // 检查嵌套深度
+    if (this.hasExcessiveNesting(content)) {
+      errors.push('内容嵌套深度过大');
+    }
+    
+    // 检查特殊字符注入
+    if (this.containsDangerousCharacters(content)) {
+      errors.push('检测到危险字符');
+    }
+    
+    return {
+      isSafe: errors.length === 0,
+      message: errors.length > 0 ? '书源内容包含安全风险' : undefined,
+      errors: errors.length > 0 ? errors : undefined
+    };
+  }
+  
+  /**
+   * 检查内容安全性 - 增强安全防护
    */
   private containsSuspiciousContent(content: string): boolean {
+    // 使用安全的正则表达式模式，避免ReDoS攻击
     const suspiciousPatterns = [
-      /<script[^>]*>[\s\S]*?<\/script>/gi,
+      /<(script|iframe|object|embed)[^>]*>/gi,
       /javascript:/gi,
       /vbscript:/gi,
-      /onload\s*=/gi,
-      /onerror\s*=/gi,
-      /onclick\s*=/gi,
+      /on(load|error|click|submit)\s*=/gi,
       /eval\s*\(/gi,
       /alert\s*\(/gi,
-      /document\.cookie/gi,
-      /window\.location/gi,
+      /document\.(cookie|write)/gi,
+      /window\.(location|open)/gi,
       /XMLHttpRequest/gi,
-      /fetch\s*\(/gi
+      /fetch\s*\(/gi,
+      /\$\{.*\}/gi,
+      /\{\{.*\}\}/gi
     ];
     
     for (const pattern of suspiciousPatterns) {
+      // 限制正则表达式执行时间
+      const startTime = Date.now();
+      const result = pattern.test(content);
+      const elapsed = Date.now() - startTime;
+      
+      // 如果正则表达式执行时间过长，视为可疑
+      if (elapsed > 100) {
+        return true;
+      }
+      
+      if (result) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * 检查危险字符 - 新增安全防护
+   */
+  private containsDangerousCharacters(content: string): boolean {
+    // 检查潜在的注入字符
+    const dangerousChars = [
+      /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, // 控制字符
+      /[\u2028\u2029]/g, // 行分隔符和段落分隔符
+      /[\uFEFF]/g, // 零宽空格
+      /[\uFFF0-\uFFFF]/g // 特殊用途Unicode字符
+    ];
+    
+    for (const pattern of dangerousChars) {
       if (pattern.test(content)) {
         return true;
       }
@@ -389,7 +501,7 @@ class SourceImportManager {
   }
   
   /**
-   * 检查书源安全性 - 新增安全防护
+   * 检查书源安全性 - 增强安全防护
    */
   private isSafeSource(source: BookSource): boolean {
     // 检查名称长度
@@ -398,18 +510,173 @@ class SourceImportManager {
     }
     
     // 检查URL安全性
-    if (!source.url || source.url.length > 2048) {
+    if (!source.url || source.url.length > this.MAX_URL_LENGTH) {
       return false;
     }
     
     // 检查搜索URL安全性
-    if (source.searchUrl && source.searchUrl.length > 2048) {
+    if (source.searchUrl && source.searchUrl.length > this.MAX_URL_LENGTH) {
       return false;
     }
     
     // 检查请求头安全性
-    if (source.header && source.header.length > 5000) {
+    if (source.header && source.header.length > this.MAX_HEADER_LENGTH) {
       return false;
+    }
+    
+    // 检查URL协议
+    if (!this.isValidUrlProtocol(source.url)) {
+      return false;
+    }
+    
+    if (source.searchUrl && !this.isValidUrlProtocol(source.searchUrl)) {
+      return false;
+    }
+    
+    // 检查URL格式
+    if (!this.isValidUrlFormat(source.url)) {
+      return false;
+    }
+    
+    if (source.searchUrl && !this.isValidUrlFormat(source.searchUrl)) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  /**
+   * 验证URL格式 - 新增安全防护
+   */
+  private isValidUrlFormat(url: string): boolean {
+    try {
+      // 简单的URL格式验证
+      if (url.includes(' ')) return false;
+      if (url.includes('\n') || url.includes('\r') || url.includes('\t')) return false;
+      if (url.includes('\\')) return false;
+      
+      // 检查URL编码
+      if (encodeURI(url) !== url && decodeURI(url) !== url) {
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * 验证URL协议安全性
+   */
+  private isValidUrlProtocol(url: string): boolean {
+    try {
+      return url.startsWith('http://') || url.startsWith('https://');
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * 验证内容结构
+   */
+  private isValidContentStructure(content: string): boolean {
+    // 检查内容是否为空
+    if (!content || content.trim().length === 0) {
+      return false;
+    }
+    
+    // 检查内容是否过大
+    if (content.length > this.MAX_CONTENT_SIZE) {
+      return false;
+    }
+    
+    // 检查行数是否过多（防止DoS攻击）
+    const lines = content.split('\n');
+    if (lines.length > this.MAX_LINE_COUNT) {
+      return false;
+    }
+    
+    return true;
+  }
+  
+  /**
+   * 验证编码 - 使用HarmonyOS兼容的方法
+   */
+  private isValidEncoding(content: string): boolean {
+    // 简单的UTF-8兼容性检查
+    try {
+      // 检查是否包含无效的UTF-8序列
+      for (let i = 0; i < content.length; i++) {
+        const charCode = content.charCodeAt(i);
+        // 基本ASCII字符检查（0-127）
+        if (charCode > 127) {
+          // 对于非ASCII字符，进行简单的UTF-8连续性检查
+          if (charCode >= 0xD800 && charCode <= 0xDFFF) {
+            // 代理对检查
+            if (i + 1 < content.length) {
+              const nextCharCode = content.charCodeAt(i + 1);
+              if (nextCharCode >= 0xDC00 && nextCharCode <= 0xDFFF) {
+                i++; // 跳过代理对的高位
+                continue;
+              }
+            }
+            return false; // 无效的代理对
+          }
+        }
+      }
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * 检查嵌套深度
+   */
+  private hasExcessiveNesting(content: string): boolean {
+    // 检查JSON/XML嵌套深度
+    let depth = 0;
+    let maxDepth = 0;
+    
+    for (let i = 0; i < content.length; i++) {
+      const char = content[i];
+      if (char === '{' || char === '[' || char === '<') {
+        depth++;
+        if (depth > maxDepth) {
+          maxDepth = depth;
+        }
+      } else if (char === '}' || char === ']' || char === '>') {
+        depth--;
+      }
+      
+      // 限制最大嵌套深度
+      if (maxDepth > this.MAX_NESTING_DEPTH) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 验证内容是否适合解析
+   */
+  private isValidContentForParsing(content: string): boolean {
+    // 检查基本格式
+    if (!content || typeof content !== 'string') {
+      return false;
+    }
+    
+    // 检查内容长度
+    if (content.length < 10 || content.length > this.MAX_CONTENT_SIZE) {
+      return false;
+    }
+    
+    // 检查是否包含有效字符
+    const validCharCount = content.replace(/[^\x20-\x7E\n\r\t]/g, '').length;
+    if (validCharCount < content.length * 0.8) {
+      return false; // 超过20%的字符为不可见字符
     }
     
     return true;
@@ -530,7 +797,9 @@ class SourceImportManager {
       /\.\.\//g, // 禁止上级目录引用
       /\/etc\//g, // 禁止系统目录
       /\/system\//g,
-      /\/data\/local\//g
+      /\/data\/local\//g,
+      /^\//g, // 禁止绝对路径
+      /^[A-Z]:\\/g // 禁止Windows绝对路径
     ];
     
     for (const pattern of forbiddenPatterns) {
@@ -541,6 +810,13 @@ class SourceImportManager {
     
     // 限制文件路径长度
     if (filePath.length > 500) {
+      return false;
+    }
+    
+    // 只允许特定扩展名
+    const allowedExtensions = ['.json', '.txt', '.xml'];
+    const hasAllowedExtension = allowedExtensions.some(ext => filePath.endsWith(ext));
+    if (!hasAllowedExtension) {
       return false;
     }
     
@@ -570,6 +846,13 @@ export interface UpdateStatusResult {
   success: boolean;
   updatedCount: number;
   totalCount: number;
+  errors?: string[];
+}
+
+// 安全检查结果类型
+interface SafetyCheckResult {
+  isSafe: boolean;
+  message?: string;
   errors?: string[];
 }
 
