@@ -212,7 +212,7 @@ export class BookSourceViewModel {
       this.bookSources = await this.databaseManager.getAllEnabledBookSources();
       return this.bookSources;
     } catch (error) {
-      Logger.error('BookSourceViewModel', `加载启用的书源失败`);
+      Logger.error('BookSourceViewModel', '加载启用的书源失败');
       throw new Error('加载书源失败');
     }
   }
@@ -225,7 +225,7 @@ export class BookSourceViewModel {
       // TODO: 实现加载所有书源的方法
       return await this.loadEnabledBookSources();
     } catch (error) {
-      Logger.error('BookSourceViewModel', `加载所有书源失败`);
+      Logger.error('BookSourceViewModel', '加载所有书源失败');
       throw new Error('加载书源失败');
     }
   }
@@ -241,8 +241,8 @@ export class BookSourceViewModel {
       await this.databaseManager.upsertBookSource(bookSource);
       await this.loadEnabledBookSources();
     } catch (error) {
-      Logger.error('BookSourceViewModel', `添加或更新书源失败：${error}`);
-      throw error;
+      Logger.error('BookSourceViewModel', '添加或更新书源失败');
+      throw new Error('添加或更新书源失败');
     }
   }
 
@@ -262,7 +262,7 @@ export class BookSourceViewModel {
         await this.loadEnabledBookSources();
       }
     } catch (error) {
-      Logger.error('BookSourceViewModel', `切换书源状态失败`);
+      Logger.error('BookSourceViewModel', '切换书源状态失败');
       throw new Error('切换书源状态失败');
     }
   }
@@ -284,8 +284,8 @@ export class BookSourceViewModel {
       await this.batchUpsertBookSources(sources);
       await this.loadEnabledBookSources();
     } catch (error) {
-      Logger.error('BookSourceViewModel', `导入书源失败`);
-      throw error;
+      Logger.error('BookSourceViewModel', '导入书源失败');
+      throw new Error('导入书源失败');
     }
   }
 
@@ -306,8 +306,8 @@ export class BookSourceViewModel {
       await this.databaseManager.batchUpsertBookSources(sources);
       Logger.info('BookSourceViewModel', `成功添加/更新${sources.length}个书源`);
     } catch (error) {
-      Logger.error('BookSourceViewModel', `批量添加/更新书源失败`);
-      throw error;
+      Logger.error('BookSourceViewModel', '批量添加/更新书源失败');
+      throw new Error('批量添加/更新书源失败');
     }
   }
 
@@ -327,7 +327,7 @@ export class BookSourceViewModel {
       // 验证所有ID
       for (const id of ids) {
         if (!this.isValidUUID(id)) {
-          throw new Error(`无效的书源ID: ${id}`);
+          throw new Error('无效的书源ID');
         }
       }
       
@@ -341,7 +341,7 @@ export class BookSourceViewModel {
       };
       return result;
     } catch (error) {
-      Logger.error('BookSourceViewModel', `批量删除书源失败`);
+      Logger.error('BookSourceViewModel', '批量删除书源失败');
       return {
         success: false,
         message: error instanceof Error ? error.message : '删除失败'
@@ -367,7 +367,7 @@ export class BookSourceViewModel {
       }
       return deletedCount;
     } catch (error) {
-      Logger.error('BookSourceViewModel', `删除书源失败`);
+      Logger.error('BookSourceViewModel', '删除书源失败');
       throw new Error('删除书源失败');
     }
   }
@@ -385,7 +385,7 @@ export class BookSourceViewModel {
       // 暂时返回true表示删除成功
       return true;
     } catch (error) {
-      Logger.error('BookSourceViewModel', `删除书源失败`);
+      Logger.error('BookSourceViewModel', '删除书源失败');
       return false;
     }
   }
@@ -426,7 +426,7 @@ export class BookSourceViewModel {
       
       return false;
     } catch (error) {
-      Logger.error('BookSourceViewModel', `测试书源有效性失败`);
+      Logger.error('BookSourceViewModel', '测试书源有效性失败');
       return false;
     }
   }
@@ -438,7 +438,7 @@ export class BookSourceViewModel {
     try {
       return await this.batchDeleteBookSources([id]);
     } catch (error) {
-      Logger.error('BookSourceViewModel', `删除书源失败`);
+      Logger.error('BookSourceViewModel', '删除书源失败');
       return {
         success: false,
         message: error instanceof Error ? error.message : '删除失败'
@@ -467,7 +467,7 @@ export class BookSourceViewModel {
       
       // 如果是URL，先下载内容
       if (this.isValidUrl(content)) {
-        Logger.debug('BookSourceViewModel', `从URL下载书源内容`);
+        Logger.debug('BookSourceViewModel', '从URL下载书源内容');
         
         const networkManager = NetworkManager.getInstance();
         if (this.context) {
@@ -498,7 +498,7 @@ export class BookSourceViewModel {
       };
       
     } catch (error) {
-      Logger.error('BookSourceViewModel', `导入书源失败`);
+      Logger.error('BookSourceViewModel', '导入书源失败');
       return {
         success: false,
         message: error instanceof Error ? error.message : '导入失败'
@@ -529,11 +529,11 @@ export class BookSourceViewModel {
         await this.upsertBookSource(result.source);
       }
       
-      Logger.info('BookSourceViewModel', `书源验证完成`);
+      Logger.info('BookSourceViewModel', '书源验证完成');
       return results;
       
     } catch (error) {
-      Logger.error('BookSourceViewModel', `批量验证书源失败`);
+      Logger.error('BookSourceViewModel', '批量验证书源失败');
       return [];
     }
   }
@@ -605,7 +605,7 @@ export class BookSourceViewModel {
         count: allSources.length
       };
     } catch (error) {
-      Logger.error('BookSourceViewModel', `导出书源失败`);
+      Logger.error('BookSourceViewModel', '导出书源失败');
       return {
         success: false,
         message: error instanceof Error ? error.message : '导出失败'
@@ -626,7 +626,7 @@ export class BookSourceViewModel {
       // 使用fs模块写入文件
       await fs.writeText(filePath, content);
     } catch (error) {
-      throw new Error(`写入文件失败`);
+      throw new Error('写入文件失败');
     }
   }
 
@@ -652,7 +652,7 @@ export class BookSourceViewModel {
       }
       
       // 防止SSRF攻击，限制本地地址
-      const hostname = new URL(input).hostname;
+      const hostname = this.extractHostname(input);
       if (this.isLocalAddress(hostname)) {
         return false;
       }
@@ -660,6 +660,19 @@ export class BookSourceViewModel {
       return true;
     } catch (error) {
       return false;
+    }
+  }
+
+  /**
+   * 提取主机名
+   */
+  private extractHostname(url: string): string {
+    try {
+      // 简化版URL解析，避免使用URL构造函数
+      const match = url.match(/^https?:\/\/([^\/:]+)/);
+      return match ? match[1] : '';
+    } catch (error) {
+      return '';
     }
   }
 
@@ -771,11 +784,14 @@ export class BookSourceViewModel {
       
       const result: Record<string, string> = {};
       
-      for (const [key, value] of Object.entries(headers)) {
-        if (typeof key === 'string' && typeof value === 'string') {
-          // 限制header key和value长度
-          if (key.length <= 100 && value.length <= 1000) {
-            result[key] = value;
+      for (const key in headers) {
+        if (Object.prototype.hasOwnProperty.call(headers, key)) {
+          const value = headers[key];
+          if (typeof key === 'string' && typeof value === 'string') {
+            // 限制header key和value长度
+            if (key.length <= 100 && value.length <= 1000) {
+              result[key] = value;
+            }
           }
         }
       }
