@@ -2,7 +2,7 @@ import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../m
 import { databaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import { IdGenerator } from '../utils/IdGenerator';
-import SourceImportManager, { ImportResult as EnhancedImportResult } from '../utils/SourceImportManager';
+import SourceImportManager from '../utils/SourceImportManager';
 import SourceValidator from '../utils/SourceValidator';
 import BookSourceParser from '../utils/BookSourceParser';
 import { Logger } from '../utils/Logger';
@@ -36,6 +36,40 @@ export interface DeleteResult {
   success: boolean;
   message: string;
   count?: number;
+}
+
+/**
+ * 导出书源数据接口
+ */
+interface ExportBookSourceData {
+  bookSourceName: string;
+  bookSourceUrl: string;
+  ruleSearch: SearchRule;
+  ruleToc: ChapterRule;
+  ruleContent: ContentRule;
+  ruleType: string;
+  enabled: boolean;
+  customOrder: number;
+}
+
+/**
+ * 备份书源数据接口
+ */
+interface BackupBookSourceData {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  header: string | undefined;
+  searchUrl: string;
+  searchRule: SearchRule;
+  findRule: FindRule | undefined;
+  chapterRule: ChapterRule;
+  contentRule: ContentRule;
+  ruleType: string;
+  sort: number;
+  lastUpdateTime: number;
+  addTime: number;
 }
 
 /**
@@ -570,16 +604,19 @@ export class BookSourceViewModel {
       }
 
       // 转换为导出格式
-      const exportData = allSources.map(source => ({
-        bookSourceName: source.name,
-        bookSourceUrl: source.url,
-        ruleSearch: source.searchRule,
-        ruleToc: source.chapterRule,
-        ruleContent: source.contentRule,
-        ruleType: source.ruleType,
-        enabled: source.enabled,
-        customOrder: source.sort
-      }));
+      const exportData: ExportBookSourceData[] = allSources.map(source => {
+        const exportItem: ExportBookSourceData = {
+          bookSourceName: source.name,
+          bookSourceUrl: source.url,
+          ruleSearch: source.searchRule,
+          ruleToc: source.chapterRule,
+          ruleContent: source.contentRule,
+          ruleType: source.ruleType,
+          enabled: source.enabled,
+          customOrder: source.sort
+        };
+        return exportItem;
+      });
 
       // 创建导出目录
       const filesDir = this.context.filesDir;
@@ -595,7 +632,7 @@ export class BookSourceViewModel {
       const filePath = exportDir + fileName;
       const jsonContent = JSON.stringify(exportData, null, 2);
       
-      // 使用文件IO写入文件
+      // 使用文件IO写入文件 - 修复：使用正确的API
       await this.writeFileContent(filePath, jsonContent);
 
       return {
@@ -623,8 +660,10 @@ export class BookSourceViewModel {
         throw new Error('无效的文件路径');
       }
       
-      // 使用fs模块写入文件
-      await fs.writeText(filePath, content);
+      // 使用fileio模块写入文件 - 修复：使用正确的API
+      const fd = await fileio.open(filePath, 0o2 | 0o100); // READ_WRITE | CREATE
+      await fileio.write(fd, content);
+      await fileio.close(fd);
     } catch (error) {
       throw new Error('写入文件失败');
     }
@@ -784,14 +823,15 @@ export class BookSourceViewModel {
       
       const result: Record<string, string> = {};
       
-      for (const key in headers) {
-        if (Object.prototype.hasOwnProperty.call(headers, key)) {
-          const value = headers[key];
-          if (typeof key === 'string' && typeof value === 'string') {
-            // 限制header key和value长度
-            if (key.length <= 100 && value.length <= 1000) {
-              result[key] = value;
-            }
+      // 使用Object.keys替代for-in循环
+      const keys = Object.keys(headers);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const value = headers[key];
+        if (typeof key === 'string' && typeof value === 'string') {
+          // 限制header key和value长度
+          if (key.length <= 100 && value.length <= 1000) {
+            result[key] = value;
           }
         }
       }
@@ -831,8 +871,9 @@ export class BookSourceViewModel {
       throw new Error('排序值必须在0-1000之间');
     }
     
-    // 验证规则类型
-    if (!['xpath', 'jsonpath', 'regex'].includes(source.ruleType)) {
+    // 验证规则类型 - 修复类型不匹配问题
+    const validRuleTypes = ['xpath', 'jsonpath', 'regex'];
+    if (source.ruleType && !validRuleTypes.includes(source.ruleType)) {
       throw new Error('无效的规则类型');
     }
   }
@@ -847,142 +888,188 @@ export class BookSourceViewModel {
     
     const bookSources: BookSource[] = [];
     
-    // 限制处理数量
-    const maxSources = 1000;
-    const sourcesToProcess = data.slice(0, maxSources);
-    
-    // 分段处理大量书源
-    const batchSize = 50;
-    for (let i = 0; i < sourcesToProcess.length; i += batchSize) {
-      const batch = sourcesToProcess.slice(i, i + batchSize);
-      Logger.debug('BookSourceViewModel', `处理批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(sourcesToProcess.length / batchSize)} (${batch.length} 个书源)`);
-      
-      const batchSources = batch.map((source) => this.createBookSourceFromRaw(source));
-      bookSources.push(...batchSources.filter(source => source.name && source.url)); // 过滤无效书源
+    for (let i = 0; i < data.length; i++) {
+      const item = data[i];
+      const processedSource = this.processBookSourceItem(item);
+      if (processedSource) {
+        bookSources.push(processedSource);
+      }
     }
     
     return bookSources;
   }
 
   /**
-   * 批量导入书源
+   * 处理单个书源项
    */
-  private async batchImportBookSources(bookSources: BookSource[]): Promise<void> {
-    if (bookSources.length === 0) {
-      return;
-    }
-    
-    const importBatchSize = 50;
-    for (let i = 0; i < bookSources.length; i += importBatchSize) {
-      const batch = bookSources.slice(i, i + importBatchSize);
-      Logger.debug('BookSourceViewModel', `导入批次 ${Math.floor(i / importBatchSize) + 1}/${Math.ceil(bookSources.length / importBatchSize)} (${batch.length} 个书源)`);
-      await this.batchUpsertBookSources(batch);
+  private processBookSourceItem(item: BookSourceRawData): BookSource | null {
+    try {
+      // 创建新的BookSource对象 - 修复：使用对象字面量而不是构造函数
+      const bookSource: BookSource = {
+        id: item.id || IdGenerator.generateUUID(),
+        name: item.name || item.bookSourceName || '未知书源',
+        url: item.url || item.bookSourceUrl || '',
+        enabled: item.enabled ?? true,
+        sort: item.sort || item.customOrder || 0,
+        ruleType: (item.ruleType as 'xpath' | 'jsonpath' | 'regex') || 'xpath',
+        searchRule: undefined,
+        findRule: undefined,
+        chapterRule: undefined,
+        contentRule: undefined,
+        header: item.header || '',
+        searchUrl: item.searchUrl || '',
+        addTime: item.addTime || Date.now(),
+        lastUpdateTime: Date.now()
+      };
       
-      // 每批次导入后稍作延迟
-      if (i + importBatchSize < bookSources.length) {
-        await new Promise<void>(resolve => setTimeout(resolve, 500));
+      // 设置搜索规则
+      if (item.searchRule) {
+        bookSource.searchRule = this.convertSearchRule(item.searchRule);
+      } else if (item.ruleSearch) {
+        bookSource.searchRule = this.convertAstroReadSearchRule(item.ruleSearch);
       }
+      
+      // 设置发现规则
+      if (item.findRule) {
+        bookSource.findRule = this.convertFindRule(item.findRule);
+      } else if (item.ruleExplore) {
+        bookSource.findRule = this.convertAstroReadExploreRule(item.ruleExplore);
+      }
+      
+      // 设置章节规则
+      if (item.chapterRule) {
+        bookSource.chapterRule = this.convertChapterRule(item.chapterRule);
+      } else if (item.ruleToc) {
+        bookSource.chapterRule = this.convertAstroReadTocRule(item.ruleToc);
+      }
+      
+      // 设置内容规则
+      if (item.contentRule) {
+        bookSource.contentRule = this.convertContentRule(item.contentRule);
+      } else if (item.ruleContent) {
+        bookSource.contentRule = this.convertAstroReadContentRule(item.ruleContent);
+      }
+      
+      return bookSource;
+    } catch (error) {
+      Logger.warn('BookSourceViewModel', '处理书源项失败');
+      return null;
     }
   }
 
   /**
-   * 从原始数据创建书源对象
+   * 转换搜索规则
    */
-  private createBookSourceFromRaw(source: BookSourceRawData): BookSource {
-    // 映射书源基本信息
-    const bookSourceName = source.bookSourceName || source.name || '未知书源';
-    const bookSourceUrl = source.bookSourceUrl || source.url || source.baseUrl || '';
-    const searchUrl = source.searchUrl || source.search || '';
-    const enabled = source.enabled !== false;
-    const sort = source.customOrder || source.sort || 0;
-    const lastUpdateTime = source.lastUpdateTime || Date.now();
-    const addTime = source.addTime || Date.now();
-    const header = source.header || source.headers || undefined;
-
-    // 映射搜索规则
-    const ruleSearch = source.ruleSearch || source.searchRule || {};
+  private convertSearchRule(rule: SearchRuleRaw): SearchRule {
     const searchRule: SearchRule = {
-      bookList: ruleSearch.bookList || ruleSearch.list || '',
-      name: ruleSearch.name || '',
-      author: ruleSearch.author || '',
-      cover: ruleSearch.cover || undefined,
-      intro: ruleSearch.intro || undefined,
-      bookUrl: ruleSearch.bookUrl || ruleSearch.url || '',
-      nextUrl: ruleSearch.nextUrl
+      bookList: rule.bookList || rule.list || '',
+      name: rule.name || '',
+      author: rule.author || '',
+      cover: rule.cover || '',
+      intro: rule.intro || '',
+      bookUrl: rule.bookUrl || rule.url || '',
+      nextUrl: rule.nextUrl || ''
     };
+    return searchRule;
+  }
 
-    // 映射发现规则
-    const ruleExplore = source.ruleExplore || source.findRule || {};
-    const exploreUrl = source.exploreUrl || ruleExplore.url || '';
-    const findRule: FindRule | undefined = exploreUrl ? {
-      url: exploreUrl,
-      bookList: ruleExplore.bookList || ruleExplore.list || '',
-      name: ruleExplore.name || '',
-      author: ruleExplore.author || '',
-      cover: ruleExplore.cover || undefined,
-      intro: ruleExplore.intro || undefined,
-      bookUrl: ruleExplore.bookUrl || ruleExplore.url || ''
-    } : undefined;
+  /**
+   * 转换AstroRead搜索规则
+   */
+  private convertAstroReadSearchRule(rule: AstroReadSearchRule): SearchRule {
+    const searchRule: SearchRule = {
+      bookList: rule.bookList || rule.list || '',
+      name: rule.name || '',
+      author: rule.author || '',
+      cover: rule.cover || '',
+      intro: rule.intro || '',
+      bookUrl: rule.bookUrl || rule.url || '',
+      nextUrl: rule.nextUrl || ''
+    };
+    return searchRule;
+  }
 
-    // 映射章节规则
-    const ruleToc = source.ruleToc || source.chapterRule || {};
+  /**
+   * 转换发现规则
+   */
+  private convertFindRule(rule: FindRuleRaw): FindRule {
+    const findRule: FindRule = {
+      url: rule.url || '',
+      bookList: rule.bookList || rule.list || '',
+      name: rule.name || '',
+      author: rule.author || '',
+      cover: rule.cover || '',
+      intro: rule.intro || '',
+      bookUrl: rule.bookUrl || ''
+    };
+    return findRule;
+  }
+
+  /**
+   * 转换AstroRead发现规则
+   */
+  private convertAstroReadExploreRule(rule: AstroReadExploreRule): FindRule {
+    const findRule: FindRule = {
+      url: rule.url || '',
+      bookList: rule.bookList || rule.list || '',
+      name: rule.name || '',
+      author: rule.author || '',
+      cover: rule.cover || '',
+      intro: rule.intro || '',
+      bookUrl: rule.bookUrl || ''
+    };
+    return findRule;
+  }
+
+  /**
+   * 转换章节规则
+   */
+  private convertChapterRule(rule: ChapterRuleRaw): ChapterRule {
     const chapterRule: ChapterRule = {
-      chapterList: ruleToc.chapterList || ruleToc.list || '',
-      chapterName: ruleToc.chapterName || ruleToc.name || '',
-      chapterUrl: ruleToc.chapterUrl || ruleToc.url || '',
-      nextUrl: ruleToc.nextUrl
+      chapterList: rule.chapterList || rule.list || '',
+      chapterName: rule.chapterName || rule.name || '',
+      chapterUrl: rule.chapterUrl || rule.url || '',
+      nextUrl: rule.nextUrl || ''
     };
+    return chapterRule;
+  }
 
-    // 映射内容规则
-    const ruleContent = source.ruleContent || source.contentRule || {};
+  /**
+   * 转换AstroRead章节规则
+   */
+  private convertAstroReadTocRule(rule: AstroReadTocRule): ChapterRule {
+    const chapterRule: ChapterRule = {
+      chapterList: rule.chapterList || rule.list || '',
+      chapterName: rule.chapterName || rule.name || '',
+      chapterUrl: rule.chapterUrl || rule.url || '',
+      nextUrl: rule.nextUrl || ''
+    };
+    return chapterRule;
+  }
+
+  /**
+   * 转换内容规则
+   */
+  private convertContentRule(rule: ContentRuleRaw): ContentRule {
     const contentRule: ContentRule = {
-      content: ruleContent.content || '',
-      nextUrl: ruleContent.nextUrl,
-      prevUrl: ruleContent.prevUrl,
-      replaceRule: ruleContent.replaceRule
+      content: rule.content || '',
+      nextUrl: rule.nextUrl || '',
+      prevUrl: rule.prevUrl || '',
+      replaceRule: rule.replaceRule || ''
     };
+    return contentRule;
+  }
 
-    // 确定规则类型
-    let ruleType: 'xpath' | 'jsonpath' | 'regex' = 'xpath';
-    if (source.ruleType) {
-      if (source.ruleType === 'xpath' || source.ruleType === 'jsonpath' || source.ruleType === 'regex') {
-        ruleType = source.ruleType;
-      }
-    } else {
-      // 根据规则内容自动判断
-      const allRules = [
-        searchRule.bookList, searchRule.name, searchRule.author, searchRule.bookUrl,
-        chapterRule.chapterList, chapterRule.chapterName, chapterRule.chapterUrl,
-        contentRule.content
-      ];
-      for (const rule of allRules) {
-        if (rule && typeof rule === 'string') {
-          if (rule.startsWith('$')) {
-            ruleType = 'jsonpath';
-            break;
-          } else if (rule.startsWith('@js:')) {
-            ruleType = 'regex';
-            break;
-          }
-        }
-      }
-    }
-
-    return {
-      id: source.id || IdGenerator.generateUUID(),
-      name: bookSourceName,
-      url: bookSourceUrl,
-      enabled: enabled,
-      header: header,
-      searchUrl: searchUrl,
-      searchRule: searchRule,
-      findRule: findRule,
-      chapterRule: chapterRule,
-      contentRule: contentRule,
-      ruleType: ruleType,
-      sort: sort,
-      lastUpdateTime: lastUpdateTime,
-      addTime: addTime
+  /**
+   * 转换AstroRead内容规则
+   */
+  private convertAstroReadContentRule(rule: AstroReadContentRule): ContentRule {
+    const contentRule: ContentRule = {
+      content: rule.content || '',
+      nextUrl: rule.nextUrl || '',
+      prevUrl: rule.prevUrl || '',
+      replaceRule: rule.replaceRule || ''
     };
+    return contentRule;
   }
 }
