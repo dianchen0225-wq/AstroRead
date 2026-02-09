@@ -7,6 +7,16 @@ import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from './Logger';
 
+interface MatchedBook {
+  book: Book;
+  score: number;
+}
+
+interface BookWithSource extends Book {
+  bookSourceId: string;
+  bookSourceName: string;
+}
+
 class SearchEnhancer {
   
   private TAG: string = 'SearchEnhancer';
@@ -24,7 +34,7 @@ class SearchEnhancer {
     }
     
     const trimmedKeyword = keyword.trim().toLowerCase();
-    const matchedBooks: Array<{ book: Book, score: number }> = [];
+    const matchedBooks: Array<MatchedBook> = [];
     
     for (const book of books) {
       const score = this.calculateMatchScore(book, trimmedKeyword, source);
@@ -34,7 +44,7 @@ class SearchEnhancer {
     }
     
     // 按匹配度排序
-    matchedBooks.sort((a, b) => b.score - a.score);
+    matchedBooks.sort((a: MatchedBook, b: MatchedBook) => b.score - a.score);
     
     Logger.debug(this.TAG, `搜索"${keyword}"匹配到${matchedBooks.length}本书`);
     return matchedBooks.map(item => item.book);
@@ -58,24 +68,37 @@ class SearchEnhancer {
       score += authorScore * 0.2; // 作者权重20%
     }
     
-    // 描述匹配
-    if (book.description) {
-      const descScore = this.calculateStringMatchScore(book.description.toLowerCase(), keyword);
-      score += descScore * 0.1; // 描述权重10%
+    // 简介匹配（使用intro替代description）
+    if (book.intro) {
+      const introScore = this.calculateStringMatchScore(book.intro.toLowerCase(), keyword);
+      score += introScore * 0.1; // 简介权重10%
     }
     
-    // 分类匹配
-    if (book.category) {
-      const categoryScore = this.calculateStringMatchScore(book.category.toLowerCase(), keyword);
-      score += categoryScore * 0.1; // 分类权重10%
+    // 分类匹配（使用kind替代category）
+    if (book.kind) {
+      const kindScore = this.calculateStringMatchScore(book.kind.toLowerCase(), keyword);
+      score += kindScore * 0.1; // 分类权重10%
     }
     
-    // 书源权重调整
-    if (source && source.weight) {
-      score *= source.weight;
+    // 书源权重调整（根据sort字段计算权重）
+    if (source) {
+      const sourceWeight = this.calculateSourceWeight(source);
+      score *= sourceWeight;
     }
     
     return score;
+  }
+  
+  /**
+   * 计算书源权重
+   */
+  private calculateSourceWeight(source: BookSource): number {
+    // 基于书源的sort字段计算权重，sort值越大权重越高
+    const baseWeight = 1.0;
+    const sortBonus = source.sort ? source.sort / 100 : 0; // 最大增加1.0
+    const enabledBonus = source.enabled ? 0.2 : 0; // 启用的书源额外权重
+    
+    return baseWeight + sortBonus + enabledBonus;
   }
   
   /**
@@ -181,7 +204,7 @@ class SearchEnhancer {
     }
     
     // 去重并限制数量
-    const uniqueSuggestions = [...new Set(suggestions)];
+    const uniqueSuggestions = Array.from(new Set(suggestions));
     return uniqueSuggestions.slice(0, 5); // 最多返回5个建议
   }
   
@@ -202,11 +225,26 @@ class SearchEnhancer {
     const searchPromises = enabledSources.map(async (source) => {
       try {
         const results = await searchFunction(keyword, source);
+        // 为搜索结果添加书源信息（创建新对象避免修改原对象）
         return results.map(book => {
-          // 标记书源信息
-          book.sourceId = source.id;
-          book.sourceName = source.name;
-          return book;
+          const bookWithSource: BookWithSource = {
+            id: book.id,
+            name: book.name,
+            author: book.author,
+            cover: book.cover,
+            intro: book.intro,
+            kind: book.kind,
+            wordCount: book.wordCount,
+            latestChapter: book.latestChapter,
+            bookSourceId: source.id,
+            bookSourceName: source.name,
+            bookUrl: book.bookUrl,
+            lastUpdateTime: book.lastUpdateTime,
+            addTime: book.addTime,
+            readProgress: book.readProgress,
+            lastReadChapter: book.lastReadChapter
+          };
+          return bookWithSource;
         });
       } catch (error) {
         Logger.error(this.TAG, `书源${source.name}搜索失败：${JSON.stringify(error)}`);
