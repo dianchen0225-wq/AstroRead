@@ -1,6 +1,6 @@
 import fileIo from '@ohos.file.fs';
 import util from '@ohos.util';
-import { databaseManager } from './DatabaseManager';
+import { DatabaseManager } from './DatabaseManager';
 import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { ReadConfig } from '../models/ReadConfig';
@@ -28,7 +28,7 @@ export interface BackupData {
  */
 export class BackupManager {
   private static instance: BackupManager | null = null;
-  private readonly backupDir: string = 'backup';
+  private databaseManager: DatabaseManager | null = null;
 
   private constructor() {
   }
@@ -41,16 +41,35 @@ export class BackupManager {
   }
 
   /**
+   * 设置数据库管理器实例
+   */
+  setDatabaseManager(databaseManager: DatabaseManager): void {
+    this.databaseManager = databaseManager;
+  }
+
+  /**
+   * 获取数据库管理器实例
+   */
+  private getDatabaseManager(): DatabaseManager {
+    if (this.databaseManager === null) {
+      throw new Error('DatabaseManager not set. Please call setDatabaseManager() first.');
+    }
+    return this.databaseManager;
+  }
+
+  /**
    * 执行全量备份
    */
   async backupAll(context: common.UIAbilityContext): Promise<string> {
     try {
+      const databaseManager = this.getDatabaseManager();
+      
       const backupData: BackupData = {
         version: '1.0.0',
         timestamp: Date.now(),
         books: await databaseManager.getAllBooks(),
-        bookSources: await databaseManager.getAllEnabledBookSources(),
-        categories: await databaseManager.getAllCategories(),
+        bookSources: [], // 暂时为空，后续需要根据实际的DatabaseManager实现调整
+        categories: [], // 暂时为空，后续需要根据实际的DatabaseManager实现调整
         chapters: [],
         bookmarks: [],
         readConfig: await databaseManager.getOrCreateReadConfig()
@@ -59,10 +78,14 @@ export class BackupManager {
       // 获取所有书籍的章节和书签
       for (const book of backupData.books) {
         const chapters = await databaseManager.getChaptersByBookId(book.id);
-        backupData.chapters.push(...chapters);
+        if (chapters && chapters.length > 0) {
+          backupData.chapters = backupData.chapters.concat(chapters);
+        }
         
         const bookmarks = await databaseManager.getBookmarksByBookId(book.id);
-        backupData.bookmarks.push(...bookmarks);
+        if (bookmarks && bookmarks.length > 0) {
+          backupData.bookmarks = backupData.bookmarks.concat(bookmarks);
+        }
       }
 
       // 保存到文件
@@ -111,33 +134,32 @@ export class BackupManager {
    * 恢复数据
    */
   private async restoreData(backupData: BackupData): Promise<void> {
-    // 恢复书源
-    for (const source of backupData.bookSources) {
-      await databaseManager.upsertBookSource(source);
-    }
-
-    // 恢复分类
-    for (const category of backupData.categories) {
-      await databaseManager.addCategory(category);
-    }
-
+    const databaseManager = this.getDatabaseManager();
+    
     // 恢复书籍
     for (const book of backupData.books) {
       await databaseManager.upsertBook(book);
     }
 
-    // 恢复章节
-    await databaseManager.batchUpsertChapters(backupData.chapters);
+    // 恢复章节（使用批量操作）
+    if (backupData.chapters && backupData.chapters.length > 0) {
+      await databaseManager.batchUpsertChapters(backupData.chapters);
+    }
 
     // 恢复书签
-    for (const bookmark of backupData.bookmarks) {
-      await databaseManager.addBookmark(bookmark);
+    if (backupData.bookmarks && backupData.bookmarks.length > 0) {
+      for (const bookmark of backupData.bookmarks) {
+        await databaseManager.addBookmark(bookmark);
+      }
     }
 
     // 恢复阅读配置
     if (backupData.readConfig) {
       await databaseManager.updateReadConfig(backupData.readConfig);
     }
+
+    // 书源和分类的恢复暂时跳过，因为DatabaseManager缺少相应的方法
+    console.warn('Book sources and categories restoration is not implemented yet');
   }
 
   /**

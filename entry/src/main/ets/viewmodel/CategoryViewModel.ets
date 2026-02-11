@@ -13,7 +13,7 @@ export class CategoryViewModel {
    */
   async getAllCategories(): Promise<BookCategory[]> {
     try {
-      return await this.databaseManager.getAllCategories();
+      return await this.databaseManager.getAllBookCategories();
     } catch (error) {
       console.error('Failed to load categories:', error);
       return [];
@@ -32,7 +32,7 @@ export class CategoryViewModel {
         createTime: Date.now()
       };
       
-      await this.databaseManager.addCategory(category);
+      await this.databaseManager.addBookCategory(category);
       return category;
     } catch (error) {
       console.error('Failed to create category:', error);

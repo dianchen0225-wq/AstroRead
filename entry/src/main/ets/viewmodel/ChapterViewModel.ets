@@ -1,23 +1,16 @@
 import { Chapter } from '../models/Book';
 import { ChapterContent } from '../models/Book';
 import { BookSource } from '../models/BookSource';
-import { databaseManager } from '../utils/DatabaseManager';
+import { DatabaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import { IdGenerator } from '../utils/IdGenerator';
-
-interface ParsedChapterItem {
-  title?: string;
-  url?: string;
-  order?: number;
-  isVip?: boolean;
-}
+import { ParsedChapterItem } from '../utils/ContentParser';
 
 /**
  * 章节视图模型
  */
 export class ChapterViewModel {
-  private readonly databaseManager = databaseManager;
-  private readonly networkManager = NetworkManager.getInstance();
+  private readonly databaseManager = DatabaseManager.getInstance();
 
   /**
    * 获取书籍的章节列表
@@ -40,9 +33,7 @@ export class ChapterViewModel {
     }
 
     try {
-      // 这里需要实现具体的数据库查询逻辑
-      // 暂时返回空数组
-      return [];
+      return await this.databaseManager.getChaptersByBookId(bookId);
     } catch (error) {
       console.error('Failed to get chapters by book ID:', error);
       return [];
@@ -75,7 +66,7 @@ export class ChapterViewModel {
       return chapters;
     } catch (error) {
       console.error('Failed to fetch chapters:', error);
-      throw new Error(`Failed to fetch chapters: ${error}`);
+      throw new Error(`Failed to fetch chapters: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -84,12 +75,11 @@ export class ChapterViewModel {
    */
   private async getChapterList(bookSource: BookSource, bookUrl: string): Promise<ParsedChapterItem[]> {
     try {
-      // 这里需要实现具体的章节列表获取逻辑
-      // 暂时返回空数组
-      return [];
+      const response = await NetworkManager.getInstance().getChapterList(bookSource, bookUrl);
+      return response;
     } catch (error) {
       console.error('Failed to get chapter list:', error);
-      throw new Error(`Failed to get chapter list: ${error}`);
+      throw new Error(`Failed to get chapter list: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -102,11 +92,10 @@ export class ChapterViewModel {
     }
 
     try {
-      // 这里需要实现具体的批量保存逻辑
-      console.log(`Successfully saved ${chapters.length} chapters`);
+      await this.databaseManager.batchUpsertChapters(chapters);
     } catch (error) {
       console.error('Failed to batch upsert chapters:', error);
-      throw new Error(`Failed to batch upsert chapters: ${error}`);
+      throw new Error(`Failed to batch upsert chapters: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -131,7 +120,7 @@ export class ChapterViewModel {
       };
     } catch (error) {
       console.error('Failed to get chapter content:', error);
-      throw new Error(`Failed to get chapter content: ${error}`);
+      throw new Error(`Failed to get chapter content: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -140,12 +129,11 @@ export class ChapterViewModel {
    */
   private async getChapterContentFromNetwork(bookSource: BookSource, chapterUrl: string): Promise<string> {
     try {
-      // 这里需要实现具体的章节内容获取逻辑
-      // 暂时返回空字符串
-      return '';
+      const response = await NetworkManager.getInstance().getChapterContent(bookSource, chapterUrl);
+      return response;
     } catch (error) {
       console.error('Failed to get chapter content from network:', error);
-      throw new Error(`Failed to get chapter content from network: ${error}`);
+      throw new Error(`Failed to get chapter content from network: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -170,4 +158,5 @@ export class ChapterViewModel {
     }
     return null;
   }
+
 }

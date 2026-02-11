@@ -3,7 +3,7 @@
  * 支持格式：JSON、XML、TXT格式的书源定义
  */
 
-import { BookSource, SearchRule, ChapterRule, ContentRule } from '../models/BookSource';
+import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../models/BookSource';
 import { Logger } from './Logger';
 
 interface SourceData {
@@ -253,43 +253,23 @@ class BookSourceParser {
         return null;
       }
       
-      const searchRule: SearchRule = {
-        bookList: '',
-        name: '',
-        author: '',
-        cover: undefined,
-        intro: undefined,
-        bookUrl: '',
-        nextUrl: undefined
-      };
-      
-      const chapterRule: ChapterRule = {
-        chapterList: '',
-        chapterName: '',
-        chapterUrl: '',
-        nextUrl: undefined
-      };
-      
-      const contentRule: ContentRule = {
-        content: '',
-        nextUrl: undefined,
-        prevUrl: undefined,
-        replaceRule: undefined
-      };
+      const searchRule: SearchRule = this.buildSearchRule(sourceData);
+      const chapterRule: ChapterRule = this.buildChapterRule(sourceData);
+      const contentRule: ContentRule = this.buildContentRule(sourceData);
       
       const source: BookSource = {
         id: '', // 将在ViewModel中生成
         name: name,
         url: url,
         enabled: sourceData['enabled'] !== 'false',
-        header: undefined,
+        header: sourceData['header'] || sourceData['headers'] || undefined,
         searchUrl: sourceData['searchUrl'] || sourceData['search_url'] || '',
         searchRule: searchRule,
-        findRule: undefined,
+        findRule: this.buildFindRule(sourceData),
         chapterRule: chapterRule,
         contentRule: contentRule,
         ruleType: 'jsonpath',
-        sort: parseInt(sourceData['weight'] || '1'),
+        sort: parseInt(sourceData['weight'] || sourceData['sort'] || '1'),
         lastUpdateTime: parseInt(sourceData['lastUpdateTime'] || Date.now().toString()),
         addTime: Date.now()
       };
@@ -305,6 +285,69 @@ class BookSourceParser {
       Logger.error(this.TAG, `构建书源对象失败：${JSON.stringify(error)}`);
       return null;
     }
+  }
+  
+  /**
+   * 构建搜索规则
+   */
+  private buildSearchRule(sourceData: Record<string, string>): SearchRule {
+    const rule: SearchRule = {
+      bookList: sourceData['bookList'] || sourceData['search_bookList'] || '',
+      name: sourceData['search_name'] || sourceData['bookName'] || '',
+      author: sourceData['search_author'] || sourceData['author'] || '',
+      cover: sourceData['search_cover'] || sourceData['cover'] || undefined,
+      intro: sourceData['search_intro'] || sourceData['intro'] || undefined,
+      bookUrl: sourceData['search_bookUrl'] || sourceData['bookUrl'] || '',
+      nextUrl: sourceData['search_nextUrl'] || sourceData['nextUrl'] || undefined
+    };
+    return rule;
+  }
+  
+  /**
+   * 构建发现规则
+   */
+  private buildFindRule(sourceData: Record<string, string>): FindRule | undefined {
+    const url = sourceData['find_url'] || sourceData['findUrl'] || '';
+    if (!url) {
+      return undefined;
+    }
+    
+    const rule: FindRule = {
+      url: url,
+      bookList: sourceData['find_bookList'] || sourceData['bookList'] || '',
+      name: sourceData['find_name'] || sourceData['bookName'] || '',
+      author: sourceData['find_author'] || sourceData['author'] || '',
+      cover: sourceData['find_cover'] || sourceData['cover'] || undefined,
+      intro: sourceData['find_intro'] || sourceData['intro'] || undefined,
+      bookUrl: sourceData['find_bookUrl'] || sourceData['bookUrl'] || ''
+    };
+    return rule;
+  }
+  
+  /**
+   * 构建章节规则
+   */
+  private buildChapterRule(sourceData: Record<string, string>): ChapterRule {
+    const rule: ChapterRule = {
+      chapterList: sourceData['chapterList'] || sourceData['toc_chapterList'] || '',
+      chapterName: sourceData['chapterName'] || sourceData['toc_chapterName'] || '',
+      chapterUrl: sourceData['chapterUrl'] || sourceData['toc_chapterUrl'] || '',
+      nextUrl: sourceData['chapter_nextUrl'] || sourceData['toc_nextUrl'] || undefined
+    };
+    return rule;
+  }
+  
+  /**
+   * 构建内容规则
+   */
+  private buildContentRule(sourceData: Record<string, string>): ContentRule {
+    const rule: ContentRule = {
+      content: sourceData['content'] || sourceData['content_content'] || '',
+      nextUrl: sourceData['content_nextUrl'] || sourceData['nextUrl'] || undefined,
+      prevUrl: sourceData['content_prevUrl'] || sourceData['prevUrl'] || undefined,
+      replaceRule: sourceData['content_replaceRule'] || sourceData['replaceRule'] || undefined
+    };
+    return rule;
   }
   
   /**

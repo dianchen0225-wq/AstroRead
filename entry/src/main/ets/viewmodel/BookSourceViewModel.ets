@@ -76,14 +76,12 @@ interface BackupBookSourceData {
  * 搜索规则接口
  */
 export interface SearchRuleRaw {
-  bookList?: string;
-  list?: string;
-  name?: string;
-  author?: string;
+  bookList: string;
+  name: string;
+  author: string;
   cover?: string;
   intro?: string;
-  bookUrl?: string;
-  url?: string;
+  bookUrl: string;
   nextUrl?: string;
 }
 
@@ -91,26 +89,22 @@ export interface SearchRuleRaw {
  * 发现规则接口
  */
 export interface FindRuleRaw {
-  url?: string;
-  bookList?: string;
-  list?: string;
-  name?: string;
-  author?: string;
+  url: string;
+  bookList: string;
+  name: string;
+  author: string;
   cover?: string;
   intro?: string;
-  bookUrl?: string;
+  bookUrl: string;
 }
 
 /**
  * 章节规则接口
  */
 export interface ChapterRuleRaw {
-  chapterList?: string;
-  list?: string;
-  chapterName?: string;
-  name?: string;
-  chapterUrl?: string;
-  url?: string;
+  chapterList: string;
+  chapterName: string;
+  chapterUrl: string;
   nextUrl?: string;
 }
 
@@ -118,7 +112,7 @@ export interface ChapterRuleRaw {
  * 内容规则接口
  */
 export interface ContentRuleRaw {
-  content?: string;
+  content: string;
   nextUrl?: string;
   prevUrl?: string;
   replaceRule?: string;
@@ -128,14 +122,12 @@ export interface ContentRuleRaw {
  * AstroRead 搜索规则接口
  */
 export interface AstroReadSearchRule {
-  bookList?: string;
-  list?: string;
-  name?: string;
-  author?: string;
+  bookList: string;
+  name: string;
+  author: string;
   cover?: string;
   intro?: string;
-  bookUrl?: string;
-  url?: string;
+  bookUrl: string;
   nextUrl?: string;
 }
 
@@ -143,26 +135,22 @@ export interface AstroReadSearchRule {
  * AstroRead 发现规则接口
  */
 export interface AstroReadExploreRule {
-  url?: string;
-  bookList?: string;
-  list?: string;
-  name?: string;
-  author?: string;
+  url: string;
+  bookList: string;
+  name: string;
+  author: string;
   cover?: string;
   intro?: string;
-  bookUrl?: string;
+  bookUrl: string;
 }
 
 /**
  * AstroRead 章节规则接口
  */
 export interface AstroReadTocRule {
-  chapterList?: string;
-  list?: string;
-  chapterName?: string;
-  name?: string;
-  chapterUrl?: string;
-  url?: string;
+  chapterList: string;
+  chapterName: string;
+  chapterUrl: string;
   nextUrl?: string;
 }
 
@@ -170,7 +158,7 @@ export interface AstroReadTocRule {
  * AstroRead 内容规则接口
  */
 export interface AstroReadContentRule {
-  content?: string;
+  content: string;
   nextUrl?: string;
   prevUrl?: string;
   replaceRule?: string;
@@ -256,8 +244,8 @@ export class BookSourceViewModel {
    */
   async loadAllBookSources(): Promise<BookSource[]> {
     try {
-      // TODO: 实现加载所有书源的方法
-      return await this.loadEnabledBookSources();
+      this.bookSources = await this.databaseManager.getAllBookSources();
+      return this.bookSources;
     } catch (error) {
       Logger.error('BookSourceViewModel', '加载所有书源失败');
       throw new Error('加载书源失败');
@@ -415,8 +403,7 @@ export class BookSourceViewModel {
     }
 
     try {
-      // 这里需要实现具体的删除逻辑
-      // 暂时返回true表示删除成功
+      await this.databaseManager.deleteBookSource(id);
       return true;
     } catch (error) {
       Logger.error('BookSourceViewModel', '删除书源失败');
@@ -603,7 +590,7 @@ export class BookSourceViewModel {
         };
       }
 
-      // 转换为导出格式
+      // 转换为导出格式，提供默认值
       const exportData: ExportBookSourceData[] = allSources.map(source => {
         const exportItem: ExportBookSourceData = {
           bookSourceName: source.name,
@@ -814,7 +801,7 @@ export class BookSourceViewModel {
    */
   private parseHeadersSafely(headersString: string): Record<string, string> {
     try {
-      const headers = JSON.parse(headersString);
+      const headers = JSON.parse(headersString) as Record<string, string>;
       
       // 验证headers对象
       if (typeof headers !== 'object' || headers === null) {
@@ -827,7 +814,7 @@ export class BookSourceViewModel {
       const keys = Object.keys(headers);
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        const value = headers[key];
+        const value = headers[key] as string;
         if (typeof key === 'string' && typeof value === 'string') {
           // 限制header key和value长度
           if (key.length <= 100 && value.length <= 1000) {
@@ -871,7 +858,7 @@ export class BookSourceViewModel {
       throw new Error('排序值必须在0-1000之间');
     }
     
-    // 验证规则类型 - 修复类型不匹配问题
+    // 验证规则类型
     const validRuleTypes = ['xpath', 'jsonpath', 'regex'];
     if (source.ruleType && !validRuleTypes.includes(source.ruleType)) {
       throw new Error('无效的规则类型');
@@ -879,197 +866,164 @@ export class BookSourceViewModel {
   }
 
   /**
-   * 处理书源数组
+   * 处理书源数组（修复类型问题）
    */
   private processBookSourceArray(data: BookSourceRawData[]): BookSource[] {
     if (!Array.isArray(data) || data.length === 0) {
       return [];
     }
     
-    const bookSources: BookSource[] = [];
+    const processedSources: BookSource[] = [];
     
-    for (let i = 0; i < data.length; i++) {
-      const item = data[i];
-      const processedSource = this.processBookSourceItem(item);
-      if (processedSource) {
-        bookSources.push(processedSource);
+    for (const item of data) {
+      try {
+        // 创建默认的规则对象
+        const defaultSearchRule: SearchRule = {
+          bookList: '',
+          name: '',
+          author: '',
+          cover: undefined,
+          intro: undefined,
+          bookUrl: '',
+          nextUrl: undefined
+        };
+
+        const defaultChapterRule: ChapterRule = {
+          chapterList: '',
+          chapterName: '',
+          chapterUrl: '',
+          nextUrl: undefined
+        };
+
+        const defaultContentRule: ContentRule = {
+          content: '',
+          nextUrl: undefined,
+          prevUrl: undefined,
+          replaceRule: undefined
+        };
+
+        // 创建BookSource对象并设置默认值
+        const bookSource: BookSource = {
+          id: item.id || IdGenerator.generateUUID(),
+          name: item.name || item.bookSourceName || '',
+          url: item.url || item.bookSourceUrl || '',
+          enabled: item.enabled !== undefined ? item.enabled : true,
+          header: item.header || item.headers || undefined,
+          searchUrl: item.searchUrl || '',
+          searchRule: this.convertToSearchRule(item.searchRule || item.ruleSearch || defaultSearchRule),
+          findRule: (item.findRule || item.ruleExplore) ? this.convertToFindRule(item.findRule || item.ruleExplore!) : undefined,
+          chapterRule: this.convertToChapterRule(item.chapterRule || item.ruleToc || defaultChapterRule),
+          contentRule: this.convertToContentRule(item.contentRule || item.ruleContent || defaultContentRule),
+          ruleType: this.validateRuleType((item.ruleType as 'xpath' | 'jsonpath' | 'regex') || 'xpath'),
+          sort: item.sort || item.customOrder || 0,
+          lastUpdateTime: item.lastUpdateTime || Date.now(),
+          addTime: item.addTime || Date.now()
+        };
+
+        processedSources.push(bookSource);
+      } catch (error) {
+        Logger.warn('BookSourceViewModel', `处理书源数据失败: ${error}`);
       }
     }
-    
-    return bookSources;
+
+    return processedSources;
   }
 
   /**
-   * 处理单个书源项
+   * 转换搜索规则类型
    */
-  private processBookSourceItem(item: BookSourceRawData): BookSource | null {
-    try {
-      // 创建新的BookSource对象 - 修复：使用对象字面量而不是构造函数
-      const bookSource: BookSource = {
-        id: item.id || IdGenerator.generateUUID(),
-        name: item.name || item.bookSourceName || '未知书源',
-        url: item.url || item.bookSourceUrl || '',
-        enabled: item.enabled ?? true,
-        sort: item.sort || item.customOrder || 0,
-        ruleType: (item.ruleType as 'xpath' | 'jsonpath' | 'regex') || 'xpath',
-        searchRule: undefined,
-        findRule: undefined,
-        chapterRule: undefined,
-        contentRule: undefined,
-        header: item.header || '',
-        searchUrl: item.searchUrl || '',
-        addTime: item.addTime || Date.now(),
-        lastUpdateTime: Date.now()
-      };
-      
-      // 设置搜索规则
-      if (item.searchRule) {
-        bookSource.searchRule = this.convertSearchRule(item.searchRule);
-      } else if (item.ruleSearch) {
-        bookSource.searchRule = this.convertAstroReadSearchRule(item.ruleSearch);
-      }
-      
-      // 设置发现规则
-      if (item.findRule) {
-        bookSource.findRule = this.convertFindRule(item.findRule);
-      } else if (item.ruleExplore) {
-        bookSource.findRule = this.convertAstroReadExploreRule(item.ruleExplore);
-      }
-      
-      // 设置章节规则
-      if (item.chapterRule) {
-        bookSource.chapterRule = this.convertChapterRule(item.chapterRule);
-      } else if (item.ruleToc) {
-        bookSource.chapterRule = this.convertAstroReadTocRule(item.ruleToc);
-      }
-      
-      // 设置内容规则
-      if (item.contentRule) {
-        bookSource.contentRule = this.convertContentRule(item.contentRule);
-      } else if (item.ruleContent) {
-        bookSource.contentRule = this.convertAstroReadContentRule(item.ruleContent);
-      }
-      
-      return bookSource;
-    } catch (error) {
-      Logger.warn('BookSourceViewModel', '处理书源项失败');
-      return null;
-    }
-  }
-
-  /**
-   * 转换搜索规则
-   */
-  private convertSearchRule(rule: SearchRuleRaw): SearchRule {
-    const searchRule: SearchRule = {
-      bookList: rule.bookList || rule.list || '',
+  private convertToSearchRule(rule: SearchRuleRaw | AstroReadSearchRule | SearchRule): SearchRule {
+    return {
+      bookList: rule.bookList || '',
       name: rule.name || '',
       author: rule.author || '',
-      cover: rule.cover || '',
-      intro: rule.intro || '',
-      bookUrl: rule.bookUrl || rule.url || '',
-      nextUrl: rule.nextUrl || ''
+      cover: rule.cover || undefined,
+      intro: rule.intro || undefined,
+      bookUrl: rule.bookUrl || '',
+      nextUrl: rule.nextUrl || undefined
     };
-    return searchRule;
   }
 
   /**
-   * 转换AstroRead搜索规则
+   * 转换发现规则类型
    */
-  private convertAstroReadSearchRule(rule: AstroReadSearchRule): SearchRule {
-    const searchRule: SearchRule = {
-      bookList: rule.bookList || rule.list || '',
-      name: rule.name || '',
-      author: rule.author || '',
-      cover: rule.cover || '',
-      intro: rule.intro || '',
-      bookUrl: rule.bookUrl || rule.url || '',
-      nextUrl: rule.nextUrl || ''
-    };
-    return searchRule;
-  }
-
-  /**
-   * 转换发现规则
-   */
-  private convertFindRule(rule: FindRuleRaw): FindRule {
-    const findRule: FindRule = {
+  private convertToFindRule(rule: FindRuleRaw | AstroReadExploreRule): FindRule {
+    return {
       url: rule.url || '',
-      bookList: rule.bookList || rule.list || '',
+      bookList: rule.bookList || '',
       name: rule.name || '',
       author: rule.author || '',
-      cover: rule.cover || '',
-      intro: rule.intro || '',
+      cover: rule.cover || undefined,
+      intro: rule.intro || undefined,
       bookUrl: rule.bookUrl || ''
     };
-    return findRule;
   }
 
   /**
-   * 转换AstroRead发现规则
+   * 转换章节规则类型
    */
-  private convertAstroReadExploreRule(rule: AstroReadExploreRule): FindRule {
-    const findRule: FindRule = {
-      url: rule.url || '',
-      bookList: rule.bookList || rule.list || '',
-      name: rule.name || '',
-      author: rule.author || '',
-      cover: rule.cover || '',
-      intro: rule.intro || '',
-      bookUrl: rule.bookUrl || ''
+  private convertToChapterRule(rule: ChapterRuleRaw | AstroReadTocRule | ChapterRule): ChapterRule {
+    return {
+      chapterList: rule.chapterList || '',
+      chapterName: rule.chapterName || '',
+      chapterUrl: rule.chapterUrl || '',
+      nextUrl: rule.nextUrl || undefined
     };
-    return findRule;
   }
 
   /**
-   * 转换章节规则
+   * 转换内容规则类型
    */
-  private convertChapterRule(rule: ChapterRuleRaw): ChapterRule {
-    const chapterRule: ChapterRule = {
-      chapterList: rule.chapterList || rule.list || '',
-      chapterName: rule.chapterName || rule.name || '',
-      chapterUrl: rule.chapterUrl || rule.url || '',
-      nextUrl: rule.nextUrl || ''
-    };
-    return chapterRule;
-  }
-
-  /**
-   * 转换AstroRead章节规则
-   */
-  private convertAstroReadTocRule(rule: AstroReadTocRule): ChapterRule {
-    const chapterRule: ChapterRule = {
-      chapterList: rule.chapterList || rule.list || '',
-      chapterName: rule.chapterName || rule.name || '',
-      chapterUrl: rule.chapterUrl || rule.url || '',
-      nextUrl: rule.nextUrl || ''
-    };
-    return chapterRule;
-  }
-
-  /**
-   * 转换内容规则
-   */
-  private convertContentRule(rule: ContentRuleRaw): ContentRule {
-    const contentRule: ContentRule = {
+  private convertToContentRule(rule: ContentRuleRaw | AstroReadContentRule | ContentRule): ContentRule {
+    return {
       content: rule.content || '',
-      nextUrl: rule.nextUrl || '',
-      prevUrl: rule.prevUrl || '',
-      replaceRule: rule.replaceRule || ''
+      nextUrl: rule.nextUrl || undefined,
+      prevUrl: rule.prevUrl || undefined,
+      replaceRule: rule.replaceRule || undefined
     };
-    return contentRule;
   }
 
   /**
-   * 转换AstroRead内容规则
+   * 验证规则类型
    */
-  private convertAstroReadContentRule(rule: AstroReadContentRule): ContentRule {
-    const contentRule: ContentRule = {
-      content: rule.content || '',
-      nextUrl: rule.nextUrl || '',
-      prevUrl: rule.prevUrl || '',
-      replaceRule: rule.replaceRule || ''
-    };
-    return contentRule;
+  private validateRuleType(ruleType: string): 'xpath' | 'jsonpath' | 'regex' {
+    const validTypes = ['xpath', 'jsonpath', 'regex'];
+    return validTypes.includes(ruleType) ? ruleType as 'xpath' | 'jsonpath' | 'regex' : 'xpath';
+  }
+
+  /**
+   * 获取书源列表
+   */
+  getBookSources(): BookSource[] {
+    return [...this.bookSources];
+  }
+
+  /**
+   * 根据ID获取书源
+   */
+  getBookSourceById(id: string): BookSource | undefined {
+    return this.bookSources.find(source => source.id === id);
+  }
+
+  /**
+   * 获取启用的书源数量
+   */
+  getEnabledBookSourcesCount(): number {
+    return this.bookSources.filter(source => source.enabled).length;
+  }
+
+  /**
+   * 获取书源总数
+   */
+  getTotalBookSourcesCount(): number {
+    return this.bookSources.length;
+  }
+
+  /**
+   * 清理资源
+   */
+  destroy(): void {
+    this.bookSources = [];
+    this.context = null;
   }
 }

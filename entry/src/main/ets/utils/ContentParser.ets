@@ -709,27 +709,31 @@ export class ContentParser {
   }
 
   // 以下方法需要实现，但当前版本暂时使用正则表达式替代
-  private static parseByXPath(html: string, listRule: string, rule: SearchRule): ParsedBookItem[] {
+  private static parseByXPath(_html: string, listRule: string, _rule: SearchRule): ParsedBookItem[] {
     // 简化实现：使用正则表达式替代XPath
     console.warn('XPath解析功能未完全实现，使用正则表达式回退');
-    return ContentParser.parseByRegex(html, listRule, rule);
+    // TODO: 待实现XPath解析功能
+    return ContentParser.parseByRegex(_html, listRule, _rule);
   }
 
-  private static parseChaptersByXPath(html: string, listRule: string, rule: ChapterRule): ParsedChapterItem[] {
+  private static parseChaptersByXPath(_html: string, listRule: string, _rule: ChapterRule): ParsedChapterItem[] {
     // 简化实现：使用正则表达式替代XPath
     console.warn('XPath章节解析功能未完全实现，使用正则表达式回退');
-    return ContentParser.parseChaptersByRegex(html, listRule, rule);
+    // TODO: 待实现XPath解析功能
+    return ContentParser.parseChaptersByRegex(_html, listRule, _rule);
   }
 
-  private static extractByXPath(html: string, rule: string): string {
+  private static extractByXPath(_html: string, _rule: string): string {
     // 简化实现：使用正则表达式替代XPath
     console.warn('XPath文本提取功能未完全实现');
+    // TODO: 待实现XPath解析功能
     return '';
   }
 
-  private static extractElementAttribute(html: string, selector: string, attr: string): string {
+  private static extractElementAttribute(_html: string, _selector: string, _attr: string): string {
     // 简化实现：返回空字符串
     console.warn('XPath属性提取功能未实现');
+    // TODO: 待实现XPath属性提取功能
     return '';
   }
 }

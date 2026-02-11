@@ -15,7 +15,7 @@ export default class EntryAbility extends UIAbility {
     
     // 初始化数据库
     try {
-      await databaseManager.init(this.context);
+      await databaseManager.initDatabase(this.context);
       hilog.info(DOMAIN, 'testTag', 'Database initialized successfully');
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to initialize database. Cause: %{public}s', JSON.stringify(err));

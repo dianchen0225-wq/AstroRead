@@ -170,10 +170,16 @@ class SourceValidator {
         }, this.REQUEST_TIMEOUT);
       });
       
-      const requestPromise = networkManager.get(testUrl, headers).then((response: string) => {
+      const requestPromise = networkManager.get(testUrl, headers, this.MAX_RESPONSE_SIZE).then((response: string) => {
         const responseTime = Date.now() - startTime;
         
+        // 检查响应大小
         if (response && response.length > 0) {
+          if (response.length > this.MAX_RESPONSE_SIZE) {
+            Logger.warn(this.TAG, `书源${this.sanitizeLogOutput(source.name)}响应过大：${response.length}字节`);
+            throw new Error('响应大小超过限制');
+          }
+          
           Logger.debug(this.TAG, `书源${this.sanitizeLogOutput(source.name)}验证成功，响应时间：${responseTime}ms`);
           const result: AvailabilityResult = {
             isAvailable: true,
@@ -334,9 +340,15 @@ class SourceValidator {
       }
       
       const networkManager = NetworkManager.getInstance();
-      const response = await networkManager.get(searchUrl);
+      const response = await networkManager.get(searchUrl, undefined, this.MAX_RESPONSE_SIZE);
       
       if (response && response.length > 0) {
+        // 检查响应大小
+        if (response.length > this.MAX_RESPONSE_SIZE) {
+          Logger.warn(this.TAG, `搜索响应过大：${response.length}字节`);
+          throw new Error('响应大小超过限制');
+        }
+        
         const hasResults = this.detectSearchResults(response);
         
         const result: SearchValidationResult = {

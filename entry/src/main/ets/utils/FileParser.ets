@@ -108,8 +108,9 @@ export class FileParser {
   /**
    * 解析EPUB文件（简化版）
    */
-  static async parseEpubFile(filePath: string, bookId: string): Promise<Chapter[]> {
-    // TODO: 实现EPUB解析
+  static async parseEpubFile(_filePath: string, _bookId: string): Promise<Chapter[]> {
+    // 参数filePath和bookId目前未使用，但为未来EPUB解析功能预留
+    // TODO: 实现EPUB解析功能时将使用这些参数
     // EPUB是一个ZIP压缩包，包含HTML文件
     // 需要使用ZIP解压库和HTML解析器
     

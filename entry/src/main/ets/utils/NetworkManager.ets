@@ -68,7 +68,7 @@ export class NetworkManager {
   /**
    * 流式获取数据（处理大量数据）
    */
-  async getStream(url: string, headers?: Record<string, string>): Promise<string> {
+  async getStream(url: string, headers?: Record<string, string>, maxResponseSize?: number): Promise<string> {
     const httpRequest = http.createHttp();
     const requestHeaders: Record<string, string> = headers || {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -77,12 +77,23 @@ export class NetworkManager {
     };
     
     const chunks: Uint8Array[] = [];
+    let totalSize = 0;
     
     return new Promise<string>((resolve, reject) => {
       // 监听数据接收事件
       httpRequest.on('dataReceive', (data: ArrayBuffer) => {
         if (data) {
           try {
+            // 检查响应大小限制
+            totalSize += data.byteLength;
+            if (maxResponseSize && totalSize > maxResponseSize) {
+              httpRequest.off('dataReceive');
+              httpRequest.off('dataEnd');
+              httpRequest.destroy();
+              reject(new Error(`响应大小超过限制: ${totalSize}字节 > ${maxResponseSize}字节`));
+              return;
+            }
+            
             chunks.push(new Uint8Array(data));
           } catch (e) {
             console.error('解析流式数据失败:', e);
@@ -106,6 +117,15 @@ export class NetworkManager {
           // 使用util模块的TextDecoder（使用新API替代废弃的decode方法）
           const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
           const result = decoder.decodeToString(mergedArray, { stream: false });
+          
+          // 检查响应大小限制
+          if (maxResponseSize && result.length > maxResponseSize) {
+            httpRequest.off('dataReceive');
+            httpRequest.off('dataEnd');
+            httpRequest.destroy();
+            reject(new Error(`响应大小超过限制: ${result.length}字节 > ${maxResponseSize}字节`));
+            return;
+          }
           
           httpRequest.off('dataReceive');
           httpRequest.off('dataEnd');
@@ -156,7 +176,7 @@ export class NetworkManager {
   /**
    * 发送GET请求
    */
-  async get(url: string, headers?: Record<string, string>): Promise<string> {
+  async get(url: string, headers?: Record<string, string>, maxResponseSize?: number): Promise<string> {
     const httpRequest = http.createHttp();
     
     try {
@@ -177,7 +197,14 @@ export class NetworkManager {
       
       // 处理不同的响应码
       if (response.responseCode === 200) {
-        return response.result.toString();
+        const responseText = response.result.toString();
+        
+        // 检查响应大小限制
+        if (maxResponseSize && responseText.length > maxResponseSize) {
+          throw new Error(`响应大小超过限制: ${responseText.length}字节 > ${maxResponseSize}字节`);
+        }
+        
+        return responseText;
       } else if (response.responseCode === 301 || response.responseCode === 302) {
         // 处理重定向
         const headersObj = response.header as Record<string, string>;
@@ -191,7 +218,7 @@ export class NetworkManager {
         if (location) {
           const redirectUrl = this.resolveUrl(url, location);
           console.log(`Redirecting to: ${redirectUrl}`);
-          return this.get(redirectUrl, headers);
+          return this.get(redirectUrl, headers, maxResponseSize);
         } else {
           throw new Error(`HTTP ${response.responseCode}: No redirect location`);
         }
@@ -217,7 +244,7 @@ export class NetworkManager {
   /**
    * 发送POST请求
    */
-  async post(url: string, data: string, headers?: Record<string, string>): Promise<string> {
+  async post(url: string, data: string, headers?: Record<string, string>, maxResponseSize?: number): Promise<string> {
     const httpRequest = http.createHttp();
     
     try {
@@ -254,7 +281,14 @@ export class NetworkManager {
       
       // 处理不同的响应码
       if (response.responseCode === 200) {
-        return response.result.toString();
+        const responseText = response.result.toString();
+        
+        // 检查响应大小限制
+        if (maxResponseSize && responseText.length > maxResponseSize) {
+          throw new Error(`响应大小超过限制: ${responseText.length}字节 > ${maxResponseSize}字节`);
+        }
+        
+        return responseText;
       } else if (response.responseCode === 301 || response.responseCode === 302) {
         // 处理重定向
         const headersObj = response.header as Record<string, string>;
@@ -268,7 +302,7 @@ export class NetworkManager {
         if (location) {
           const redirectUrl = this.resolveUrl(url, location);
           console.log(`Redirecting to: ${redirectUrl}`);
-          return this.get(redirectUrl, headers);
+          return this.get(redirectUrl, headers, maxResponseSize);
         } else {
           throw new Error(`HTTP ${response.responseCode}: No redirect location`);
         }

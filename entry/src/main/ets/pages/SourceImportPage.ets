@@ -4,7 +4,7 @@
  */
 
 import { BookSourceViewModel, ImportResult } from '../viewmodel/BookSourceViewModel';
-import { BookSource } from '../models/BookSource';
+// import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
 
 @Entry
@@ -160,48 +160,65 @@ struct SourceImportPage {
       // 格式选项
       if (this.showFormatOptions) {
         Column({ space: 5 }) {
-          RadioGroup({ group: 'formatGroup' }) {
+          // 自动检测选项
+          Row({ space: 10 }) {
             Radio({ value: 'auto', group: 'formatGroup' })
               .checked(this.selectedFormat === 'auto')
-              .onChange((value: string) => {
-                this.selectedFormat = value;
-                this.showFormatOptions = false;
+              .onChange((value: boolean) => {
+                if (value) {
+                  this.selectedFormat = 'auto';
+                  this.showFormatOptions = false;
+                }
               })
             Text('自动检测')
               .fontSize(14)
               .margin({ left: 10 })
-            
+          }
+          
+          // JSON格式选项
+          Row({ space: 10 }) {
             Radio({ value: 'json', group: 'formatGroup' })
               .checked(this.selectedFormat === 'json')
-              .onChange((value: string) => {
-                this.selectedFormat = value;
-                this.showFormatOptions = false;
+              .onChange((value: boolean) => {
+                if (value) {
+                  this.selectedFormat = 'json';
+                  this.showFormatOptions = false;
+                }
               })
             Text('JSON格式')
               .fontSize(14)
               .margin({ left: 10 })
-            
+          }
+          
+          // XML格式选项
+          Row({ space: 10 }) {
             Radio({ value: 'xml', group: 'formatGroup' })
               .checked(this.selectedFormat === 'xml')
-              .onChange((value: string) => {
-                this.selectedFormat = value;
-                this.showFormatOptions = false;
+              .onChange((value: boolean) => {
+                if (value) {
+                  this.selectedFormat = 'xml';
+                  this.showFormatOptions = false;
+                }
               })
             Text('XML格式')
               .fontSize(14)
               .margin({ left: 10 })
-            
+          }
+          
+          // TXT格式选项
+          Row({ space: 10 }) {
             Radio({ value: 'txt', group: 'formatGroup' })
               .checked(this.selectedFormat === 'txt')
-              .onChange((value: string) => {
-                this.selectedFormat = value;
-                this.showFormatOptions = false;
+              .onChange((value: boolean) => {
+                if (value) {
+                  this.selectedFormat = 'txt';
+                  this.showFormatOptions = false;
+                }
               })
             Text('TXT格式')
               .fontSize(14)
               .margin({ left: 10 })
           }
-          .width('100%')
         }
         .width('100%')
         .padding(10)

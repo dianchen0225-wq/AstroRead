@@ -1,0 +1,250 @@
+import relationalStore from '@ohos.data.relationalStore';
+import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../../models/BookSource';
+
+/**
+ * 书源数据库操作
+ */
+export class BookSourceRepository {
+  private rdbStore: relationalStore.RdbStore;
+
+  constructor(rdbStore: relationalStore.RdbStore) {
+    this.rdbStore = rdbStore;
+  }
+
+  /**
+   * 获取所有启用的书源
+   */
+  async getAllEnabledBookSources(): Promise<BookSource[]> {
+    const predicates = new relationalStore.RdbPredicates('book_source');
+    predicates.equalTo('enabled', 1);
+    predicates.orderByAsc('sort');
+
+    try {
+      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      const bookSources: BookSource[] = [];
+
+      while (resultSet.goToNextRow()) {
+        const bookSource = this.parseBookSource(resultSet);
+        bookSources.push(bookSource);
+      }
+
+      resultSet.close();
+      return bookSources;
+    } catch (error) {
+      console.error(`Failed to query enabled book sources: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * 获取所有书源（包括禁用的）
+   */
+  async getAllBookSources(): Promise<BookSource[]> {
+    const predicates = new relationalStore.RdbPredicates('book_source');
+    predicates.orderByAsc('sort');
+
+    try {
+      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      const bookSources: BookSource[] = [];
+
+      while (resultSet.goToNextRow()) {
+        const bookSource = this.parseBookSource(resultSet);
+        bookSources.push(bookSource);
+      }
+
+      resultSet.close();
+      return bookSources;
+    } catch (error) {
+      console.error(`Failed to query all book sources: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * 插入或更新书源
+   */
+  async upsertBookSource(bookSource: BookSource): Promise<void> {
+    const valueBucket: relationalStore.ValuesBucket = {
+      'id': bookSource.id,
+      'name': bookSource.name,
+      'url': bookSource.url,
+      'enabled': bookSource.enabled ? 1 : 0,
+      'header': bookSource.header || null,
+      'search_url': bookSource.searchUrl,
+      'search_rule': JSON.stringify(bookSource.searchRule),
+      'find_rule': bookSource.findRule ? JSON.stringify(bookSource.findRule) : null,
+      'chapter_rule': JSON.stringify(bookSource.chapterRule),
+      'content_rule': JSON.stringify(bookSource.contentRule),
+      'rule_type': bookSource.ruleType,
+      'sort': bookSource.sort || 0,
+      'last_update_time': Date.now(),
+      'add_time': bookSource.addTime || Date.now()
+    };
+
+    try {
+      // 先尝试更新
+      const predicates = new relationalStore.RdbPredicates('book_source');
+      predicates.equalTo('id', bookSource.id);
+      const updatedRows = await this.rdbStore.update(valueBucket, predicates);
+      
+      // 如果更新失败则插入
+      if (updatedRows === 0) {
+        await this.rdbStore.insert('book_source', valueBucket);
+      }
+    } catch (error) {
+      console.error(`Failed to upsert book source: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * 批量插入或更新书源
+   */
+  async batchUpsertBookSources(sources: BookSource[]): Promise<void> {
+    if (sources.length === 0) {
+      return;
+    }
+
+    try {
+      // 使用事务确保批量操作的原子性
+      this.rdbStore.beginTransaction();
+
+      for (const source of sources) {
+        await this.upsertBookSource(source);
+      }
+
+      this.rdbStore.commit();
+    } catch (error) {
+      this.rdbStore.rollback();
+      console.error(`Failed to batch upsert book sources: ${error instanceof Error ? error.message : String(error)}`);
+      throw (error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * 删除书源
+   */
+  async deleteBookSource(sourceId: string): Promise<void> {
+    try {
+      const predicates = new relationalStore.RdbPredicates('book_source');
+      predicates.equalTo('id', sourceId);
+      await this.rdbStore.delete(predicates);
+    } catch (error) {
+      console.error(`Failed to delete book source: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * 解析书源数据
+   */
+  private parseBookSource(resultSet: relationalStore.ResultSet): BookSource {
+    try {
+      const idIndex = resultSet.getColumnIndex('id');
+      const nameIndex = resultSet.getColumnIndex('name');
+      const urlIndex = resultSet.getColumnIndex('url');
+      const enabledIndex = resultSet.getColumnIndex('enabled');
+      const headerIndex = resultSet.getColumnIndex('header');
+      const searchUrlIndex = resultSet.getColumnIndex('search_url');
+      const searchRuleIndex = resultSet.getColumnIndex('search_rule');
+      const findRuleIndex = resultSet.getColumnIndex('find_rule');
+      const chapterRuleIndex = resultSet.getColumnIndex('chapter_rule');
+      const contentRuleIndex = resultSet.getColumnIndex('content_rule');
+      const ruleTypeIndex = resultSet.getColumnIndex('rule_type');
+      const sortIndex = resultSet.getColumnIndex('sort');
+      const lastUpdateTimeIndex = resultSet.getColumnIndex('last_update_time');
+      const addTimeIndex = resultSet.getColumnIndex('add_time');
+
+      const searchRuleJson = this.parseJson(resultSet.getString(searchRuleIndex));
+      const searchRule: SearchRule = {
+        bookList: searchRuleJson['bookList'] as string || '',
+        name: searchRuleJson['name'] as string || '',
+        author: searchRuleJson['author'] as string || '',
+        cover: searchRuleJson['cover'] as string | undefined,
+        intro: searchRuleJson['intro'] as string | undefined,
+        bookUrl: searchRuleJson['bookUrl'] as string || '',
+        nextUrl: searchRuleJson['nextUrl'] as string | undefined
+      };
+
+      const chapterRuleJson = this.parseJson(resultSet.getString(chapterRuleIndex));
+      const chapterRule: ChapterRule = {
+        chapterList: chapterRuleJson['chapterList'] as string || '',
+        chapterName: chapterRuleJson['chapterName'] as string || '',
+        chapterUrl: chapterRuleJson['chapterUrl'] as string || '',
+        nextUrl: chapterRuleJson['nextUrl'] as string | undefined
+      };
+
+      const contentRuleJson = this.parseJson(resultSet.getString(contentRuleIndex));
+      const contentRule: ContentRule = {
+        content: contentRuleJson['content'] as string || '',
+        nextUrl: contentRuleJson['nextUrl'] as string | undefined,
+        prevUrl: contentRuleJson['prevUrl'] as string | undefined,
+        replaceRule: contentRuleJson['replaceRule'] as string | undefined
+      };
+
+      let findRule: FindRule | undefined = undefined;
+      if (!resultSet.isColumnNull(findRuleIndex)) {
+        const findRuleJson = this.parseJson(resultSet.getString(findRuleIndex));
+        findRule = {
+          url: findRuleJson['url'] as string || '',
+          bookList: findRuleJson['bookList'] as string || '',
+          name: findRuleJson['name'] as string || '',
+          author: findRuleJson['author'] as string || '',
+          cover: findRuleJson['cover'] as string | undefined,
+          intro: findRuleJson['intro'] as string | undefined,
+          bookUrl: findRuleJson['bookUrl'] as string || ''
+        };
+      }
+
+      return {
+        id: resultSet.getString(idIndex) || '',
+        name: resultSet.getString(nameIndex) || '',
+        url: resultSet.getString(urlIndex) || '',
+        enabled: resultSet.getLong(enabledIndex) === 1,
+        header: resultSet.isColumnNull(headerIndex)
+          ? undefined
+          : resultSet.getString(headerIndex) || '',
+        searchUrl: resultSet.getString(searchUrlIndex) || '',
+        searchRule: searchRule,
+        findRule: findRule,
+        chapterRule: chapterRule,
+        contentRule: contentRule,
+        ruleType: (resultSet.getString(ruleTypeIndex) || 'xpath') as 'xpath' | 'jsonpath' | 'regex',
+        sort: resultSet.getLong(sortIndex) || 0,
+        lastUpdateTime: resultSet.getLong(lastUpdateTimeIndex) || 0,
+        addTime: resultSet.getLong(addTimeIndex) || 0
+      };
+    } catch (error) {
+      console.error(`Failed to parse book source: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        id: '',
+        name: '',
+        url: '',
+        enabled: true,
+        header: undefined,
+        searchUrl: '',
+        searchRule: { bookList: '', name: '', author: '', bookUrl: '', cover: undefined, intro: undefined, nextUrl: undefined },
+        findRule: undefined,
+        chapterRule: { chapterList: '', chapterName: '', chapterUrl: '', nextUrl: undefined },
+        contentRule: { content: '', nextUrl: undefined, prevUrl: undefined, replaceRule: undefined },
+        ruleType: 'xpath' as 'xpath' | 'jsonpath' | 'regex',
+        sort: 0,
+        lastUpdateTime: 0,
+        addTime: 0
+      };
+    }
+  }
+
+  /**
+   * 安全解析JSON字符串
+   */
+  private parseJson(jsonString: string | undefined): Record<string, Object> {
+    if (!jsonString) {
+      return {} as Record<string, Object>;
+    }
+    try {
+      return JSON.parse(jsonString) as Record<string, Object>;
+    } catch (error) {
+      console.warn(`Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}`);
+      return {} as Record<string, Object>;
+    }
+  }
+}
