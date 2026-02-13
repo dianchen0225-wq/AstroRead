@@ -1,7 +1,63 @@
-import { BookSource } from '../models/BookSource';
+import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../models/BookSource';
 import { BookSourceViewModel } from '../viewmodel/BookSourceViewModel';
 import { IdGenerator } from '../utils/IdGenerator';
 import { NetworkManager } from '../utils/NetworkManager';
+
+/**
+ * 书源原始数据类型
+ */
+interface RawBookSource {
+  id?: string;
+  name?: string;
+  url?: string;
+  baseUrl?: string;
+  enabled?: boolean;
+  header?: string;
+  headers?: string;
+  searchUrl?: string;
+  search?: string;
+  searchRule?: {
+    bookList?: string;
+    list?: string;
+    name?: string;
+    author?: string;
+    cover?: string;
+    intro?: string;
+    bookUrl?: string;
+    url?: string;
+    nextUrl?: string;
+  };
+  findRule?: {
+    url?: string;
+    bookList?: string;
+    list?: string;
+    name?: string;
+    author?: string;
+    cover?: string;
+    intro?: string;
+    bookUrl?: string;
+    url?: string;
+  };
+  chapterRule?: {
+    chapterList?: string;
+    list?: string;
+    chapterName?: string;
+    name?: string;
+    chapterUrl?: string;
+    url?: string;
+    nextUrl?: string;
+  };
+  contentRule?: {
+    content?: string;
+    nextUrl?: string;
+    prevUrl?: string;
+    replaceRule?: string;
+  };
+  ruleType?: string;
+  sort?: number;
+  lastUpdateTime?: number;
+  addTime?: number;
+}
 
 /**
  * 书源管理页面
@@ -218,22 +274,22 @@ export struct BookSourcePage {
     try {
       let bookSources: BookSource[] = [];
       const input = this.importUrl.trim();
-      
+
       // 检测输入类型
       if (input.startsWith('http://') || input.startsWith('https://')) {
         // 从URL获取书源
         const networkManager = NetworkManager.getInstance();
         const jsonString = await networkManager.get(input);
         const data = JSON.parse(jsonString);
-        
+
         // 处理书源数据格式
         if (Array.isArray(data)) {
           // 多个书源
-          bookSources = data.map((source) => this.normalizeBookSource(source));
-        } else if (data.bookSource || data.sources) {
+          bookSources = data.map((source: RawBookSource) => this.normalizeBookSource(source));
+        } else if (data.bookSource !== undefined || data.sources !== undefined) {
           // 包含书源数组的对象
-          const sources = data.bookSource || data.sources;
-          bookSources = sources.map((source) => this.normalizeBookSource(source));
+          const sources: RawBookSource[] = data.bookSource !== undefined ? data.bookSource : data.sources;
+          bookSources = sources.map((source: RawBookSource) => this.normalizeBookSource(source));
         } else {
           // 单个书源
           bookSources = [this.normalizeBookSource(data)];
@@ -241,28 +297,28 @@ export struct BookSourcePage {
       } else {
         // 直接解析JSON字符串
         const data = JSON.parse(input);
-        
+
         // 处理书源数据格式
         if (Array.isArray(data)) {
           // 多个书源
-          bookSources = data.map((source) => this.normalizeBookSource(source));
-        } else if (data.bookSource || data.sources) {
+          bookSources = data.map((source: RawBookSource) => this.normalizeBookSource(source));
+        } else if (data.bookSource !== undefined || data.sources !== undefined) {
           // 包含书源数组的对象
-          const sources = data.bookSource || data.sources;
-          bookSources = sources.map((source) => this.normalizeBookSource(source));
+          const sources: RawBookSource[] = data.bookSource !== undefined ? data.bookSource : data.sources;
+          bookSources = sources.map((source: RawBookSource) => this.normalizeBookSource(source));
         } else {
           // 单个书源
           bookSources = [this.normalizeBookSource(data)];
         }
       }
-      
+
       // 导入所有书源
       for (const source of bookSources) {
         await this.bookSourceViewModel.upsertBookSource(source);
       }
-      
+
       await this.loadBookSources();
-      
+
       this.showImportDialog = false;
       this.importUrl = '';
       this.importError = '';
@@ -273,106 +329,239 @@ export struct BookSourcePage {
   }
 
   /**
-   * 书源原始数据类型
-   */
-  private type RawBookSource = {
-    id?: string;
-    name?: string;
-    url?: string;
-    baseUrl?: string;
-    enabled?: boolean;
-    header?: string;
-    headers?: string;
-    searchUrl?: string;
-    search?: string;
-    searchRule?: {
-      bookList?: string;
-      list?: string;
-      name?: string;
-      author?: string;
-      cover?: string;
-      intro?: string;
-      bookUrl?: string;
-      url?: string;
-      nextUrl?: string;
-    };
-    findRule?: {
-      url?: string;
-      bookList?: string;
-      list?: string;
-      name?: string;
-      author?: string;
-      cover?: string;
-      intro?: string;
-      bookUrl?: string;
-      url?: string;
-    };
-    chapterRule?: {
-      chapterList?: string;
-      list?: string;
-      chapterName?: string;
-      name?: string;
-      chapterUrl?: string;
-      url?: string;
-      nextUrl?: string;
-    };
-    contentRule?: {
-      content?: string;
-      nextUrl?: string;
-      prevUrl?: string;
-      replaceRule?: string;
-    };
-    ruleType?: string;
-    sort?: number;
-    lastUpdateTime?: number;
-    addTime?: number;
-  };
-
-  /**
    * 规范化书源数据格式
    */
   private normalizeBookSource(source: RawBookSource): BookSource {
     return {
-      id: source.id || IdGenerator.generateUUID(),
-      name: source.name || '未知书源',
-      url: source.url || source.baseUrl || '',
+      id: source.id !== undefined ? source.id : IdGenerator.generateUUID(),
+      name: source.name !== undefined ? source.name : '未知书源',
+      url: source.url !== undefined ? source.url : (source.baseUrl !== undefined ? source.baseUrl : ''),
       enabled: source.enabled !== false,
-      header: source.header || source.headers || undefined,
-      searchUrl: source.searchUrl || source.search || '',
+      header: source.header !== undefined ? source.header : (source.headers !== undefined ? source.headers : undefined),
+      searchUrl: source.searchUrl !== undefined ? source.searchUrl : (source.search !== undefined ? source.search : ''),
       searchRule: {
-        bookList: source.searchRule?.bookList || source.searchRule?.list || '',
-        name: source.searchRule?.name || '',
-        author: source.searchRule?.author || '',
-        cover: source.searchRule?.cover,
-        intro: source.searchRule?.intro,
-        bookUrl: source.searchRule?.bookUrl || source.searchRule?.url || '',
-        nextUrl: source.searchRule?.nextUrl
+        bookList: this.getSearchRuleBookList(source),
+        name: this.getSearchRuleName(source),
+        author: this.getSearchRuleAuthor(source),
+        cover: this.getSearchRuleCover(source),
+        intro: this.getSearchRuleIntro(source),
+        bookUrl: this.getSearchRuleBookUrl(source),
+        nextUrl: this.getSearchRuleNextUrl(source)
       },
-      findRule: source.findRule ? {
-        url: source.findRule?.url || '',
-        bookList: source.findRule?.bookList || source.findRule?.list || '',
-        name: source.findRule?.name || '',
-        author: source.findRule?.author || '',
-        cover: source.findRule?.cover,
-        intro: source.findRule?.intro,
-        bookUrl: source.findRule?.bookUrl || source.findRule?.url || ''
-      } : undefined,
+      findRule: this.buildFindRule(source),
       chapterRule: {
-        chapterList: source.chapterRule?.chapterList || source.chapterRule?.list || '',
-        chapterName: source.chapterRule?.chapterName || source.chapterRule?.name || '',
-        chapterUrl: source.chapterRule?.chapterUrl || source.chapterRule?.url || '',
-        nextUrl: source.chapterRule?.nextUrl
+        chapterList: this.getChapterRuleChapterList(source),
+        chapterName: this.getChapterRuleChapterName(source),
+        chapterUrl: this.getChapterRuleChapterUrl(source),
+        nextUrl: this.getChapterRuleNextUrl(source)
       },
       contentRule: {
-        content: source.contentRule?.content || '',
-        nextUrl: source.contentRule?.nextUrl,
-        prevUrl: source.contentRule?.prevUrl,
-        replaceRule: source.contentRule?.replaceRule
+        content: this.getContentRuleContent(source),
+        nextUrl: this.getContentRuleNextUrl(source),
+        prevUrl: this.getContentRulePrevUrl(source),
+        replaceRule: this.getContentRuleReplaceRule(source)
       },
-      ruleType: source.ruleType || 'xpath',
-      sort: source.sort || 0,
-      lastUpdateTime: source.lastUpdateTime || Date.now(),
-      addTime: source.addTime || Date.now()
+      ruleType: source.ruleType !== undefined ? source.ruleType : 'xpath',
+      sort: source.sort !== undefined ? source.sort : 0,
+      lastUpdateTime: source.lastUpdateTime !== undefined ? source.lastUpdateTime : Date.now(),
+      addTime: source.addTime !== undefined ? source.addTime : Date.now()
     };
+  }
+
+  private getSearchRuleBookList(source: RawBookSource): string {
+    if (source.searchRule !== undefined) {
+      if (source.searchRule.bookList !== undefined) {
+        return source.searchRule.bookList;
+      }
+      if (source.searchRule.list !== undefined) {
+        return source.searchRule.list;
+      }
+    }
+    return '';
+  }
+
+  private getSearchRuleName(source: RawBookSource): string {
+    if (source.searchRule !== undefined && source.searchRule.name !== undefined) {
+      return source.searchRule.name;
+    }
+    return '';
+  }
+
+  private getSearchRuleAuthor(source: RawBookSource): string {
+    if (source.searchRule !== undefined && source.searchRule.author !== undefined) {
+      return source.searchRule.author;
+    }
+    return '';
+  }
+
+  private getSearchRuleCover(source: RawBookSource): string | undefined {
+    if (source.searchRule !== undefined) {
+      return source.searchRule.cover;
+    }
+    return undefined;
+  }
+
+  private getSearchRuleIntro(source: RawBookSource): string | undefined {
+    if (source.searchRule !== undefined) {
+      return source.searchRule.intro;
+    }
+    return undefined;
+  }
+
+  private getSearchRuleBookUrl(source: RawBookSource): string {
+    if (source.searchRule !== undefined) {
+      if (source.searchRule.bookUrl !== undefined) {
+        return source.searchRule.bookUrl;
+      }
+      if (source.searchRule.url !== undefined) {
+        return source.searchRule.url;
+      }
+    }
+    return '';
+  }
+
+  private getSearchRuleNextUrl(source: RawBookSource): string | undefined {
+    if (source.searchRule !== undefined) {
+      return source.searchRule.nextUrl;
+    }
+    return undefined;
+  }
+
+  private buildFindRule(source: RawBookSource): FindRule | undefined {
+    if (source.findRule === undefined) {
+      return undefined;
+    }
+    return {
+      url: source.findRule.url !== undefined ? source.findRule.url : '',
+      bookList: this.getFindRuleBookList(source),
+      name: this.getFindRuleName(source),
+      author: this.getFindRuleAuthor(source),
+      cover: this.getFindRuleCover(source),
+      intro: this.getFindRuleIntro(source),
+      bookUrl: this.getFindRuleBookUrl(source)
+    };
+  }
+
+  private getFindRuleBookList(source: RawBookSource): string {
+    if (source.findRule !== undefined) {
+      if (source.findRule.bookList !== undefined) {
+        return source.findRule.bookList;
+      }
+      if (source.findRule.list !== undefined) {
+        return source.findRule.list;
+      }
+    }
+    return '';
+  }
+
+  private getFindRuleName(source: RawBookSource): string {
+    if (source.findRule !== undefined && source.findRule.name !== undefined) {
+      return source.findRule.name;
+    }
+    return '';
+  }
+
+  private getFindRuleAuthor(source: RawBookSource): string {
+    if (source.findRule !== undefined && source.findRule.author !== undefined) {
+      return source.findRule.author;
+    }
+    return '';
+  }
+
+  private getFindRuleCover(source: RawBookSource): string | undefined {
+    if (source.findRule !== undefined) {
+      return source.findRule.cover;
+    }
+    return undefined;
+  }
+
+  private getFindRuleIntro(source: RawBookSource): string | undefined {
+    if (source.findRule !== undefined) {
+      return source.findRule.intro;
+    }
+    return undefined;
+  }
+
+  private getFindRuleBookUrl(source: RawBookSource): string {
+    if (source.findRule !== undefined) {
+      if (source.findRule.bookUrl !== undefined) {
+        return source.findRule.bookUrl;
+      }
+      if (source.findRule.url !== undefined) {
+        return source.findRule.url;
+      }
+    }
+    return '';
+  }
+
+  private getChapterRuleChapterList(source: RawBookSource): string {
+    if (source.chapterRule !== undefined) {
+      if (source.chapterRule.chapterList !== undefined) {
+        return source.chapterRule.chapterList;
+      }
+      if (source.chapterRule.list !== undefined) {
+        return source.chapterRule.list;
+      }
+    }
+    return '';
+  }
+
+  private getChapterRuleChapterName(source: RawBookSource): string {
+    if (source.chapterRule !== undefined) {
+      if (source.chapterRule.chapterName !== undefined) {
+        return source.chapterRule.chapterName;
+      }
+      if (source.chapterRule.name !== undefined) {
+        return source.chapterRule.name;
+      }
+    }
+    return '';
+  }
+
+  private getChapterRuleChapterUrl(source: RawBookSource): string {
+    if (source.chapterRule !== undefined) {
+      if (source.chapterRule.chapterUrl !== undefined) {
+        return source.chapterRule.chapterUrl;
+      }
+      if (source.chapterRule.url !== undefined) {
+        return source.chapterRule.url;
+      }
+    }
+    return '';
+  }
+
+  private getChapterRuleNextUrl(source: RawBookSource): string | undefined {
+    if (source.chapterRule !== undefined) {
+      return source.chapterRule.nextUrl;
+    }
+    return undefined;
+  }
+
+  private getContentRuleContent(source: RawBookSource): string {
+    if (source.contentRule !== undefined && source.contentRule.content !== undefined) {
+      return source.contentRule.content;
+    }
+    return '';
+  }
+
+  private getContentRuleNextUrl(source: RawBookSource): string | undefined {
+    if (source.contentRule !== undefined) {
+      return source.contentRule.nextUrl;
+    }
+    return undefined;
+  }
+
+  private getContentRulePrevUrl(source: RawBookSource): string | undefined {
+    if (source.contentRule !== undefined) {
+      return source.contentRule.prevUrl;
+    }
+    return undefined;
+  }
+
+  private getContentRuleReplaceRule(source: RawBookSource): string | undefined {
+    if (source.contentRule !== undefined) {
+      return source.contentRule.replaceRule;
+    }
+    return undefined;
   }
 }

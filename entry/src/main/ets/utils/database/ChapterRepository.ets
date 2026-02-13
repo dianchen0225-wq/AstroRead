@@ -1,6 +1,14 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { Chapter } from '../../models/Book';
 
+// 常量定义
+const DEFAULT_ORDER: number = 0;
+const VIP_FLAG_TRUE: number = 1;
+const VIP_FLAG_FALSE: number = 0;
+
+// 数据库字段名称常量
+const TABLE_CHAPTER: string = 'chapter';
+
 /**
  * 章节数据库操作
  */
@@ -15,7 +23,7 @@ export class ChapterRepository {
    * 根据书籍ID获取章节列表
    */
   async getChaptersByBookId(bookId: string): Promise<Chapter[]> {
-    const predicates = new relationalStore.RdbPredicates('chapter');
+    const predicates = new relationalStore.RdbPredicates(TABLE_CHAPTER);
     predicates.equalTo('book_id', bookId);
     predicates.orderByAsc('order');
 
@@ -30,7 +38,8 @@ export class ChapterRepository {
 
       resultSet.close();
       return chapters;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Failed to query chapters by book id: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
@@ -53,17 +62,18 @@ export class ChapterRepository {
         bookId: resultSet.getString(bookIdIndex) || '',
         title: resultSet.getString(titleIndex) || '',
         url: resultSet.getString(urlIndex) || '',
-        order: resultSet.getLong(orderIndex) || 0,
-        isVip: resultSet.getLong(isVipIndex) === 1
+        order: resultSet.getLong(orderIndex) || DEFAULT_ORDER,
+        isVip: resultSet.getLong(isVipIndex) === VIP_FLAG_TRUE
       };
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Failed to parse chapter: ${error instanceof Error ? error.message : String(error)}`);
       return {
         id: '',
         bookId: '',
         title: '',
         url: '',
-        order: 0,
+        order: DEFAULT_ORDER,
         isVip: false
       };
     }
@@ -73,7 +83,7 @@ export class ChapterRepository {
    * 批量插入或更新章节
    */
   async batchUpsertChapters(chapters: Chapter[]): Promise<void> {
-    if (chapters.length === 0) {
+    if (chapters.length === DEFAULT_ORDER) {
       return;
     }
 
@@ -88,23 +98,24 @@ export class ChapterRepository {
           'title': chapter.title,
           'url': chapter.url,
           'order': chapter.order,
-          'is_vip': chapter.isVip ? 1 : 0
+          'is_vip': chapter.isVip ? VIP_FLAG_TRUE : VIP_FLAG_FALSE
         };
 
         // 先尝试更新
-        const predicates = new relationalStore.RdbPredicates('chapter');
+        const predicates = new relationalStore.RdbPredicates(TABLE_CHAPTER);
         predicates.equalTo('id', chapter.id);
         const updatedRows = await this.rdbStore.update(valueBucket, predicates);
-        
+
         // 如果更新失败则插入
-        if (updatedRows === 0) {
-          await this.rdbStore.insert('chapter', valueBucket);
+        if (updatedRows === DEFAULT_ORDER) {
+          await this.rdbStore.insert(TABLE_CHAPTER, valueBucket);
         }
       }
 
       this.rdbStore.commit();
-    } catch (error) {
-      this.rdbStore.rollback();
+    }
+    catch (error) {
+      await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
       console.error(`Failed to batch upsert chapters: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }

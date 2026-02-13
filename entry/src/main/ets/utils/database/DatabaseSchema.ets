@@ -8,7 +8,7 @@ export class DatabaseSchema {
    * 数据库配置
    */
   static readonly DB_CONFIG: relationalStore.StoreConfig = {
-    name: 'astroread.db',
+    name: 'AstroRead.db',
     securityLevel: relationalStore.SecurityLevel.S1
   };
 
@@ -117,7 +117,7 @@ export class DatabaseSchema {
     try {
       for (const sql of DatabaseSchema.TABLE_SQL) {
         try {
-          rdbStore.executeSql(sql);
+          await rdbStore.executeSql(sql);
         } catch (sqlError) {
           console.error(`Failed to execute SQL: ${sql}, Error: ${sqlError instanceof Error ? sqlError.message : String(sqlError)}`);
           throw (sqlError instanceof Error ? sqlError : new Error(String(sqlError)));

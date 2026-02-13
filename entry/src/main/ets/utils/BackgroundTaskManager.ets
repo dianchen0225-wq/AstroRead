@@ -1,10 +1,7 @@
-import taskpool from '@ohos.taskpool';
 import { databaseManager } from './DatabaseManager';
 import { NetworkManager } from './NetworkManager';
-import { ChapterViewModel } from '../viewmodel/ChapterViewModel';
 import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
-import { Chapter } from '../models/Book';
 
 /**
  * 后台任务类型
@@ -61,21 +58,20 @@ export class BackgroundTaskManager {
     chapterUrls: string[]
   ): Promise<void> {
     const networkManager = NetworkManager.getInstance();
-    const chapterViewModel = new ChapterViewModel();
-    
+
     // 分批处理，避免一次性缓存太多
     const batchSize = 10;
     for (let i = 0; i < chapterUrls.length; i += batchSize) {
       const batch = chapterUrls.slice(i, i + batchSize);
-      
+
       await Promise.all(batch.map(async (url: string) => {
         try {
           // 获取章节内容
-          const content = await networkManager.getChapterContent(bookSource, url);
-          
+          await networkManager.getChapterContent(bookSource, url);
+
           // TODO: 保存到本地缓存文件
           // 这里可以实现本地文件缓存逻辑
-          
+
         } catch (error) {
           console.error(`Failed to cache chapter ${url}:`, error);
         }
@@ -93,11 +89,11 @@ export class BackgroundTaskManager {
    */
   async updateBookSources(): Promise<void> {
     try {
-      const sources = await databaseManager.getAllEnabledBookSources();
-      
+      await databaseManager.getAllEnabledBookSources();
+
       // 这里可以实现书源自动更新逻辑
       // 例如：从远程服务器获取最新书源列表
-      
+
     } catch (error) {
       console.error('Failed to update book sources:', error);
     }

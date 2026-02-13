@@ -27,6 +27,214 @@
     {
       "name": "permission_write_storage_reason",
       "value": "需要保存媒体文件"
+    },
+    {
+      "name": "hub_light_mode",
+      "value": "浅色模式"
+    },
+    {
+      "name": "hub_feature_entry",
+      "value": "核心功能入口"
+    },
+    {
+      "name": "hub_core_display",
+      "value": "核心展示"
+    },
+    {
+      "name": "hub_bookshelf_title",
+      "value": "我的书架"
+    },
+    {
+      "name": "hub_bookshelf_desc",
+      "value": "管理已添加书籍"
+    },
+    {
+      "name": "hub_bookshelf_button",
+      "value": "进入书架"
+    },
+    {
+      "name": "hub_search_title",
+      "value": "搜索书籍"
+    },
+    {
+      "name": "hub_search_desc",
+      "value": "查找海量图书"
+    },
+    {
+      "name": "hub_search_button",
+      "value": "开始搜索"
+    },
+    {
+      "name": "hub_booksource_title",
+      "value": "书源管理"
+    },
+    {
+      "name": "hub_booksource_desc",
+      "value": "导入书源获取内容"
+    },
+    {
+      "name": "hub_booksource_button",
+      "value": "管理书源"
+    },
+    {
+      "name": "hub_settings_title",
+      "value": "设置"
+    },
+    {
+      "name": "hub_settings_desc",
+      "value": "个性化应用配置"
+    },
+    {
+      "name": "hub_settings_button",
+      "value": "打开设置"
+    },
+    {
+      "name": "light_mode",
+      "value": "浅色模式"
+    },
+    {
+      "name": "dark_mode",
+      "value": "深色模式"
+    },
+    {
+      "name": "core_entrance",
+      "value": "核心功能入口"
+    },
+    {
+      "name": "core_display",
+      "value": "核心展示"
+    },
+    {
+      "name": "my_bookshelf",
+      "value": "我的书架"
+    },
+    {
+      "name": "my_bookshelf_desc",
+      "value": "管理已添加书籍"
+    },
+    {
+      "name": "search_books",
+      "value": "搜索书籍"
+    },
+    {
+      "name": "search_books_desc",
+      "value": "查找海量图书"
+    },
+    {
+      "name": "source_management",
+      "value": "书源管理"
+    },
+    {
+      "name": "source_management_desc",
+      "value": "导入书源获取内容"
+    },
+    {
+      "name": "settings",
+      "value": "设置"
+    },
+    {
+      "name": "settings_desc",
+      "value": "个性化应用配置"
+    },
+    {
+      "name": "home",
+      "value": "首页"
+    },
+    {
+      "name": "search",
+      "value": "搜索"
+    },
+    {
+      "name": "bookshelf",
+      "value": "书架"
+    },
+    {
+      "name": "source",
+      "value": "书源"
+    },
+    {
+      "name": "more",
+      "value": "更多"
+    },
+    {
+      "name": "search_placeholder",
+      "value": "输入书名或作者"
+    },
+    {
+      "name": "search_button",
+      "value": "搜索"
+    },
+    {
+      "name": "search_history",
+      "value": "搜索历史"
+    },
+    {
+      "name": "clear_history",
+      "value": "清除"
+    },
+    {
+      "name": "hot_search",
+      "value": "热门搜索"
+    },
+    {
+      "name": "recent_read",
+      "value": "最近阅读"
+    },
+    {
+      "name": "favorites",
+      "value": "已收藏"
+    },
+    {
+      "name": "add_source",
+      "value": "添加书源"
+    },
+    {
+      "name": "update_source",
+      "value": "更新书源"
+    },
+    {
+      "name": "normal_status",
+      "value": "正常"
+    },
+    {
+      "name": "reading_settings",
+      "value": "阅读设置"
+    },
+    {
+      "name": "reading_mode",
+      "value": "阅读模式"
+    },
+    {
+      "name": "day_mode",
+      "value": "白天模式"
+    },
+    {
+      "name": "night_mode",
+      "value": "夜间模式"
+    },
+    {
+      "name": "follow_system",
+      "value": "跟随系统"
+    },
+    {
+      "name": "font_size",
+      "value": "字体大小"
+    },
+    {
+      "name": "app_settings",
+      "value": "应用设置"
+    },
+    {
+      "name": "auto_update",
+      "value": "自动更新"
+    },
+    {
+      "name": "clear_cache",
+      "value": "缓存清理"
+    },
+    {
+      "name": "about_us",
+      "value": "关于我们"
     }
   ]
 }

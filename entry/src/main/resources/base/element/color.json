@@ -1,8 +1,72 @@
 {
   "color": [
     {
-      "name": "start_window_background",
-      "value": "#FFFFFF"
+      "name": "app_background",
+      "value": "#121212"
+    },
+    {
+      "name": "page_background",
+      "value": "#0a0a0a"
+    },
+    {
+      "name": "primary_color",
+      "value": "#d4b483"
+    },
+    {
+      "name": "primary_color_hover",
+      "value": "#e0c595"
+    },
+    {
+      "name": "text_primary",
+      "value": "#e0d8c9"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#8a7f6e"
+    },
+    {
+      "name": "text_tertiary",
+      "value": "#b8ad9a"
+    },
+    {
+      "name": "card_background",
+      "value": "#1e1e1e"
+    },
+    {
+      "name": "card_background_hover",
+      "value": "#252525"
+    },
+    {
+      "name": "border_color",
+      "value": "#2a2a2a"
+    },
+    {
+      "name": "divider_color",
+      "value": "#222222"
+    },
+    {
+      "name": "icon_background",
+      "value": "#2a2a2a"
+    },
+    {
+      "name": "success_color",
+      "value": "#4caf50"
+    },
+    {
+      "name": "navigation_background",
+      "value": "#0f0f0f"
+    },
+    {
+      "name": "status_bar_background",
+      "value": "#0a0a0a"
+    },
+    {
+      "name": "button_press_background",
+      "value": "#2a2a2a"
+    },
+    {
+      "name": "progress_background",
+      "value": "#2a2a2a"
     }
   ]
 }

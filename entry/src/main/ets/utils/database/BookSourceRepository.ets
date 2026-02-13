@@ -1,6 +1,16 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../../models/BookSource';
 
+// 数据库常量定义
+const DB_ENABLED_TRUE: number = 1;
+const DB_ENABLED_FALSE: number = 0;
+const DB_DEFAULT_SORT: number = 0;
+const DB_DEFAULT_TIME: number = 0;
+const DB_UPDATED_ROWS_ZERO: number = 0;
+
+// 数据库表字段名常量（必须与数据库表结构保持一致，使用下划线命名）
+const DB_COLUMN_ID: string = 'id';
+
 /**
  * 书源数据库操作
  */
@@ -16,7 +26,7 @@ export class BookSourceRepository {
    */
   async getAllEnabledBookSources(): Promise<BookSource[]> {
     const predicates = new relationalStore.RdbPredicates('book_source');
-    predicates.equalTo('enabled', 1);
+    predicates.equalTo('enabled', DB_ENABLED_TRUE);
     predicates.orderByAsc('sort');
 
     try {
@@ -30,7 +40,8 @@ export class BookSourceRepository {
 
       resultSet.close();
       return bookSources;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Failed to query enabled book sources: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
@@ -54,7 +65,8 @@ export class BookSourceRepository {
 
       resultSet.close();
       return bookSources;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Failed to query all book sources: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
@@ -68,7 +80,7 @@ export class BookSourceRepository {
       'id': bookSource.id,
       'name': bookSource.name,
       'url': bookSource.url,
-      'enabled': bookSource.enabled ? 1 : 0,
+      'enabled': bookSource.enabled ? DB_ENABLED_TRUE : DB_ENABLED_FALSE,
       'header': bookSource.header || null,
       'search_url': bookSource.searchUrl,
       'search_rule': JSON.stringify(bookSource.searchRule),
@@ -76,7 +88,7 @@ export class BookSourceRepository {
       'chapter_rule': JSON.stringify(bookSource.chapterRule),
       'content_rule': JSON.stringify(bookSource.contentRule),
       'rule_type': bookSource.ruleType,
-      'sort': bookSource.sort || 0,
+      'sort': bookSource.sort || DB_DEFAULT_SORT,
       'last_update_time': Date.now(),
       'add_time': bookSource.addTime || Date.now()
     };
@@ -84,14 +96,15 @@ export class BookSourceRepository {
     try {
       // 先尝试更新
       const predicates = new relationalStore.RdbPredicates('book_source');
-      predicates.equalTo('id', bookSource.id);
+      predicates.equalTo(DB_COLUMN_ID, bookSource.id);
       const updatedRows = await this.rdbStore.update(valueBucket, predicates);
-      
+
       // 如果更新失败则插入
-      if (updatedRows === 0) {
+      if (updatedRows === DB_UPDATED_ROWS_ZERO) {
         await this.rdbStore.insert('book_source', valueBucket);
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Failed to upsert book source: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -113,8 +126,9 @@ export class BookSourceRepository {
       }
 
       this.rdbStore.commit();
-    } catch (error) {
-      this.rdbStore.rollback();
+    }
+    catch (error) {
+      await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
       console.error(`Failed to batch upsert book sources: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
@@ -126,9 +140,10 @@ export class BookSourceRepository {
   async deleteBookSource(sourceId: string): Promise<void> {
     try {
       const predicates = new relationalStore.RdbPredicates('book_source');
-      predicates.equalTo('id', sourceId);
+      predicates.equalTo(DB_COLUMN_ID, sourceId);
       await this.rdbStore.delete(predicates);
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Failed to delete book source: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -155,42 +170,42 @@ export class BookSourceRepository {
 
       const searchRuleJson = this.parseJson(resultSet.getString(searchRuleIndex));
       const searchRule: SearchRule = {
-        bookList: searchRuleJson['bookList'] as string || '',
-        name: searchRuleJson['name'] as string || '',
-        author: searchRuleJson['author'] as string || '',
-        cover: searchRuleJson['cover'] as string | undefined,
-        intro: searchRuleJson['intro'] as string | undefined,
-        bookUrl: searchRuleJson['bookUrl'] as string || '',
-        nextUrl: searchRuleJson['nextUrl'] as string | undefined
+        bookList: searchRuleJson.bookList as string || '',
+        name: searchRuleJson.name as string || '',
+        author: searchRuleJson.author as string || '',
+        cover: searchRuleJson.cover as string | undefined,
+        intro: searchRuleJson.intro as string | undefined,
+        bookUrl: searchRuleJson.bookUrl as string || '',
+        nextUrl: searchRuleJson.nextUrl as string | undefined
       };
 
       const chapterRuleJson = this.parseJson(resultSet.getString(chapterRuleIndex));
       const chapterRule: ChapterRule = {
-        chapterList: chapterRuleJson['chapterList'] as string || '',
-        chapterName: chapterRuleJson['chapterName'] as string || '',
-        chapterUrl: chapterRuleJson['chapterUrl'] as string || '',
-        nextUrl: chapterRuleJson['nextUrl'] as string | undefined
+        chapterList: chapterRuleJson.chapterList as string || '',
+        chapterName: chapterRuleJson.chapterName as string || '',
+        chapterUrl: chapterRuleJson.chapterUrl as string || '',
+        nextUrl: chapterRuleJson.nextUrl as string | undefined
       };
 
       const contentRuleJson = this.parseJson(resultSet.getString(contentRuleIndex));
       const contentRule: ContentRule = {
-        content: contentRuleJson['content'] as string || '',
-        nextUrl: contentRuleJson['nextUrl'] as string | undefined,
-        prevUrl: contentRuleJson['prevUrl'] as string | undefined,
-        replaceRule: contentRuleJson['replaceRule'] as string | undefined
+        content: contentRuleJson.content as string || '',
+        nextUrl: contentRuleJson.nextUrl as string | undefined,
+        prevUrl: contentRuleJson.prevUrl as string | undefined,
+        replaceRule: contentRuleJson.replaceRule as string | undefined
       };
 
       let findRule: FindRule | undefined = undefined;
       if (!resultSet.isColumnNull(findRuleIndex)) {
         const findRuleJson = this.parseJson(resultSet.getString(findRuleIndex));
         findRule = {
-          url: findRuleJson['url'] as string || '',
-          bookList: findRuleJson['bookList'] as string || '',
-          name: findRuleJson['name'] as string || '',
-          author: findRuleJson['author'] as string || '',
-          cover: findRuleJson['cover'] as string | undefined,
-          intro: findRuleJson['intro'] as string | undefined,
-          bookUrl: findRuleJson['bookUrl'] as string || ''
+          url: findRuleJson.url as string || '',
+          bookList: findRuleJson.bookList as string || '',
+          name: findRuleJson.name as string || '',
+          author: findRuleJson.author as string || '',
+          cover: findRuleJson.cover as string | undefined,
+          intro: findRuleJson.intro as string | undefined,
+          bookUrl: findRuleJson.bookUrl as string || ''
         };
       }
 
@@ -198,7 +213,7 @@ export class BookSourceRepository {
         id: resultSet.getString(idIndex) || '',
         name: resultSet.getString(nameIndex) || '',
         url: resultSet.getString(urlIndex) || '',
-        enabled: resultSet.getLong(enabledIndex) === 1,
+        enabled: resultSet.getLong(enabledIndex) === DB_ENABLED_TRUE,
         header: resultSet.isColumnNull(headerIndex)
           ? undefined
           : resultSet.getString(headerIndex) || '',
@@ -208,11 +223,12 @@ export class BookSourceRepository {
         chapterRule: chapterRule,
         contentRule: contentRule,
         ruleType: (resultSet.getString(ruleTypeIndex) || 'xpath') as 'xpath' | 'jsonpath' | 'regex',
-        sort: resultSet.getLong(sortIndex) || 0,
-        lastUpdateTime: resultSet.getLong(lastUpdateTimeIndex) || 0,
-        addTime: resultSet.getLong(addTimeIndex) || 0
+        sort: resultSet.getLong(sortIndex) || DB_DEFAULT_SORT,
+        lastUpdateTime: resultSet.getLong(lastUpdateTimeIndex) || DB_DEFAULT_TIME,
+        addTime: resultSet.getLong(addTimeIndex) || DB_DEFAULT_TIME
       };
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Failed to parse book source: ${error instanceof Error ? error.message : String(error)}`);
       return {
         id: '',
@@ -242,7 +258,8 @@ export class BookSourceRepository {
     }
     try {
       return JSON.parse(jsonString) as Record<string, Object>;
-    } catch (error) {
+    }
+    catch (error) {
       console.warn(`Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}`);
       return {} as Record<string, Object>;
     }
