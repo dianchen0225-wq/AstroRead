@@ -1,148 +1,236 @@
-@ComponentV2
-export struct HomePage {
-  @Param isLightMode: boolean = true;
-  @Param onModeChange: () => void = () => {};
+  import { themeManager } from '../common/ThemeManager';
+  import { DesignSystem } from '../common/DesignSystem';
 
-  @Local buttonScaleMap: Map<string, number> = new Map<string, number>();
+  @ComponentV2
+  export struct HomePage {
+    @Local isLightMode: boolean = themeManager.isLightTheme();
+    @Local buttonPressedMap: Map<string, boolean> = new Map<string, boolean>();
+    @Param safeAreaTop: number = 0;
 
-  build() {
-    Column() {
-      // 顶部标题栏
+    aboutToAppear(): void {
+      this.isLightMode = themeManager.isLightTheme();
+      themeManager.addListener((isDark: boolean) => {
+        this.isLightMode = !isDark;
+      });
+    }
+
+    build() {
+      Column() {
+        this.buildHeader()
+
+        this.buildAppTitle()
+
+        this.buildCoreSection()
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+    }
+
+    @Builder
+    buildHeader() {
       Row() {
-        Text(this.isLightMode ? $r('app.string.dark_mode') : $r('app.string.light_mode'))
-          .fontSize(15)
-          .fontColor(this.isLightMode ? '#8a6d3b' : '#d4b483')
-          .fontWeight(500)
-          .onClick(() => {
-            this.onModeChange();
-          })
+        this.buildThemeToggle()
 
         Blank()
 
-        Text($r('app.string.core_entrance'))
-          .fontSize(14)
-          .fontColor(this.isLightMode ? '#666' : '#8a7f6e')
+        this.buildHeaderRight()
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 20, bottom: 10 })
+      .padding({
+        left: 16,
+        right: 16,
+        top: this.safeAreaTop + 12,
+        bottom: 8
+      })
+    }
 
-      // 应用标题
-      Text($r('app.string.app_name'))
-        .width('100%')
-        .textAlign(TextAlign.Center)
-        .padding({ bottom: 20 })
-        .fontSize(28)
-        .fontColor(this.isLightMode ? '#8a6d3b' : '#d4b483')
-        .fontWeight(700)
-        .letterSpacing(1)
+    @Builder
+    buildThemeToggle() {
+      Row() {
+        Text('⚙️')
+          .fontSize(18)
+          .margin({ right: 8 })
 
-      // 核心功能区
+        Text(this.isLightMode ? $r('app.string.dark_mode') : $r('app.string.light_mode'))
+          .fontSize(14)
+          .fontColor('#333333')
+          .fontWeight(500)
+
+        this.buildToggleSwitch()
+      }
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .borderRadius(8)
+      .backgroundColor('#F0EBE0')
+      .border({ width: 1, color: '#DDDDDD' })
+      .onClick(() => {
+        themeManager.toggleTheme();
+      })
+    }
+
+    @Builder
+    buildToggleSwitch() {
+      Row() {
+        Row()
+          .width(6)
+          .height(6)
+          .borderRadius(3)
+          .backgroundColor(this.isLightMode ? '#8A6D3B' : '#999999')
+
+        Row()
+          .width(6)
+          .height(6)
+          .borderRadius(3)
+          .backgroundColor(!this.isLightMode ? '#8A6D3B' : '#999999')
+      }
+      .width(24)
+      .height(12)
+      .borderRadius(6)
+      .backgroundColor('#E0D8C9')
+      .justifyContent(FlexAlign.SpaceEvenly)
+      .margin({ left: 8 })
+    }
+
+    @Builder
+    buildHeaderRight() {
+      Row() {
+        Text($r('app.string.core_entrance'))
+          .fontSize(12)
+          .fontColor('#666666')
+          .fontWeight(400)
+      }
+      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+      .borderRadius(8)
+      .backgroundColor('#F0EBE0')
+      .border({ width: 1, color: '#DDDDDD' })
+    }
+
+    @Builder
+    buildAppTitle() {
+      Column() {
+        Text($r('app.string.app_name'))
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .fontSize(26)
+          .fontColor('#8A6D3B')
+          .fontWeight(700)
+          .letterSpacing(3)
+      }
+      .width('100%')
+      .padding({ top: 12, bottom: 20 })
+    }
+
+    @Builder
+    buildCoreSection() {
       Column() {
         Text($r('app.string.core_display'))
           .width('100%')
-          .fontSize(18)
-          .fontColor(this.isLightMode ? '#666' : '#b8ad9a')
-          .fontWeight(500)
-          .margin({ bottom: 20 })
+          .fontSize(16)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(600)
+          .margin({ bottom: 16 })
 
-        // 功能按钮网格
-        Grid() {
-          GridItem() {
-            this.buildCoreButton($r('app.string.my_bookshelf'), $r('app.string.my_bookshelf_desc'),
-              $r('app.media.ic_book'), 1)
-          }
-
-          GridItem() {
-            this.buildCoreButton($r('app.string.search_books'), $r('app.string.search_books_desc'),
-              $r('app.media.ic_search'), 2)
-          }
-
-          GridItem() {
-            this.buildCoreButton($r('app.string.source_management'), $r('app.string.source_management_desc'),
-              $r('app.media.ic_source'), 3)
-          }
-
-          GridItem() {
-            this.buildCoreButton($r('app.string.settings'), $r('app.string.settings_desc'),
-              $r('app.media.ic_settings'), 4)
-          }
-        }
-        .columnsTemplate('1fr 1fr')
-        .rowsGap(15)
-        .columnsGap(15)
+        this.buildButtonGrid()
       }
       .width('100%')
-      .padding({ left: 20, right: 20 })
-
-      Blank()
+      .margin(10)
+      .padding({ left: 15, right: 15 })
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(this.isLightMode ? '#f5f1e8' : 'transparent')
-  }
 
-  @Builder
-  buildCoreButton(title: ResourceStr, desc: ResourceStr, icon: Resource, pageIndex: number) {
-    Row() {
-      // 图标
+    @Builder
+    buildButtonGrid() {
+      Column({ space: 8 }) {
+        this.buildCoreButton(
+          $r('app.string.my_bookshelf'),
+          $r('app.string.my_bookshelf_desc'),
+          '📖',
+          '1'
+        )
+
+        this.buildCoreButton(
+          $r('app.string.search_books'),
+          $r('app.string.search_books_desc'),
+          '🔍',
+          '2'
+        )
+
+        this.buildCoreButton(
+          $r('app.string.source_management'),
+          $r('app.string.source_management_desc'),
+          '📚',
+          '3'
+        )
+
+        this.buildCoreButton(
+          $r('app.string.settings'),
+          $r('app.string.settings_desc'),
+          '⚙️',
+          '4'
+        )
+      }
+      .width('100%')
+    }
+
+    @Builder
+    buildCoreButton(title: ResourceStr, desc: ResourceStr, icon: string, key: string) {
       Row() {
-        Image(icon)
-          .width(20)
-          .height(20)
-          .fillColor(this.isLightMode ? '#8a6d3b' : '#d4b483')
+        Row() {
+          Text(icon)
+            .fontSize(18)
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(20)
+        .backgroundColor('#E0D8C9')
+        .justifyContent(FlexAlign.Center)
+        .margin({ right: 15 })
+
+        Column() {
+          Text(title)
+            .fontSize(16)
+            .fontColor('#333333')
+            .fontWeight(500)
+            .lineHeight(20)
+
+          Text(desc)
+            .fontSize(12)
+            .fontColor('#666666')
+            .lineHeight(16)
+            .margin({ top: 4 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Text('›')
+          .fontSize(24)
+          .fontColor('#999999')
+          .margin({ left: 10 })
       }
-      .width(40)
-      .height(40)
-      .backgroundColor(this.isLightMode ? '#e0d8c9' : '#2a2a2a')
+      .width('100%')
+      .height(64)
+      .padding({ top: 12, bottom: 12, left: 15, right: 15 })
       .borderRadius(8)
-      .justifyContent(FlexAlign.Center)
-      .margin({ right: 15 })
-
-      // 文字内容
-      Column() {
-        Text(title)
-          .fontSize(16)
-          .fontColor(this.isLightMode ? '#333' : '#e0d8c9')
-          .fontWeight(600)
-          .margin({ bottom: 5 })
-
-        Text(desc)
-          .fontSize(12)
-          .fontColor(this.isLightMode ? '#666' : '#8a7f6e')
-          .lineHeight(1.4)
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-
-      // 箭头
-      Image($r('app.media.ic_arrow_right'))
-        .width(14)
-        .height(14)
-        .fillColor(this.isLightMode ? '#666' : '#8a7f6e')
+      .backgroundColor(this.buttonPressedMap.get(key) ? '#E6E1D6' : '#F0EBE0')
+      .border({
+        width: 1,
+        color: '#DDDDDD'
+      })
+      .gesture(
+        LongPressGesture({ repeat: false })
+          .onAction(() => {
+            this.buttonPressedMap.set(key, true);
+          })
+      )
+      .onClick(() => {
+        this.buttonPressedMap.set(key, true);
+        setTimeout(() => {
+          this.buttonPressedMap.set(key, false);
+        }, 150);
+      })
+      .onTouch((event: TouchEvent) => {
+        if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+          this.buttonPressedMap.set(key, false);
+        }
+      })
     }
-    .width('100%')
-    .padding({ top: 18, bottom: 18, left: 15, right: 15 })
-    .borderRadius(12)
-    .backgroundColor(this.isLightMode ? '#f0ebe0' : '#1e1e1e')
-    .border({
-      width: 1,
-      color: this.isLightMode ? '#ddd' : '#2a2a2a'
-    })
-    .scale({
-      x: this.buttonScaleMap.get(pageIndex.toString()) ?? 1,
-      y: this.buttonScaleMap.get(pageIndex.toString()) ?? 1
-    })
-    .onClick(() => {
-      this.handleButtonClick(pageIndex.toString());
-    })
   }
-
-  handleButtonClick(key: string): void {
-    const scale = 0.98;
-    this.buttonScaleMap.set(key, scale);
-    
-    setTimeout(() => {
-      this.buttonScaleMap.set(key, 1);
-    }, 150);
-  }
-}

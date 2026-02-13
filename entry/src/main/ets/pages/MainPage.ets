@@ -1,148 +1,181 @@
-import { HomePage } from './HomePage';
-import { SearchPage } from './SearchPage';
-import { BookshelfPage } from './BookshelfPage';
-import { SourcePage } from './SourcePage';
-import { SettingsPage } from './SettingsPage';
+  import { HomePage } from './HomePage';
+  import { SearchPage } from './SearchPage';
+  import { BookshelfPage } from './BookshelfPage';
+  import { SourcePage } from './SourcePage';
+  import { SettingsPage } from './SettingsPage';
+  import { themeManager } from '../common/ThemeManager';
+  import { DesignSystem } from '../common/DesignSystem';
+  import window from '@ohos.window';
 
-enum PageIndex {
-  Home = 0,
-  Search = 1,
-  Bookshelf = 2,
-  Source = 3,
-  Settings = 4,
-  More = 5
-}
-
-@Entry
-@ComponentV2
-struct MainPage {
-  @Local currentPageIndex: number = PageIndex.Home;
-  @Local isLightMode: boolean = true;
-
-  handleModeChange(): void {
-    this.isLightMode = !this.isLightMode;
+  enum PageIndex {
+    Home = 0,
+    Search = 1,
+    Bookshelf = 2,
+    Source = 3,
+    Settings = 4,
+    More = 5
   }
 
-  build() {
-    Column() {
-      Tabs({ barPosition: BarPosition.End, index: this.currentPageIndex }) {
-        TabContent() {
-          HomePage({ isLightMode: this.isLightMode, onModeChange: this.handleModeChange })
-        }
-        .tabBar(this.buildTabBar(PageIndex.Home))
+  @Entry
+  @ComponentV2
+  struct MainPage {
+    @Local currentPageIndex: number = PageIndex.Home;
+    @Local isLightMode: boolean = themeManager.isLightTheme();
+    @Local safeAreaTop: number = 0;
+    @Local safeAreaBottom: number = 0;
 
-        TabContent() {
-          SearchPage({ isLightMode: this.isLightMode })
-        }
-        .tabBar(this.buildTabBar(PageIndex.Search))
+    aboutToAppear(): void {
+      themeManager.addListener((isDark: boolean) => {
+        this.isLightMode = !isDark;
+      });
+      this.isLightMode = themeManager.isLightTheme();
+      this.setWindowImmersive();
+    }
 
-        TabContent() {
-          BookshelfPage({ isLightMode: this.isLightMode })
-        }
-        .tabBar(this.buildTabBar(PageIndex.Bookshelf))
+    async setWindowImmersive(): Promise<void> {
+      try {
+        const windowStage = AppStorage.get('windowStage') as window.WindowStage;
+        if (windowStage) {
+          const mainWindow = await windowStage.getMainWindow();
+          const avoidArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+          this.safeAreaTop = avoidArea.topRect.height;
+          this.safeAreaBottom = avoidArea.bottomRect.height;
 
-        TabContent() {
-          SourcePage({ isLightMode: this.isLightMode })
+          await mainWindow.setWindowSystemBarProperties({
+            statusBarColor: this.isLightMode ? '#F5F1E8' : '#1a1a1a',
+            statusBarContentColor: this.isLightMode ? '#333333' : '#e0d8c9',
+            navigationBarColor: this.isLightMode ? '#F5F1E8' : '#1a1a1a',
+            navigationBarContentColor: this.isLightMode ? '#333333' : '#e0d8c9'
+          });
         }
-        .tabBar(this.buildTabBar(PageIndex.Source))
-
-        TabContent() {
-          SettingsPage({ isLightMode: this.isLightMode })
-        }
-        .tabBar(this.buildTabBar(PageIndex.Settings))
-
-        TabContent() {
-          this.buildMorePage()
-        }
-        .tabBar(this.buildTabBar(PageIndex.More))
+      } catch (error) {
+        console.error('setWindowImmersive error:', error);
       }
-      .barMode(BarMode.Fixed)
-      .barBackgroundColor(this.isLightMode ? '#f0ebe0' : '#0f0f0f')
-      .onChange((index: number) => {
-        this.currentPageIndex = index;
-      })
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(this.isLightMode ? '#f5f1e8' : '#0a0a0a')
-  }
 
-  @Builder
-  buildTabBar(index: PageIndex) {
-    Column() {
-      Image(this.getTabIcon(index))
-        .width(18)
-        .height(18)
-        .fillColor(this.currentPageIndex === index ?
-          (this.isLightMode ? '#8a6d3b' : '#d4b483') :
-          (this.isLightMode ? '#666' : '#8a7f6e'))
-        .margin({ bottom: 5 })
+    build() {
+      Column() {
+        Tabs({ barPosition: BarPosition.End, index: this.currentPageIndex }) {
+          TabContent() {
+            HomePage({ safeAreaTop: this.safeAreaTop })
+          }
+          .tabBar(this.buildTabBar(PageIndex.Home))
 
-      Text(this.getTabText(index))
-        .fontSize(11)
-        .fontColor(this.currentPageIndex === index ?
-          (this.isLightMode ? '#8a6d3b' : '#d4b483') :
-          (this.isLightMode ? '#666' : '#8a7f6e'))
+          TabContent() {
+            SearchPage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Search))
+
+          TabContent() {
+            BookshelfPage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Bookshelf))
+
+          TabContent() {
+            SourcePage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Source))
+
+          TabContent() {
+            SettingsPage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Settings))
+
+          TabContent() {
+            this.buildMorePage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.More))
+        }
+        .barMode(BarMode.Fixed)
+        .barHeight(56 + this.safeAreaBottom)
+        .barBackgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+        .onChange((index: number) => {
+          this.currentPageIndex = index;
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     }
-    .padding({ top: 8, bottom: 8 })
-    .width('100%')
-  }
 
-  @Builder
-  buildMorePage() {
-    Column() {
-      Text('更多功能')
-        .fontSize(24)
-        .fontColor(this.isLightMode ? '#333' : '#e0d8c9')
-        .fontWeight(600)
-        .margin({ top: 100 })
+    @Builder
+    buildTabBar(index: PageIndex) {
+      Column() {
+        Text(this.getTabIconText(index))
+          .fontSize(20)
+          .fontColor(this.currentPageIndex === index ? DesignSystem.getPrimaryColor(this.isLightMode) : DesignSystem.getSecondaryTextColor(this.isLightMode))
+          .scale({ x: this.currentPageIndex === index ? 1.1 : 1, y: this.currentPageIndex === index ? 1.1 : 1 })
+          .animation({ duration: 200, curve: Curve.EaseOut })
 
-      Text('敬请期待...')
-        .fontSize(14)
-        .fontColor(this.isLightMode ? '#666' : '#8a7f6e')
-        .margin({ top: 16 })
+        Text(this.getTabText(index))
+          .fontSize(12)
+          .lineHeight(16)
+          .fontColor(this.currentPageIndex === index ? DesignSystem.getPrimaryColor(this.isLightMode) : DesignSystem.getSecondaryTextColor(this.isLightMode))
+          .fontWeight(this.currentPageIndex === index ? 500 : 400)
+          .margin({ top: 4 })
+      }
+      .height(48)
+      .justifyContent(FlexAlign.Center)
+      .width('100%')
+      .padding({ bottom: this.safeAreaBottom })
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(this.isLightMode ? '#f5f1e8' : 'transparent')
-    .justifyContent(FlexAlign.Start)
-  }
 
-  getTabIcon(index: PageIndex): Resource {
-    switch (index) {
-      case PageIndex.Home:
-        return $r('app.media.ic_home');
-      case PageIndex.Search:
-        return $r('app.media.ic_search');
-      case PageIndex.Bookshelf:
-        return $r('app.media.ic_bookshelf');
-      case PageIndex.Source:
-        return $r('app.media.ic_book_source');
-      case PageIndex.Settings:
-        return $r('app.media.ic_settings');
-      case PageIndex.More:
-        return $r('app.media.ic_more_line');
-      default:
-        return $r('app.media.ic_home');
+    @Builder
+    buildMorePage() {
+      Column() {
+        Text('更多功能')
+          .fontSize(24)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(600)
+          .margin({ top: 100 })
+
+        Text('敬请期待...')
+          .fontSize(14)
+          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+          .margin({ top: 16 })
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+      .justifyContent(FlexAlign.Start)
+    }
+
+    getTabIconText(index: PageIndex): string {
+      switch (index) {
+        case PageIndex.Home:
+          return '🏠';
+        case PageIndex.Search:
+          return '🔍';
+        case PageIndex.Bookshelf:
+          return '📚';
+        case PageIndex.Source:
+          return '📖';
+        case PageIndex.Settings:
+          return '⚙️';
+        case PageIndex.More:
+          return '⋯';
+        default:
+          return '🏠';
+      }
+    }
+
+    getTabText(index: PageIndex): string {
+      switch (index) {
+        case PageIndex.Home:
+          return '首页';
+        case PageIndex.Search:
+          return '搜索';
+        case PageIndex.Bookshelf:
+          return '书架';
+        case PageIndex.Source:
+          return '书源';
+        case PageIndex.Settings:
+          return '设置';
+        case PageIndex.More:
+          return '更多';
+        default:
+          return '首页';
+      }
     }
   }
-
-  getTabText(index: PageIndex): string {
-    switch (index) {
-      case PageIndex.Home:
-        return '首页';
-      case PageIndex.Search:
-        return '搜索';
-      case PageIndex.Bookshelf:
-        return '书架';
-      case PageIndex.Source:
-        return '书源';
-      case PageIndex.Settings:
-        return '设置';
-      case PageIndex.More:
-        return '更多';
-      default:
-        return '首页';
-    }
-  }
-}
