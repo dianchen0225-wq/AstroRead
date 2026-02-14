@@ -7,11 +7,9 @@ import { ReadConfig } from '../models/ReadConfig';
 import { BookCategory } from '../models/BookCategory';
 import { Chapter } from '../models/Book';
 import { Bookmark } from '../models/Bookmark';
+import { Logger } from './Logger';
 import common from '@ohos.app.ability.common';
 
-/**
- * 备份数据模型
- */
 export interface BackupData {
   version: string;
   timestamp: number;
@@ -23,10 +21,8 @@ export interface BackupData {
   readConfig: ReadConfig | null;
 }
 
-/**
- * 备份管理器
- */
 export class BackupManager {
+  private static readonly TAG = 'BackupManager';
   private static instance: BackupManager | null = null;
   private databaseManager: DatabaseManager | null = null;
 
@@ -68,14 +64,13 @@ export class BackupManager {
         version: '1.0.0',
         timestamp: Date.now(),
         books: await databaseManager.getAllBooks(),
-        bookSources: [], // 暂时为空，后续需要根据实际的DatabaseManager实现调整
-        categories: [], // 暂时为空，后续需要根据实际的DatabaseManager实现调整
+        bookSources: await databaseManager.getAllBookSources(),
+        categories: await databaseManager.getAllBookCategories(),
         chapters: [],
         bookmarks: [],
         readConfig: await databaseManager.getOrCreateReadConfig()
       };
 
-      // 获取所有书籍的章节和书签
       for (const book of backupData.books) {
         const chapters = await databaseManager.getChaptersByBookId(book.id);
         if (chapters && chapters.length > 0) {
@@ -88,7 +83,6 @@ export class BackupManager {
         }
       }
 
-      // 保存到文件
       const backupDir = context.filesDir + '/backup';
       await this.ensureDirectory(backupDir);
       
@@ -102,7 +96,7 @@ export class BackupManager {
 
       return filePath;
     } catch (error) {
-      console.error('Backup failed:', error);
+      Logger.error(BackupManager.TAG, `备份失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
@@ -125,7 +119,7 @@ export class BackupManager {
       // 恢复数据
       await this.restoreData(backupData);
     } catch (error) {
-      console.error('Restore failed:', error);
+      Logger.error(BackupManager.TAG, `恢复失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
@@ -136,30 +130,33 @@ export class BackupManager {
   private async restoreData(backupData: BackupData): Promise<void> {
     const databaseManager = this.getDatabaseManager();
     
-    // 恢复书籍
     for (const book of backupData.books) {
       await databaseManager.upsertBook(book);
     }
 
-    // 恢复章节（使用批量操作）
     if (backupData.chapters && backupData.chapters.length > 0) {
       await databaseManager.batchUpsertChapters(backupData.chapters);
     }
 
-    // 恢复书签
     if (backupData.bookmarks && backupData.bookmarks.length > 0) {
       for (const bookmark of backupData.bookmarks) {
         await databaseManager.addBookmark(bookmark);
       }
     }
 
-    // 恢复阅读配置
     if (backupData.readConfig) {
       await databaseManager.updateReadConfig(backupData.readConfig);
     }
 
-    // 书源和分类的恢复暂时跳过，因为DatabaseManager缺少相应的方法
-    console.warn('Book sources and categories restoration is not implemented yet');
+    if (backupData.bookSources && backupData.bookSources.length > 0) {
+      await databaseManager.batchUpsertBookSources(backupData.bookSources);
+    }
+
+    if (backupData.categories && backupData.categories.length > 0) {
+      for (const category of backupData.categories) {
+        await databaseManager.addBookCategory(category);
+      }
+    }
   }
 
   /**

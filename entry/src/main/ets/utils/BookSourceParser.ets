@@ -25,9 +25,9 @@ interface RuleObject {
 }
 
 /**
- * 阅读APP书源数据结构
+ * AstroRead书源数据结构
  */
-interface LegadoSourceData {
+interface AstroReadSourceData {
   bookSourceName?: string;
   bookSourceUrl?: string;
   bookSourceGroup?: string;
@@ -52,25 +52,8 @@ interface LegadoSourceData {
   jsLib?: string;
 }
 
-interface SourceData {
-  name?: string;
-  url?: string;
-  searchUrl?: string;
-  search_url?: string;
-  bookUrl?: string;
-  book_url?: string;
-  chapterUrl?: string;
-  chapter_url?: string;
-  contentUrl?: string;
-  content_url?: string;
-  enabled?: boolean;
-  weight?: number;
-  lastUpdateTime?: number;
-  description?: string;
-}
-
 class BookSourceParser {
-  
+
   private TAG: string = 'BookSourceParser';
   
   /**
@@ -105,20 +88,20 @@ class BookSourceParser {
    */
   private parseJsonSources(content: string): Array<BookSource> {
     try {
-      const sourcesData = JSON.parse(content) as LegadoSourceData | LegadoSourceData[];
+      const sourcesData = JSON.parse(content) as AstroReadSourceData | AstroReadSourceData[];
       const sources: Array<BookSource> = [];
       
       // 处理数组格式
       if (Array.isArray(sourcesData)) {
         for (const sourceData of sourcesData) {
-          const source = this.buildBookSourceFromLegado(sourceData);
+          const source = this.buildBookSourceFromAstroRead(sourceData);
           if (source) {
             sources.push(source);
           }
         }
       } else if (typeof sourcesData === 'object') {
         // 处理单个书源对象
-        const source = this.buildBookSourceFromLegado(sourcesData);
+        const source = this.buildBookSourceFromAstroRead(sourcesData);
         if (source) {
           sources.push(source);
         }
@@ -135,7 +118,7 @@ class BookSourceParser {
   /**
    * 从阅读APP格式构建书源对象
    */
-  private buildBookSourceFromLegado(data: LegadoSourceData): BookSource | null {
+  private buildBookSourceFromAstroRead(data: AstroReadSourceData): BookSource | null {
     try {
       const name = data.bookSourceName || '';
       let url = data.bookSourceUrl || '';  // 改为let以支持URL处理
@@ -156,16 +139,16 @@ class BookSourceParser {
       }
       
       // 构建搜索规则
-      const searchRule: SearchRule = this.buildSearchRuleFromLegado(data.ruleSearch);
+      const searchRule: SearchRule = this.buildSearchRuleFromAstroRead(data.ruleSearch);
       
       // 构建章节规则
-      const chapterRule: ChapterRule = this.buildChapterRuleFromLegado(data.ruleToc);
+      const chapterRule: ChapterRule = this.buildChapterRuleFromAstroRead(data.ruleToc);
       
       // 构建内容规则
-      const contentRule: ContentRule = this.buildContentRuleFromLegado(data.ruleContent);
+      const contentRule: ContentRule = this.buildContentRuleFromAstroRead(data.ruleContent);
       
       // 构建发现规则
-      const findRule: FindRule | undefined = this.buildFindRuleFromLegado(data.ruleExplore, data.exploreUrl);
+      const findRule: FindRule | undefined = this.buildFindRuleFromAstroRead(data.ruleExplore, data.exploreUrl);
       
       const source: BookSource = {
         id: '',
@@ -199,7 +182,7 @@ class BookSourceParser {
   /**
    * 从阅读APP规则构建搜索规则
    */
-  private buildSearchRuleFromLegado(rule?: RuleObject): SearchRule {
+  private buildSearchRuleFromAstroRead(rule?: RuleObject): SearchRule {
     if (!rule) {
       return {
         bookList: '',
@@ -226,7 +209,7 @@ class BookSourceParser {
   /**
    * 从阅读APP规则构建章节规则
    */
-  private buildChapterRuleFromLegado(rule?: RuleObject): ChapterRule {
+  private buildChapterRuleFromAstroRead(rule?: RuleObject): ChapterRule {
     if (!rule) {
       return {
         chapterList: '',
@@ -247,7 +230,7 @@ class BookSourceParser {
   /**
    * 从阅读APP规则构建内容规则
    */
-  private buildContentRuleFromLegado(rule?: RuleObject): ContentRule {
+  private buildContentRuleFromAstroRead(rule?: RuleObject): ContentRule {
     if (!rule) {
       return {
         content: '',
@@ -268,7 +251,7 @@ class BookSourceParser {
   /**
    * 从阅读APP规则构建发现规则
    */
-  private buildFindRuleFromLegado(rule?: RuleObject, exploreUrl?: string): FindRule | undefined {
+  private buildFindRuleFromAstroRead(rule?: RuleObject, exploreUrl?: string): FindRule | undefined {
     if (!rule && !exploreUrl) {
       return undefined;
     }

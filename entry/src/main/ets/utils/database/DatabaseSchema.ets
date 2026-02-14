@@ -1,12 +1,9 @@
 import relationalStore from '@ohos.data.relationalStore';
+import { Logger } from '../Logger';
 
-/**
- * 数据库表结构定义
- */
 export class DatabaseSchema {
-  /**
-   * 数据库配置
-   */
+  private static readonly TAG = 'DatabaseSchema';
+
   static readonly DB_CONFIG: relationalStore.StoreConfig = {
     name: 'AstroRead.db',
     securityLevel: relationalStore.SecurityLevel.S1
@@ -119,12 +116,12 @@ export class DatabaseSchema {
         try {
           await rdbStore.executeSql(sql);
         } catch (sqlError) {
-          console.error(`Failed to execute SQL: ${sql}, Error: ${sqlError instanceof Error ? sqlError.message : String(sqlError)}`);
+          Logger.error(DatabaseSchema.TAG, `执行SQL失败: ${sql}, 错误: ${sqlError instanceof Error ? sqlError.message : String(sqlError)}`);
           throw (sqlError instanceof Error ? sqlError : new Error(String(sqlError)));
         }
       }
     } catch (error) {
-      console.error(`Failed to create tables: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(DatabaseSchema.TAG, `创建数据表失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }

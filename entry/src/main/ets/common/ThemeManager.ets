@@ -4,6 +4,7 @@
  */
 
 import { preferences } from '@kit.ArkData';
+import { Logger } from '../utils/Logger';
 
 const THEME_PREFERENCES_NAME = 'theme_preferences';
 const THEME_MODE_KEY = 'theme_mode';
@@ -15,6 +16,7 @@ export enum ThemeMode {
 }
 
 export class ThemeManager {
+  private static readonly TAG = 'ThemeManager';
   private static instance: ThemeManager;
   private currentMode: ThemeMode = ThemeMode.LIGHT;
   private isDarkMode: boolean = false;
@@ -38,7 +40,7 @@ export class ThemeManager {
       const savedMode = await this.preferences.get(THEME_MODE_KEY, ThemeMode.LIGHT) as ThemeMode;
       await this.setThemeMode(savedMode);
     } catch (error) {
-      console.error('Failed to init theme preferences:', error);
+      Logger.error(ThemeManager.TAG, `初始化主题偏好设置失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -97,7 +99,7 @@ export class ThemeManager {
       try {
         listener(this.isDarkMode);
       } catch (error) {
-        console.error('Error notifying theme listener:', error);
+        Logger.error(ThemeManager.TAG, `通知主题监听器失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
   }
@@ -108,7 +110,7 @@ export class ThemeManager {
       const systemTheme = AppStorage.get('systemTheme') as string;
       return systemTheme === 'dark';
     } catch (error) {
-      console.error('Failed to check system theme:', error);
+      Logger.error(ThemeManager.TAG, `检查系统主题失败: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }

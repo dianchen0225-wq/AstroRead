@@ -5,12 +5,22 @@ import { DatabaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import { IdGenerator } from '../utils/IdGenerator';
 import { ParsedChapterItem } from '../utils/ContentParser';
+import { Logger } from '../utils/Logger';
+import common from '@ohos.app.ability.common';
 
 /**
  * 章节视图模型
  */
 export class ChapterViewModel {
   private readonly databaseManager = DatabaseManager.getInstance();
+  private readonly networkManager = NetworkManager.getInstance();
+  private context: common.UIAbilityContext | null = null;
+  private static readonly TAG = 'ChapterViewModel';
+
+  setContext(context: common.UIAbilityContext): void {
+    this.context = context;
+    this.networkManager.setContext(context);
+  }
 
   /**
    * 获取书籍的章节列表
@@ -19,7 +29,7 @@ export class ChapterViewModel {
     try {
       return await this.getChaptersByBookId(bookId);
     } catch (error) {
-      console.error('Failed to get chapters:', error);
+      Logger.error(ChapterViewModel.TAG, `获取章节失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
@@ -35,7 +45,7 @@ export class ChapterViewModel {
     try {
       return await this.databaseManager.getChaptersByBookId(bookId);
     } catch (error) {
-      console.error('Failed to get chapters by book ID:', error);
+      Logger.error(ChapterViewModel.TAG, `根据书籍ID获取章节失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
@@ -65,27 +75,21 @@ export class ChapterViewModel {
       
       return chapters;
     } catch (error) {
-      console.error('Failed to fetch chapters:', error);
+      Logger.error(ChapterViewModel.TAG, `获取章节列表失败: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to fetch chapters: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 获取章节列表（内部方法）
-   */
   private async getChapterList(bookSource: BookSource, bookUrl: string): Promise<ParsedChapterItem[]> {
     try {
       const response = await NetworkManager.getInstance().getChapterList(bookSource, bookUrl);
       return response;
     } catch (error) {
-      console.error('Failed to get chapter list:', error);
+      Logger.error(ChapterViewModel.TAG, `获取章节列表失败: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to get chapter list: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 批量保存章节（内部方法）
-   */
   private async batchUpsertChapters(chapters: Chapter[]): Promise<void> {
     if (this.databaseManager === null || chapters.length === 0) {
       return;
@@ -94,7 +98,7 @@ export class ChapterViewModel {
     try {
       await this.databaseManager.batchUpsertChapters(chapters);
     } catch (error) {
-      console.error('Failed to batch upsert chapters:', error);
+      Logger.error(ChapterViewModel.TAG, `批量保存章节失败: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to batch upsert chapters: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -119,7 +123,7 @@ export class ChapterViewModel {
         prevUrl: undefined
       };
     } catch (error) {
-      console.error('Failed to get chapter content:', error);
+      Logger.error(ChapterViewModel.TAG, `获取章节内容失败: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to get chapter content: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -132,7 +136,7 @@ export class ChapterViewModel {
       const response = await NetworkManager.getInstance().getChapterContent(bookSource, chapterUrl);
       return response;
     } catch (error) {
-      console.error('Failed to get chapter content from network:', error);
+      Logger.error(ChapterViewModel.TAG, `从网络获取章节内容失败: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to get chapter content from network: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

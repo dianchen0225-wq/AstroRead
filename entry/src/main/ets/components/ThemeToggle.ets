@@ -18,39 +18,35 @@
  * 支持亮色/暗黑模式切换
  */
 
-import { ThemeManager } from '../styles/ThemeManager';
-import { ThemeType, AppTheme, AppShadows } from '../styles/Theme';
+import { themeManager } from '../common/ThemeManager';
+import { DesignSystem } from '../common/DesignSystem';
 
 @Component
 export struct ThemeToggle {
-  private themeManager: ThemeManager = ThemeManager.getInstance();
+  @State isDarkMode: boolean = themeManager.isDarkTheme();
 
-  @State currentTheme: AppTheme = this.themeManager.currentTheme;
-
-  @State isDarkMode: boolean = this.themeManager.isDarkMode;
+  private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
+    this.isDarkMode = isDark;
+  };
 
   aboutToAppear(): void {
-    this.themeManager.onThemeChange((theme: AppTheme) => {
-      this.currentTheme = theme;
-      this.isDarkMode = this.themeManager.isDarkMode;
-    });
+    themeManager.addListener(this.themeListener);
   }
 
   aboutToDisappear(): void {
-    this.themeManager.offThemeChange(() => {});
+    themeManager.removeListener(this.themeListener);
   }
 
   build() {
     Button() {
       Row() {
-        // 太阳图标 - 亮色模式
         Text(this.isDarkMode ? '☀️' : '🌙')
           .fontSize(18)
-          .fontColor(this.currentTheme.textPrimary)
+          .fontColor(DesignSystem.getPrimaryTextColor(!this.isDarkMode))
 
         Text(this.isDarkMode ? '亮色模式' : '暗黑模式')
           .fontSize(14)
-          .fontColor(this.currentTheme.textPrimary)
+          .fontColor(DesignSystem.getPrimaryTextColor(!this.isDarkMode))
           .fontWeight(FontWeight.Medium)
           .margin({ left: 8 })
       }
@@ -58,16 +54,10 @@ export struct ThemeToggle {
       .padding({ left: 12, right: 12 })
     }
     .height(36)
-    .backgroundColor(this.currentTheme.surfaceColor)
+    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(!this.isDarkMode))
     .borderRadius(18)
-    .shadow({
-      radius: AppShadows.SM.radius,
-      color: AppShadows.SM.color,
-      offsetX: AppShadows.SM.offsetX,
-      offsetY: AppShadows.SM.offsetY,
-    })
     .onClick(() => {
-      this.themeManager.toggleTheme();
+      themeManager.toggleTheme();
     })
     .animation({
       duration: 300,

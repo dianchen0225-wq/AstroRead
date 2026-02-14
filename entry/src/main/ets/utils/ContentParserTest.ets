@@ -1,5 +1,5 @@
 import { ContentParser, ParsedBookItem, ParsedChapterItem, ReplaceRuleConfig } from './ContentParser';
-import { BookSource, SearchRule, ChapterRule } from '../models/BookSource';
+import { BookSource } from '../models/BookSource';
 
 /**
  * ContentParser 功能测试

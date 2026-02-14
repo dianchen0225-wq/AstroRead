@@ -10,6 +10,7 @@ import { Logger } from '../utils/Logger';
 import { promptAction } from '@kit.ArkUI';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import common from '@ohos.app.ability.common';
 
 interface RouterParams {
   bookId?: string;
@@ -30,13 +31,21 @@ export struct BookDetailPage {
   private bookViewModel: BookViewModel = new BookViewModel();
   private chapterViewModel: ChapterViewModel = new ChapterViewModel();
   private bookSourceViewModel: BookSourceViewModel = new BookSourceViewModel();
+  private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
+    this.isLightMode = !isDark;
+  };
 
   aboutToAppear(): void {
     this.isLightMode = themeManager.isLightTheme();
-    themeManager.addListener((isDark: boolean) => {
-      this.isLightMode = !isDark;
-    });
+    themeManager.addListener(this.themeListener);
+    this.bookViewModel.setContext(getContext(this) as common.UIAbilityContext);
+    this.chapterViewModel.setContext(getContext(this) as common.UIAbilityContext);
+    this.bookSourceViewModel.setContext(getContext(this) as common.UIAbilityContext);
     this.loadBookDetail();
+  }
+
+  aboutToDisappear(): void {
+    themeManager.removeListener(this.themeListener);
   }
   async loadBookDetail() {
     const params = router.getParams() as RouterParams;

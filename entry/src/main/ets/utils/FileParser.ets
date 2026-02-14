@@ -3,14 +3,11 @@ import util from '@ohos.util';
 import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { IdGenerator } from './IdGenerator';
+import { Logger } from './Logger';
 
-/**
- * 文件解析器 - 支持本地文件解析
- */
 export class FileParser {
-  /**
-   * 解析TXT文件
-   */
+  private static readonly TAG = 'FileParser';
+
   static async parseTxtFile(filePath: string, bookId: string): Promise<Chapter[]> {
     try {
       const file = await fileIo.open(filePath, fileIo.OpenMode.READ_ONLY);
@@ -78,14 +75,11 @@ export class FileParser {
       
       return chapters;
     } catch (error) {
-      console.error('Failed to parse TXT file:', error);
+      Logger.error(FileParser.TAG, `解析TXT文件失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
 
-  /**
-   * 从TXT文件读取章节内容
-   */
   static async readChapterFromTxt(
     filePath: string,
     chapterStart: number,
@@ -100,21 +94,13 @@ export class FileParser {
       const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
       return decoder.decodeToString(new Uint8Array(buffer), { stream: false });
     } catch (error) {
-      console.error('Failed to read chapter from TXT:', error);
+      Logger.error(FileParser.TAG, `读取TXT章节失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
 
-  /**
-   * 解析EPUB文件（简化版）
-   */
   static async parseEpubFile(_filePath: string, _bookId: string): Promise<Chapter[]> {
-    // 参数filePath和bookId目前未使用，但为未来EPUB解析功能预留
-    // TODO: 实现EPUB解析功能时将使用这些参数
-    // EPUB是一个ZIP压缩包，包含HTML文件
-    // 需要使用ZIP解压库和HTML解析器
-    
-    console.log('EPUB parsing not fully implemented yet');
+    Logger.warn(FileParser.TAG, 'EPUB解析功能尚未实现');
     return [];
   }
 
@@ -140,7 +126,8 @@ export class FileParser {
       lastUpdateTime: Date.now(),
       addTime: Date.now(),
       readProgress: 0,
-      lastReadChapter: undefined
+      lastReadChapter: undefined,
+      lastReadChapterIndex: undefined
     };
     return book;
   }

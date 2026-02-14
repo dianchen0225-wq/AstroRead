@@ -1,12 +1,11 @@
 import { ReadConfig, DEFAULT_READ_CONFIG } from '../models/ReadConfig';
 import { databaseManager } from '../utils/DatabaseManager';
-/**
- * 阅读配置视图模型
- * 负责管理阅读配置相关的业务逻辑和状态
- */
+import { Logger } from '../utils/Logger';
+
 export class ReadConfigViewModel {
   private readConfig: ReadConfig = DEFAULT_READ_CONFIG;
   private readonly databaseManager = databaseManager;
+  private static readonly TAG = 'ReadConfigViewModel';
 
   // 静态属性：默认阅读配置
   static DEFAULT_READ_CONFIG: ReadConfig = DEFAULT_READ_CONFIG;
@@ -19,14 +18,11 @@ export class ReadConfigViewModel {
       this.readConfig = await this.databaseManager.getOrCreateReadConfig();
       return this.readConfig;
     } catch (error) {
-      console.error('Failed to load read config:', error);
+      Logger.error(ReadConfigViewModel.TAG, `加载阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
       return DEFAULT_READ_CONFIG;
     }
   }
 
-  /**
-   * 更新阅读配置
-   */
   async updateReadConfig(config: Partial<ReadConfig>): Promise<void> {
     try {
       // 使用对象合并替代 spread 操作
@@ -47,13 +43,11 @@ export class ReadConfigViewModel {
       this.readConfig = updatedConfig;
       await this.databaseManager.updateReadConfig(this.readConfig);
     } catch (error) {
-      console.error('Failed to update read config:', error);
+      Logger.error(ReadConfigViewModel.TAG, `更新阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
-  /**
-   * 获取当前阅读配置
-   */
+
   getCurrentConfig(): ReadConfig {
     return this.readConfig;
   }
@@ -73,7 +67,7 @@ export class ReadConfigViewModel {
       this.readConfig = DEFAULT_READ_CONFIG;
       await this.databaseManager.updateReadConfig(this.readConfig);
     } catch (error) {
-      console.error('Failed to reset read config:', error);
+      Logger.error(ReadConfigViewModel.TAG, `重置阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }

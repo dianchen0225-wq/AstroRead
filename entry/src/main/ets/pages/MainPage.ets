@@ -1,11 +1,12 @@
   import { HomePage } from './HomePage';
-  import { SearchPage } from './SearchPage';
-  import { BookshelfPage } from './BookshelfPage';
-  import { SourcePage } from './SourcePage';
-  import { SettingsPage } from './SettingsPage';
-  import { themeManager } from '../common/ThemeManager';
-  import { DesignSystem } from '../common/DesignSystem';
-  import window from '@ohos.window';
+import { SearchPage } from './SearchPage';
+import { BookshelfPage } from './BookshelfPage';
+import { SourcePage } from './SourcePage';
+import { SettingsPage } from './SettingsPage';
+import { themeManager } from '../common/ThemeManager';
+import { DesignSystem } from '../common/DesignSystem';
+import { Logger } from '../utils/Logger';
+import window from '@ohos.window';
 
   enum PageIndex {
     Home = 0,
@@ -54,7 +55,7 @@
           });
         }
       } catch (error) {
-        console.error('setWindowImmersive error:', error);
+        Logger.error('MainPage', `设置窗口沉浸式失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 

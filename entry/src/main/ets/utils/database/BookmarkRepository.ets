@@ -1,10 +1,9 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { Bookmark } from '../../models/Bookmark';
+import { Logger } from '../Logger';
 
-/**
- * 书签数据库操作
- */
 export class BookmarkRepository {
+  private static readonly TAG = 'BookmarkRepository';
   private rdbStore: relationalStore.RdbStore;
 
   constructor(rdbStore: relationalStore.RdbStore) {
@@ -31,14 +30,11 @@ export class BookmarkRepository {
       resultSet.close();
       return bookmarks;
     } catch (error) {
-      console.error(`Failed to query bookmarks by book id: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookmarkRepository.TAG, `查询书签列表失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
 
-  /**
-   * 解析书签数据
-   */
   private parseBookmark(resultSet: relationalStore.ResultSet): Bookmark {
     try {
       const idIndex = resultSet.getColumnIndex('id');
@@ -57,7 +53,7 @@ export class BookmarkRepository {
         createTime: resultSet.getLong(createTimeIndex) || 0
       };
     } catch (error) {
-      console.error(`Failed to parse bookmark: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookmarkRepository.TAG, `解析书签数据失败: ${error instanceof Error ? error.message : String(error)}`);
       return {
         id: '',
         bookId: '',
@@ -85,20 +81,17 @@ export class BookmarkRepository {
     try {
       await this.rdbStore.insert('bookmark', valueBucket);
     } catch (error) {
-      console.error(`Failed to add bookmark: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookmarkRepository.TAG, `添加书签失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 删除书签
-   */
   async deleteBookmark(bookmarkId: string): Promise<void> {
     try {
       const predicates = new relationalStore.RdbPredicates('bookmark');
       predicates.equalTo('id', bookmarkId);
       await this.rdbStore.delete(predicates);
     } catch (error) {
-      console.error(`Failed to delete bookmark: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookmarkRepository.TAG, `删除书签失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

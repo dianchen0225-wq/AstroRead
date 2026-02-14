@@ -4,6 +4,11 @@ import { databaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import SearchEnhancer from '../utils/SearchEnhancer';
 import { Logger } from '../utils/Logger';
+import common from '@ohos.app.ability.common';
+import { preferences } from '@kit.ArkData';
+
+const SEARCH_HISTORY_KEY = 'search_history';
+const MAX_SEARCH_HISTORY = 20;
 
 /**
  * 书籍视图模型
@@ -14,9 +19,42 @@ export class BookViewModel {
   private readonly databaseManager = databaseManager;
   private readonly networkManager = NetworkManager.getInstance();
   private readonly searchEnhancer = SearchEnhancer;
+  private context: common.UIAbilityContext | null = null;
+  private preferences: preferences.Preferences | null = null;
   
-  // 搜索历史记录
   private searchHistory: string[] = [];
+
+  setContext(context: common.UIAbilityContext): void {
+    this.context = context;
+    this.networkManager.setContext(context);
+    this.initPreferences();
+  }
+
+  private async initPreferences(): Promise<void> {
+    if (!this.context) {
+      return;
+    }
+    try {
+      this.preferences = await preferences.getPreferences(this.context, 'book_view_model');
+      await this.loadSearchHistoryFromStorage();
+    } catch (error) {
+      Logger.error('BookViewModel', `初始化偏好设置失败: ${error}`);
+    }
+  }
+
+  private async loadSearchHistoryFromStorage(): Promise<void> {
+    if (!this.preferences) {
+      return;
+    }
+    try {
+      const historyJson = await this.preferences.get(SEARCH_HISTORY_KEY, '[]') as string;
+      this.searchHistory = JSON.parse(historyJson) as string[];
+      Logger.debug('BookViewModel', `从存储加载搜索历史: ${this.searchHistory.length}条`);
+    } catch (error) {
+      Logger.error('BookViewModel', `加载搜索历史失败: ${error}`);
+      this.searchHistory = [];
+    }
+  }
 
   /**
    * 加载所有书籍
@@ -142,10 +180,8 @@ export class BookViewModel {
     try {
       Logger.info('BookViewModel', `开始搜索书籍："${keyword}"`);
       
-      // 保存搜索历史
-      this.addToSearchHistory(keyword);
+      await this.addToSearchHistory(keyword);
       
-      // 使用搜索增强器进行多书源搜索
       const searchFunction = async (searchKeyword: string, source: BookSource): Promise<Book[]> => {
         try {
           return await this.networkManager.searchBook(source, searchKeyword);
@@ -161,7 +197,6 @@ export class BookViewModel {
         searchFunction
       );
       
-      // 验证搜索结果有效性
       const validResults = this.searchEnhancer.validateSearchResults(results);
       
       const duration = Date.now() - startTime;
@@ -198,34 +233,40 @@ export class BookViewModel {
   /**
    * 添加搜索历史
    */
-  private addToSearchHistory(keyword: string): void {
+  private async addToSearchHistory(keyword: string): Promise<void> {
     if (!keyword || keyword.trim().length === 0) {
       return;
     }
     
     const trimmedKeyword = keyword.trim();
     
-    // 移除重复项
     this.searchHistory = this.searchHistory.filter(item => item !== trimmedKeyword);
     
-    // 添加到开头
     this.searchHistory.unshift(trimmedKeyword);
     
-    // 限制历史记录数量
-    if (this.searchHistory.length > 20) {
-      this.searchHistory = this.searchHistory.slice(0, 20);
+    if (this.searchHistory.length > MAX_SEARCH_HISTORY) {
+      this.searchHistory = this.searchHistory.slice(0, MAX_SEARCH_HISTORY);
     }
     
-    // 保存到本地存储（实际项目中应该实现）
-    this.saveSearchHistory();
+    await this.saveSearchHistory();
   }
 
   /**
    * 保存搜索历史
    */
-  private saveSearchHistory(): void {
-    // TODO: 实现搜索历史的本地存储
-    Logger.debug('BookViewModel', `搜索历史已更新：${this.searchHistory.join(', ')}`);
+  private async saveSearchHistory(): Promise<void> {
+    if (!this.preferences) {
+      Logger.warn('BookViewModel', '偏好设置未初始化，无法保存搜索历史');
+      return;
+    }
+    try {
+      const historyJson = JSON.stringify(this.searchHistory);
+      await this.preferences.put(SEARCH_HISTORY_KEY, historyJson);
+      await this.preferences.flush();
+      Logger.debug('BookViewModel', `搜索历史已保存：${this.searchHistory.length}条`);
+    } catch (error) {
+      Logger.error('BookViewModel', `保存搜索历史失败: ${error}`);
+    }
   }
 
   /**
@@ -238,9 +279,9 @@ export class BookViewModel {
   /**
    * 清除搜索历史
    */
-  clearSearchHistory(): void {
+  async clearSearchHistory(): Promise<void> {
     this.searchHistory = [];
-    this.saveSearchHistory();
+    await this.saveSearchHistory();
     Logger.info('BookViewModel', '搜索历史已清除');
   }
 

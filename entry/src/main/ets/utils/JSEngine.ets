@@ -5,7 +5,6 @@
  */
 
 import webview from '@ohos.web.webview';
-import common from '@ohos.app.ability.common';
 import { Logger } from './Logger';
 
 /**
@@ -21,7 +20,7 @@ export interface JSExecutionResult {
  * 书源Java对象模拟
  * 提供阅读APP书源中常用的java对象方法
  */
-export interface LegadoJavaObject {
+export interface AstroReadJavaObject {
   ajax: (url: string) => string;
   get: (url: string) => string;
   post: (url: string, body: string) => string;
@@ -43,7 +42,6 @@ export interface LegadoJavaObject {
  */
 export class JSEngine {
   private static instance: JSEngine | null = null;
-  private context: common.UIAbilityContext | null = null;
   private webController: webview.WebviewController | null = null;
   private isInitialized: boolean = false;
   private readonly TAG = 'JSEngine';
@@ -58,13 +56,6 @@ export class JSEngine {
       JSEngine.instance = new JSEngine();
     }
     return JSEngine.instance;
-  }
-
-  /**
-   * 设置上下文
-   */
-  setContext(context: common.UIAbilityContext): void {
-    this.context = context;
   }
 
   /**

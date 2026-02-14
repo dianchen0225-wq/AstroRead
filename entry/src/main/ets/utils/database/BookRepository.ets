@@ -1,11 +1,10 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { Book } from '../../models/Book';
+import { Logger } from '../Logger';
 
-/**
- * 书籍数据库操作
- */
 export class BookRepository {
   private rdbStore: relationalStore.RdbStore;
+  private static readonly TAG = 'BookRepository';
 
   constructor(rdbStore: relationalStore.RdbStore) {
     this.rdbStore = rdbStore;
@@ -30,7 +29,7 @@ export class BookRepository {
       resultSet.close();
       return books;
     } catch (error) {
-      console.error(`Failed to query books: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookRepository.TAG, `查询书籍失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
@@ -75,7 +74,7 @@ export class BookRepository {
       bookResultSet.close();
       return books;
     } catch (error) {
-      console.error(`Failed to query books by category: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookRepository.TAG, `根据分类查询书籍失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
@@ -134,7 +133,7 @@ export class BookRepository {
           : resultSet.getLong(lastReadChapterIndex) || 0
       };
     } catch (error) {
-      console.error(`Failed to parse book: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookRepository.TAG, `解析书籍数据失败: ${error instanceof Error ? error.message : String(error)}`);
       return {
         id: '',
         name: '',
@@ -189,7 +188,7 @@ export class BookRepository {
         await this.rdbStore.insert('book', valueBucket);
       }
     } catch (error) {
-      console.error(`Failed to upsert book: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookRepository.TAG, `保存书籍失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -202,7 +201,7 @@ export class BookRepository {
       predicates.equalTo('id', bookId);
       await this.rdbStore.delete(predicates);
     } catch (error) {
-      console.error(`Failed to delete book: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookRepository.TAG, `删除书籍失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

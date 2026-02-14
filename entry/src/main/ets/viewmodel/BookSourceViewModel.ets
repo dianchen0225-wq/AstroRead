@@ -5,6 +5,7 @@ import SourceImportManager from '../utils/SourceImportManager';
 import SourceValidator from '../utils/SourceValidator';
 import BookSourceParser from '../utils/BookSourceParser';
 import { Logger } from '../utils/Logger';
+import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from '../utils/SourceSandbox';
 import fileio from '@ohos.fileio';
 import fs from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
@@ -396,12 +397,21 @@ export class BookSourceViewModel {
    */
   async testBookSource(bookSource: BookSource): Promise<boolean> {
     try {
-      // 验证书源数据
-      this.validateBookSourceData(bookSource);
+      if (!bookSource) {
+        Logger.warn('BookSourceViewModel', '书源数据为空');
+        return false;
+      }
+      
+      if (!bookSource.searchUrl) {
+        Logger.warn('BookSourceViewModel', '书源没有配置搜索URL');
+        return false;
+      }
       
       const networkManager = NetworkManager.getInstance();
+      if (this.context) {
+        networkManager.setContext(this.context);
+      }
       
-      // 测试搜索功能
       const testKeyword = '测试';
       let searchUrl = bookSource.searchUrl;
       
@@ -409,8 +419,12 @@ export class BookSourceViewModel {
         searchUrl = searchUrl.replace('{{key}}', encodeURIComponent(testKeyword));
       }
       
-      // 验证URL
+      if (searchUrl.includes('{key}')) {
+        searchUrl = searchUrl.replace('{key}', encodeURIComponent(testKeyword));
+      }
+      
       if (!this.isValidUrl(searchUrl)) {
+        Logger.warn('BookSourceViewModel', `搜索URL格式无效: ${searchUrl}`);
         return false;
       }
       
@@ -418,16 +432,18 @@ export class BookSourceViewModel {
         ? this.parseHeadersSafely(bookSource.header)
         : undefined;
       
+      Logger.info('BookSourceViewModel', `开始验证书源: ${bookSource.name}`);
       const response = await networkManager.get(searchUrl, headers);
       
-      // 检查响应是否有效
       if (response && response.length > 0) {
+        Logger.info('BookSourceViewModel', `书源验证成功: ${bookSource.name}`);
         return true;
       }
       
+      Logger.warn('BookSourceViewModel', `书源响应为空: ${bookSource.name}`);
       return false;
     } catch (error) {
-      Logger.error('BookSourceViewModel', '测试书源有效性失败');
+      Logger.error('BookSourceViewModel', `测试书源有效性失败: ${error instanceof Error ? error.message : '未知错误'}`);
       return false;
     }
   }
@@ -544,6 +560,26 @@ export class BookSourceViewModel {
    */
   detectSourceFormat(content: string): string {
     return BookSourceParser.detectFormat(content);
+  }
+
+  scanSourceSecurity(content: string): SecurityScanResult {
+    return SourceSandbox.scanSourceContent(content);
+  }
+
+  scanBookSourceSecurity(source: BookSource): SecurityScanResult {
+    return SourceSandbox.scanBookSource(source);
+  }
+
+  scanSourcesSecurityBatch(sources: BookSource[]): Map<string, SecurityScanResult> {
+    return SourceSandbox.scanSourcesBatch(sources);
+  }
+
+  getSecurityRiskLevelText(level: SecurityRiskLevel): string {
+    return SourceSandbox.getRiskLevelText(level);
+  }
+
+  getSecurityRiskLevelColor(level: SecurityRiskLevel): string {
+    return SourceSandbox.getRiskLevelColor(level);
   }
 
   /**

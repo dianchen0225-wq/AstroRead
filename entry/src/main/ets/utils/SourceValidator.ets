@@ -69,9 +69,17 @@ class SourceValidator {
       errors.push('书源URL格式无效');
     }
     
-    // 搜索URL验证（可选）
-    if (source.searchUrl && !this.isValidUrl(source.searchUrl)) {
-      errors.push('搜索URL格式无效');
+    if (source.searchUrl) {
+      let searchUrl = source.searchUrl;
+      if (searchUrl.includes('{{key}}')) {
+        searchUrl = searchUrl.replace('{{key}}', 'test');
+      }
+      if (searchUrl.includes('{key}')) {
+        searchUrl = searchUrl.replace('{key}', 'test');
+      }
+      if (!this.isValidUrl(searchUrl)) {
+        errors.push('搜索URL格式无效');
+      }
     }
     
     // 排序值验证
@@ -128,8 +136,7 @@ class SourceValidator {
     const startTime = Date.now();
     
     try {
-      // 测试基础URL
-      const testUrl = source.searchUrl || source.url;
+      let testUrl = source.searchUrl || source.url;
       if (!testUrl) {
         const result: AvailabilityResult = {
           isAvailable: false,
@@ -139,7 +146,13 @@ class SourceValidator {
         return result;
       }
       
-      // 增强URL验证
+      if (testUrl.includes('{{key}}')) {
+        testUrl = testUrl.replace('{{key}}', encodeURIComponent('测试'));
+      }
+      if (testUrl.includes('{key}')) {
+        testUrl = testUrl.replace('{key}', encodeURIComponent('测试'));
+      }
+      
       if (!this.isValidUrl(testUrl) || !this.isSafeUrl(testUrl)) {
         const result: AvailabilityResult = {
           isAvailable: false,
@@ -151,10 +164,8 @@ class SourceValidator {
       
       Logger.debug(this.TAG, `开始验证书源可用性：${this.sanitizeLogOutput(source.name)}`);
       
-      // 发送测试请求（带超时）
       const networkManager = NetworkManager.getInstance();
       
-      // 设置请求头 - 增强安全检查
       const headers: Record<string, string> | undefined = source.header
         ? this.parseHeadersSafely(source.header)
         : undefined;
@@ -382,15 +393,24 @@ class SourceValidator {
    * 构建搜索URL - 增强安全编码
    */
   private buildSearchUrl(searchUrlTemplate: string, keyword: string): string {
-    // 安全编码关键词
     const encodedKeyword = encodeURIComponent(keyword);
     
-    // 验证编码后的长度
     if (encodedKeyword.length > 1000) {
       throw new Error('搜索关键词过长');
     }
     
-    return searchUrlTemplate.replace('{keyword}', encodedKeyword);
+    let searchUrl = searchUrlTemplate;
+    if (searchUrl.includes('{{key}}')) {
+      searchUrl = searchUrl.replace('{{key}}', encodedKeyword);
+    }
+    if (searchUrl.includes('{key}')) {
+      searchUrl = searchUrl.replace('{key}', encodedKeyword);
+    }
+    if (searchUrl.includes('{keyword}')) {
+      searchUrl = searchUrl.replace('{keyword}', encodedKeyword);
+    }
+    
+    return searchUrl;
   }
   
   /**

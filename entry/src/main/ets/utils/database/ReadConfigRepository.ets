@@ -1,10 +1,9 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { ReadConfig, MarginsConfig } from '../../models/ReadConfig';
+import { Logger } from '../Logger';
 
-/**
- * 阅读配置数据库操作
- */
 export class ReadConfigRepository {
+  private static readonly TAG = 'ReadConfigRepository';
   private rdbStore: relationalStore.RdbStore;
 
   constructor(rdbStore: relationalStore.RdbStore) {
@@ -29,7 +28,7 @@ export class ReadConfigRepository {
             margins = JSON.parse(marginsString) as MarginsConfig;
           }
         } catch (error) {
-          console.warn(`Failed to parse margins, using default: ${error instanceof Error ? error.message : String(error)}`);
+          Logger.warn(ReadConfigRepository.TAG, `解析边距配置失败，使用默认值: ${error instanceof Error ? error.message : String(error)}`);
         }
 
         const config: ReadConfig = {
@@ -85,7 +84,7 @@ export class ReadConfigRepository {
         return defaultConfig;
       }
     } catch (error) {
-      console.error(`Failed to get or create read config: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(ReadConfigRepository.TAG, `获取或创建阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
@@ -114,7 +113,7 @@ export class ReadConfigRepository {
       predicates.equalTo('id', 'default');
       await this.rdbStore.update(valueBucket, predicates);
     } catch (error) {
-      console.error(`Failed to update read config: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(ReadConfigRepository.TAG, `更新阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

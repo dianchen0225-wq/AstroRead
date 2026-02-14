@@ -16,6 +16,7 @@ import { promptAction } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
+import common from '@ohos.app.ability.common';
 
 interface RouterParams {
   bookId?: string;
@@ -43,14 +44,22 @@ export struct ReadPage {
   private bookSourceViewModel: BookSourceViewModel = new BookSourceViewModel();
   private readConfigViewModel: ReadConfigViewModel = new ReadConfigViewModel();
   private bookSource: BookSource | null = null;
+  private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
+    this.isLightMode = !isDark;
+  };
 
   aboutToAppear(): void {
     this.isLightMode = themeManager.isLightTheme();
-    themeManager.addListener((isDark: boolean) => {
-      this.isLightMode = !isDark;
-    });
+    themeManager.addListener(this.themeListener);
+    this.bookViewModel.setContext(getContext(this) as common.UIAbilityContext);
+    this.chapterViewModel.setContext(getContext(this) as common.UIAbilityContext);
+    this.bookSourceViewModel.setContext(getContext(this) as common.UIAbilityContext);
     this.loadReadConfig();
     this.loadBookDetail();
+  }
+
+  aboutToDisappear(): void {
+    themeManager.removeListener(this.themeListener);
   }
 
   async loadReadConfig() {

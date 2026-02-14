@@ -2,20 +2,16 @@ import { databaseManager } from './DatabaseManager';
 import { NetworkManager } from './NetworkManager';
 import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
+import { Logger } from './Logger';
 
-/**
- * 后台任务类型
- */
 export enum BackgroundTaskType {
   CACHE_CHAPTERS = 'cache_chapters',
   UPDATE_BOOK_SOURCES = 'update_book_sources',
   BACKUP_DATA = 'backup_data'
 }
 
-/**
- * 后台任务管理器
- */
 export class BackgroundTaskManager {
+  private static readonly TAG = 'BackgroundTaskManager';
   private static instance: BackgroundTaskManager | null = null;
   private readonly taskQueue: Map<string, Promise<void>> = new Map();
 
@@ -53,7 +49,7 @@ export class BackgroundTaskManager {
    * 执行缓存任务
    */
   private async executeCacheTask(
-    book: Book,
+    _book: Book,
     bookSource: BookSource,
     chapterUrls: string[]
   ): Promise<void> {
@@ -73,7 +69,7 @@ export class BackgroundTaskManager {
           // 这里可以实现本地文件缓存逻辑
 
         } catch (error) {
-          console.error(`Failed to cache chapter ${url}:`, error);
+          Logger.error(BackgroundTaskManager.TAG, `缓存章节失败 ${url}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }));
 
@@ -95,13 +91,10 @@ export class BackgroundTaskManager {
       // 例如：从远程服务器获取最新书源列表
 
     } catch (error) {
-      console.error('Failed to update book sources:', error);
+      Logger.error(BackgroundTaskManager.TAG, `更新书源失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 取消任务
-   */
   cancelTask(taskId: string): void {
     this.taskQueue.delete(taskId);
   }

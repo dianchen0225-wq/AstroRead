@@ -1,20 +1,17 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../../models/BookSource';
+import { Logger } from '../Logger';
 
-// 数据库常量定义
 const DB_ENABLED_TRUE: number = 1;
 const DB_ENABLED_FALSE: number = 0;
 const DB_DEFAULT_SORT: number = 0;
 const DB_DEFAULT_TIME: number = 0;
 const DB_UPDATED_ROWS_ZERO: number = 0;
 
-// 数据库表字段名常量（必须与数据库表结构保持一致，使用下划线命名）
 const DB_COLUMN_ID: string = 'id';
 
-/**
- * 书源数据库操作
- */
 export class BookSourceRepository {
+  private static readonly TAG = 'BookSourceRepository';
   private rdbStore: relationalStore.RdbStore;
 
   constructor(rdbStore: relationalStore.RdbStore) {
@@ -42,14 +39,11 @@ export class BookSourceRepository {
       return bookSources;
     }
     catch (error) {
-      console.error(`Failed to query enabled book sources: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookSourceRepository.TAG, `查询启用的书源失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
 
-  /**
-   * 获取所有书源（包括禁用的）
-   */
   async getAllBookSources(): Promise<BookSource[]> {
     const predicates = new relationalStore.RdbPredicates('book_source');
     predicates.orderByAsc('sort');
@@ -67,14 +61,11 @@ export class BookSourceRepository {
       return bookSources;
     }
     catch (error) {
-      console.error(`Failed to query all book sources: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookSourceRepository.TAG, `查询所有书源失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
 
-  /**
-   * 插入或更新书源
-   */
   async upsertBookSource(bookSource: BookSource): Promise<void> {
     const valueBucket: relationalStore.ValuesBucket = {
       'id': bookSource.id,
@@ -105,13 +96,10 @@ export class BookSourceRepository {
       }
     }
     catch (error) {
-      console.error(`Failed to upsert book source: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookSourceRepository.TAG, `插入或更新书源失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 批量插入或更新书源
-   */
   async batchUpsertBookSources(sources: BookSource[]): Promise<void> {
     if (sources.length === 0) {
       return;
@@ -129,14 +117,11 @@ export class BookSourceRepository {
     }
     catch (error) {
       await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
-      console.error(`Failed to batch upsert book sources: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookSourceRepository.TAG, `批量插入或更新书源失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
 
-  /**
-   * 删除书源
-   */
   async deleteBookSource(sourceId: string): Promise<void> {
     try {
       const predicates = new relationalStore.RdbPredicates('book_source');
@@ -144,13 +129,10 @@ export class BookSourceRepository {
       await this.rdbStore.delete(predicates);
     }
     catch (error) {
-      console.error(`Failed to delete book source: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookSourceRepository.TAG, `删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 解析书源数据
-   */
   private parseBookSource(resultSet: relationalStore.ResultSet): BookSource {
     try {
       const idIndex = resultSet.getColumnIndex('id');
@@ -229,7 +211,7 @@ export class BookSourceRepository {
       };
     }
     catch (error) {
-      console.error(`Failed to parse book source: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(BookSourceRepository.TAG, `解析书源数据失败: ${error instanceof Error ? error.message : String(error)}`);
       return {
         id: '',
         name: '',
@@ -260,7 +242,7 @@ export class BookSourceRepository {
       return JSON.parse(jsonString) as Record<string, Object>;
     }
     catch (error) {
-      console.warn(`Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.warn(BookSourceRepository.TAG, `解析JSON失败: ${error instanceof Error ? error.message : String(error)}`);
       return {} as Record<string, Object>;
     }
   }

@@ -1,15 +1,8 @@
-/**
- * CSS选择器解析器
- * 支持阅读APP的CSS选择器语法
- */
+import { Logger } from './Logger';
 
-/**
- * CSS选择器解析器类
- */
 export class CssSelectorParser {
-  /**
-   * 选择元素（支持CSS选择器语法）
-   */
+  private static readonly TAG = 'CssSelectorParser';
+
   static selectElements(html: string, selector: string): string[] {
     const elements: string[] = [];
     
@@ -77,7 +70,7 @@ export class CssSelectorParser {
         }
       }
     } catch (error) {
-      console.error('选择元素失败:', error);
+      Logger.error(CssSelectorParser.TAG, `选择元素失败: ${error instanceof Error ? error.message : String(error)}`);
     }
     
     return elements;
@@ -159,7 +152,7 @@ export class CssSelectorParser {
       
       return '';
     } catch (error) {
-      console.error('提取值失败:', error);
+      Logger.error(CssSelectorParser.TAG, `提取值失败: ${error instanceof Error ? error.message : String(error)}`);
       return '';
     }
   }

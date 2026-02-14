@@ -1,18 +1,15 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { Chapter } from '../../models/Book';
+import { Logger } from '../Logger';
 
-// 常量定义
 const DEFAULT_ORDER: number = 0;
 const VIP_FLAG_TRUE: number = 1;
 const VIP_FLAG_FALSE: number = 0;
 
-// 数据库字段名称常量
 const TABLE_CHAPTER: string = 'chapter';
 
-/**
- * 章节数据库操作
- */
 export class ChapterRepository {
+  private static readonly TAG = 'ChapterRepository';
   private rdbStore: relationalStore.RdbStore;
 
   constructor(rdbStore: relationalStore.RdbStore) {
@@ -40,14 +37,11 @@ export class ChapterRepository {
       return chapters;
     }
     catch (error) {
-      console.error(`Failed to query chapters by book id: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(ChapterRepository.TAG, `查询章节列表失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
 
-  /**
-   * 解析章节数据
-   */
   private parseChapter(resultSet: relationalStore.ResultSet): Chapter {
     try {
       const idIndex = resultSet.getColumnIndex('id');
@@ -67,7 +61,7 @@ export class ChapterRepository {
       };
     }
     catch (error) {
-      console.error(`Failed to parse chapter: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(ChapterRepository.TAG, `解析章节数据失败: ${error instanceof Error ? error.message : String(error)}`);
       return {
         id: '',
         bookId: '',
@@ -116,7 +110,7 @@ export class ChapterRepository {
     }
     catch (error) {
       await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
-      console.error(`Failed to batch upsert chapters: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(ChapterRepository.TAG, `批量插入或更新章节失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }

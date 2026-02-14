@@ -1,10 +1,9 @@
 import relationalStore from '@ohos.data.relationalStore';
 import { BookCategory } from '../../models/BookCategory';
+import { Logger } from '../Logger';
 
-/**
- * 书籍分类数据库操作
- */
 export class CategoryRepository {
+  private static readonly TAG = 'CategoryRepository';
   private rdbStore: relationalStore.RdbStore;
 
   constructor(rdbStore: relationalStore.RdbStore) {
@@ -30,14 +29,11 @@ export class CategoryRepository {
       resultSet.close();
       return categories;
     } catch (error) {
-      console.error(`Failed to query book categories: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CategoryRepository.TAG, `查询书籍分类失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }
 
-  /**
-   * 添加书籍分类
-   */
   async addBookCategory(category: BookCategory): Promise<void> {
     const valueBucket: relationalStore.ValuesBucket = {
       'id': category.id,
@@ -49,26 +45,20 @@ export class CategoryRepository {
     try {
       await this.rdbStore.insert('book_category', valueBucket);
     } catch (error) {
-      console.error(`Failed to add book category: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CategoryRepository.TAG, `添加书籍分类失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 删除分类
-   */
   async deleteCategory(categoryId: string): Promise<void> {
     try {
       const predicates = new relationalStore.RdbPredicates('book_category');
       predicates.equalTo('id', categoryId);
       await this.rdbStore.delete(predicates);
     } catch (error) {
-      console.error(`Failed to delete category: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CategoryRepository.TAG, `删除分类失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 将书籍添加到分类
-   */
   async addBookToCategory(bookId: string, categoryId: string): Promise<void> {
     const valueBucket: relationalStore.ValuesBucket = {
       'book_id': bookId,
@@ -78,13 +68,10 @@ export class CategoryRepository {
     try {
       await this.rdbStore.insert('book_category_relation', valueBucket);
     } catch (error) {
-      console.error(`Failed to add book to category: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CategoryRepository.TAG, `添加书籍到分类失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 从分类移除书籍
-   */
   async removeBookFromCategory(bookId: string, categoryId: string): Promise<void> {
     try {
       const predicates = new relationalStore.RdbPredicates('book_category_relation');
@@ -92,13 +79,10 @@ export class CategoryRepository {
       predicates.equalTo('category_id', categoryId);
       await this.rdbStore.delete(predicates);
     } catch (error) {
-      console.error(`Failed to remove book from category: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CategoryRepository.TAG, `从分类移除书籍失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * 解析书籍分类数据
-   */
   private parseBookCategory(resultSet: relationalStore.ResultSet): BookCategory {
     try {
       return {
@@ -108,7 +92,7 @@ export class CategoryRepository {
         createTime: resultSet.getLong(resultSet.getColumnIndex('create_time')) || 0
       };
     } catch (error) {
-      console.error(`Failed to parse book category: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CategoryRepository.TAG, `解析书籍分类数据失败: ${error instanceof Error ? error.message : String(error)}`);
       return {
         id: '',
         name: '',

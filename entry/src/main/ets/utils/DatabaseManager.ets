@@ -1,5 +1,6 @@
 import relationalStore from '@ohos.data.relationalStore';
 import common from '@ohos.app.ability.common';
+import { Logger } from './Logger';
 import { DatabaseSchema } from './database/DatabaseSchema';
 import { BookRepository } from './database/BookRepository';
 import { BookSourceRepository } from './database/BookSourceRepository';
@@ -24,8 +25,6 @@ export class DatabaseManager {
   private chapterRepository: ChapterRepository | null = null;
   private bookmarkRepository: BookmarkRepository | null = null;
 
-  private readonly TAG = 'DatabaseManager';
-
   private constructor() {
   }
 
@@ -38,17 +37,14 @@ export class DatabaseManager {
 
   private static instance: DatabaseManager | null = null;
 
-  private appContext: common.UIAbilityContext | null = null;
-
   async initDatabase(context: common.UIAbilityContext): Promise<void> {
     try {
-      this.appContext = context;
       this.rdbStore = await relationalStore.getRdbStore(context, DatabaseSchema.DB_CONFIG);
       await DatabaseSchema.createTables(this.rdbStore);
       this.initRepositories();
       await this.initDefaultData();
     } catch (error) {
-      console.error('Failed to init database:', error);
+      Logger.error('DatabaseManager', `初始化数据库失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
