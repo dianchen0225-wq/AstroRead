@@ -1,7 +1,6 @@
 import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../models/BookSource';
 import { databaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
-import { IdGenerator } from '../utils/IdGenerator';
 import SourceImportManager from '../utils/SourceImportManager';
 import SourceValidator from '../utils/SourceValidator';
 import BookSourceParser from '../utils/BookSourceParser';
@@ -52,25 +51,6 @@ interface ExportBookSourceData {
   customOrder: number;
 }
 
-/**
- * 备份书源数据接口
- */
-interface BackupBookSourceData {
-  id: string;
-  name: string;
-  url: string;
-  enabled: boolean;
-  header: string | undefined;
-  searchUrl: string;
-  searchRule: SearchRule;
-  findRule: FindRule | undefined;
-  chapterRule: ChapterRule;
-  contentRule: ContentRule;
-  ruleType: string;
-  sort: number;
-  lastUpdateTime: number;
-  addTime: number;
-}
 
 /**
  * 搜索规则接口
@@ -495,7 +475,7 @@ export class BookSourceViewModel {
           networkManager.setContext(this.context);
         }
         
-        content = await networkManager.getStream(content);
+        content = await networkManager.get(content);
         if (!content || content.trim().length === 0) {
           throw new Error('从URL获取的书源内容为空');
         }
@@ -770,31 +750,6 @@ export class BookSourceViewModel {
     return uuidPattern.test(id);
   }
 
-  /**
-   * 安全解析JSON
-   */
-  private parseJsonSafely(jsonString: string): BookSourceRawData | BookSourceRawData[] {
-    try {
-      // 验证JSON字符串长度
-      if (jsonString.length > 10 * 1024 * 1024) {
-        throw new Error('JSON数据过大');
-      }
-      
-      return JSON.parse(jsonString);
-    } catch (error) {
-      // 尝试清理JSON字符串
-      const cleanedJson = jsonString
-        .replace(/[\x00-\x1F\x7F]/g, '') // 移除控制字符
-        .replace(/,\s*}/g, '}') // 修复尾随逗号
-        .replace(/,\s*]/g, ']'); // 修复数组尾随逗号
-      
-      try {
-        return JSON.parse(cleanedJson);
-      } catch (secondError) {
-        throw new Error('JSON格式错误，无法解析书源数据');
-      }
-    }
-  }
 
   /**
    * 安全解析请求头
@@ -865,69 +820,6 @@ export class BookSourceViewModel {
     }
   }
 
-  /**
-   * 处理书源数组（修复类型问题）
-   */
-  private processBookSourceArray(data: BookSourceRawData[]): BookSource[] {
-    if (!Array.isArray(data) || data.length === 0) {
-      return [];
-    }
-    
-    const processedSources: BookSource[] = [];
-    
-    for (const item of data) {
-      try {
-        // 创建默认的规则对象
-        const defaultSearchRule: SearchRule = {
-          bookList: '',
-          name: '',
-          author: '',
-          cover: undefined,
-          intro: undefined,
-          bookUrl: '',
-          nextUrl: undefined
-        };
-
-        const defaultChapterRule: ChapterRule = {
-          chapterList: '',
-          chapterName: '',
-          chapterUrl: '',
-          nextUrl: undefined
-        };
-
-        const defaultContentRule: ContentRule = {
-          content: '',
-          nextUrl: undefined,
-          prevUrl: undefined,
-          replaceRule: undefined
-        };
-
-        // 创建BookSource对象并设置默认值
-        const bookSource: BookSource = {
-          id: item.id || IdGenerator.generateUUID(),
-          name: item.name || item.bookSourceName || '',
-          url: item.url || item.bookSourceUrl || '',
-          enabled: item.enabled !== undefined ? item.enabled : true,
-          header: item.header || item.headers || undefined,
-          searchUrl: item.searchUrl || '',
-          searchRule: this.convertToSearchRule(item.searchRule || item.ruleSearch || defaultSearchRule),
-          findRule: (item.findRule || item.ruleExplore) ? this.convertToFindRule(item.findRule || item.ruleExplore!) : undefined,
-          chapterRule: this.convertToChapterRule(item.chapterRule || item.ruleToc || defaultChapterRule),
-          contentRule: this.convertToContentRule(item.contentRule || item.ruleContent || defaultContentRule),
-          ruleType: this.validateRuleType((item.ruleType as 'xpath' | 'jsonpath' | 'regex') || 'xpath'),
-          sort: item.sort || item.customOrder || 0,
-          lastUpdateTime: item.lastUpdateTime || Date.now(),
-          addTime: item.addTime || Date.now()
-        };
-
-        processedSources.push(bookSource);
-      } catch (error) {
-        Logger.warn('BookSourceViewModel', `处理书源数据失败: ${error}`);
-      }
-    }
-
-    return processedSources;
-  }
 
   /**
    * 转换搜索规则类型

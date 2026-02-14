@@ -14,20 +14,17 @@ import { BookCategory } from '../models/BookCategory';
 import { Bookmark } from '../models/Bookmark';
 import { Chapter } from '../models/Book';
 
-/**
- * 数据库管理器
- * 负责管理本地数据库操作，提供统一入口
- */
 export class DatabaseManager {
   private rdbStore: relationalStore.RdbStore | null = null;
 
-  // Repository 实例
   private bookRepository: BookRepository | null = null;
   private bookSourceRepository: BookSourceRepository | null = null;
   private categoryRepository: CategoryRepository | null = null;
   private readConfigRepository: ReadConfigRepository | null = null;
   private chapterRepository: ChapterRepository | null = null;
   private bookmarkRepository: BookmarkRepository | null = null;
+
+  private readonly TAG = 'DatabaseManager';
 
   private constructor() {
   }
@@ -41,11 +38,11 @@ export class DatabaseManager {
 
   private static instance: DatabaseManager | null = null;
 
-  /**
-   * 初始化数据库
-   */
+  private appContext: common.UIAbilityContext | null = null;
+
   async initDatabase(context: common.UIAbilityContext): Promise<void> {
     try {
+      this.appContext = context;
       this.rdbStore = await relationalStore.getRdbStore(context, DatabaseSchema.DB_CONFIG);
       await DatabaseSchema.createTables(this.rdbStore);
       this.initRepositories();
@@ -56,9 +53,6 @@ export class DatabaseManager {
     }
   }
 
-  /**
-   * 初始化所有 Repository
-   */
   private initRepositories(): void {
     if (this.rdbStore === null) {
       return;
@@ -71,9 +65,6 @@ export class DatabaseManager {
     this.bookmarkRepository = new BookmarkRepository(this.rdbStore);
   }
 
-  /**
-   * 初始化默认数据
-   */
   private async initDefaultData(): Promise<void> {
     if (this.readConfigRepository) {
       await this.readConfigRepository.getOrCreateReadConfig();

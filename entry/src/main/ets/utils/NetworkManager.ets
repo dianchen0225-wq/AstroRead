@@ -3,9 +3,9 @@ import { BookSource } from '../models/BookSource';
 import { ContentParser, ParsedBookItem, ParsedChapterItem } from './ContentParser';
 import { Book } from '../models/Book';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
-import util from '@ohos.util';
 import common from '@ohos.app.ability.common';
+import legadoJSRuntime, { SearchContext } from './LegadoJSRuntime';
+import { Logger } from './Logger';
 
 /**
  * 网络请求管理器
@@ -42,7 +42,7 @@ export class NetworkManager {
     const permissions: Permissions[] = ['ohos.permission.READ_MEDIA', 'ohos.permission.WRITE_MEDIA'];
     
     if (!this.context) {
-      console.error('Context not set, cannot request permissions');
+      Logger.error('NetworkManager', 'Context not set, cannot request permissions');
       return false;
     }
     
@@ -53,124 +53,16 @@ export class NetworkManager {
       if (authResults.length >= 2 && 
           authResults[0] === 0 &&  // PERMISSION_GRANTED
           authResults[1] === 0) {   // PERMISSION_GRANTED
-        console.info('存储权限申请成功，可正常存储书源数据');
+        Logger.info('NetworkManager', '存储权限申请成功');
         return true;
       } else {
-        console.info('存储权限申请失败，无法存储书源数据');
+        Logger.warn('NetworkManager', '存储权限申请失败');
         return false;
       }
     } catch (error) {
-      console.error(`申请权限失败: ${error}`);
+      Logger.error('NetworkManager', `申请权限失败: ${error}`);
       return false;
     }
-  }
-
-  /**
-   * 流式获取数据（处理大量数据）
-   */
-  async getStream(url: string, headers?: Record<string, string>, maxResponseSize?: number): Promise<string> {
-    const httpRequest = http.createHttp();
-    const requestHeaders: Record<string, string> = headers || {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-    };
-    
-    const chunks: Uint8Array[] = [];
-    let totalSize = 0;
-    
-    return new Promise<string>((resolve, reject) => {
-      // 监听数据接收事件
-      httpRequest.on('dataReceive', (data: ArrayBuffer) => {
-        if (data) {
-          try {
-            // 检查响应大小限制
-            totalSize += data.byteLength;
-            if (maxResponseSize && totalSize > maxResponseSize) {
-              httpRequest.off('dataReceive');
-              httpRequest.off('dataEnd');
-              httpRequest.destroy();
-              reject(new Error(`响应大小超过限制: ${totalSize}字节 > ${maxResponseSize}字节`));
-              return;
-            }
-            
-            chunks.push(new Uint8Array(data));
-          } catch (e) {
-            console.error('解析流式数据失败:', e);
-          }
-        }
-      });
-      
-      // 监听数据结束事件
-      httpRequest.on('dataEnd', () => {
-        try {
-          // 合并所有数据块
-          const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-          const mergedArray = new Uint8Array(totalLength);
-          let offset = 0;
-          
-          for (const chunk of chunks) {
-            mergedArray.set(chunk, offset);
-            offset += chunk.length;
-          }
-          
-          // 使用util模块的TextDecoder（使用新API替代废弃的decode方法）
-          const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
-          const result = decoder.decodeToString(mergedArray, { stream: false });
-          
-          // 检查响应大小限制
-          if (maxResponseSize && result.length > maxResponseSize) {
-            httpRequest.off('dataReceive');
-            httpRequest.off('dataEnd');
-            httpRequest.destroy();
-            reject(new Error(`响应大小超过限制: ${result.length}字节 > ${maxResponseSize}字节`));
-            return;
-          }
-          
-          httpRequest.off('dataReceive');
-          httpRequest.off('dataEnd');
-          httpRequest.destroy();
-          resolve(result);
-        } catch (e) {
-          console.error('合并流式数据失败:', e);
-          reject(new Error('Failed to merge stream data'));
-        }
-      });
-      
-      // 监听错误事件（使用try-catch处理）
-      // httpRequest.on('error', (error: BusinessError) => {
-      //   console.error(`流式请求失败: ${error.message}`);
-      //   httpRequest.off('dataReceive');
-      //   httpRequest.off('dataEnd');
-      //   httpRequest.destroy();
-      //   reject(new Error(`Network error: ${error.message}`));
-      // });
-
-      // 发起流式请求
-      try {
-        httpRequest.requestInStream(
-          url,
-          {
-            method: http.RequestMethod.GET,
-            header: requestHeaders,
-            connectTimeout: 30000,
-            readTimeout: 30000
-          }
-        ).then((statusCode: number) => {
-          console.log(`流式请求完成，状态码: ${statusCode}`);
-        }).catch((error: BusinessError) => {
-          console.error('流式请求失败:', error);
-          httpRequest.off('dataReceive');
-          httpRequest.off('dataEnd');
-          httpRequest.destroy();
-          reject(new Error(`Request failed: ${error.message}`));
-        });
-      } catch (error) {
-        console.error('发起流式请求失败:', error);
-        httpRequest.destroy();
-        reject(new Error(`Request failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
-      }
-    });
   }
 
   /**
@@ -181,7 +73,7 @@ export class NetworkManager {
     
     try {
       const requestHeaders: Record<string, string> = headers || {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
       };
@@ -195,29 +87,25 @@ export class NetworkManager {
 
       const response = await httpRequest.request(url, requestOptions);
       
-      // 处理不同的响应码
       if (response.responseCode === 200) {
         const responseText = response.result.toString();
         
-        // 检查响应大小限制
         if (maxResponseSize && responseText.length > maxResponseSize) {
-          throw new Error(`响应大小超过限制: ${responseText.length}字节 > ${maxResponseSize}字节`);
+          throw new Error(`响应大小超过限制: ${responseText.length}字节`);
         }
         
         return responseText;
       } else if (response.responseCode === 301 || response.responseCode === 302) {
-        // 处理重定向
         const headersObj = response.header as Record<string, string>;
         let location: string | undefined;
         
-        // 检查不同大小写的Location头
         if (headersObj) {
           location = headersObj['Location'] || headersObj['location'] || headersObj['LOCATION'];
         }
         
         if (location) {
           const redirectUrl = this.resolveUrl(url, location);
-          console.log(`Redirecting to: ${redirectUrl}`);
+          Logger.info('NetworkManager', `Redirecting to: ${redirectUrl}`);
           return this.get(redirectUrl, headers, maxResponseSize);
         } else {
           throw new Error(`HTTP ${response.responseCode}: No redirect location`);
@@ -226,15 +114,8 @@ export class NetworkManager {
         throw new Error(`HTTP ${response.responseCode}: ${response.result}`);
       }
     } catch (error) {
-      let errorMessage = 'Unknown error';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'object' && error !== null) {
-        errorMessage = JSON.stringify(error);
-      } else {
-        errorMessage = String(error);
-      }
-      console.error(`Network error details: ${errorMessage}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      Logger.error('NetworkManager', `Network error: ${errorMessage}`);
       throw new Error(`Network error: ${errorMessage}`);
     } finally {
       httpRequest.destroy();
@@ -248,25 +129,21 @@ export class NetworkManager {
     const httpRequest = http.createHttp();
     
     try {
-      const defaultHeaders: Record<string, string> = {
+      // 构建请求头 - 不使用spread操作符
+      const mergedHeaders: Record<string, string> = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
       };
       
-      const mergedHeaders: Record<string, string> = {};
-      Object.entries(defaultHeaders).forEach((entry) => {
-        const key = entry[0];
-        const value = entry[1];
-        mergedHeaders[key] = value;
-      });
+      // 手动合并headers
       if (headers) {
-        Object.entries(headers).forEach((entry) => {
-          const key = entry[0];
-          const value = entry[1];
-          mergedHeaders[key] = value;
-        });
+        const keys = Object.keys(headers);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          mergedHeaders[key] = headers[key];
+        }
       }
 
       const requestOptions: http.HttpRequestOptions = {
@@ -279,88 +156,123 @@ export class NetworkManager {
 
       const response = await httpRequest.request(url, requestOptions);
       
-      // 处理不同的响应码
       if (response.responseCode === 200) {
         const responseText = response.result.toString();
         
-        // 检查响应大小限制
         if (maxResponseSize && responseText.length > maxResponseSize) {
-          throw new Error(`响应大小超过限制: ${responseText.length}字节 > ${maxResponseSize}字节`);
+          throw new Error(`响应大小超过限制: ${responseText.length}字节`);
         }
         
         return responseText;
-      } else if (response.responseCode === 301 || response.responseCode === 302) {
-        // 处理重定向
-        const headersObj = response.header as Record<string, string>;
-        let location: string | undefined;
-        
-        // 检查不同大小写的Location头
-        if (headersObj) {
-          location = headersObj['Location'] || headersObj['location'] || headersObj['LOCATION'];
-        }
-        
-        if (location) {
-          const redirectUrl = this.resolveUrl(url, location);
-          console.log(`Redirecting to: ${redirectUrl}`);
-          return this.get(redirectUrl, headers, maxResponseSize);
-        } else {
-          throw new Error(`HTTP ${response.responseCode}: No redirect location`);
-        }
       } else {
         throw new Error(`HTTP ${response.responseCode}: ${response.result}`);
       }
     } catch (error) {
-      let errorMessage = 'Unknown error';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'object' && error !== null) {
-        errorMessage = JSON.stringify(error);
-      } else {
-        errorMessage = String(error);
-      }
-      console.error(`Network error details: ${errorMessage}`);
-      throw new Error(`Network error: ${errorMessage}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      Logger.error('NetworkManager', `POST error: ${errorMessage}`);
+      throw new Error(`POST error: ${errorMessage}`);
     } finally {
       httpRequest.destroy();
     }
   }
 
   /**
-   * 搜索书籍
+   * 搜索书籍 - 支持JavaScript书源
    */
-  async searchBook(bookSource: BookSource, keyword: string): Promise<Book[]> {
+  async searchBook(bookSource: BookSource, keyword: string, page: number = 1): Promise<Book[]> {
+    const TAG = 'NetworkManager';
     try {
       let searchUrl = bookSource.searchUrl;
-      const headers: Record<string, string> | undefined = bookSource.header
-        ? (JSON.parse(bookSource.header) as Record<string, string>)
-        : undefined;
       
-      // 替换搜索关键词
-      if (searchUrl.includes('{{key}}')) {
-        searchUrl = searchUrl.replace('{{key}}', encodeURIComponent(keyword));
-        console.log(`Searching with URL: ${searchUrl}`);
-        const html = await this.get(searchUrl, headers);
-        
-        // 使用规则解析引擎解析搜索结果
-        const results: ParsedBookItem[] = ContentParser.parseSearchResult(html, bookSource);
-        console.log(`Found ${results.length} results from ${bookSource.name}`);
-        
-        // 转换为Book对象
-        return results.map((item: ParsedBookItem) => this.convertToBook(item, bookSource));
-      } else {
-        // POST请求方式
-        console.log(`Searching with POST to: ${bookSource.url}`);
-        const html = await this.post(bookSource.url, `keyword=${encodeURIComponent(keyword)}`, headers);
-        
-        // 使用规则解析引擎解析搜索结果
-        const results: ParsedBookItem[] = ContentParser.parseSearchResult(html, bookSource);
-        console.log(`Found ${results.length} results from ${bookSource.name}`);
-        
-        // 转换为Book对象
-        return results.map((item: ParsedBookItem) => this.convertToBook(item, bookSource));
+      // 解析请求头
+      let headers: Record<string, string> | undefined = undefined;
+      if (bookSource.header) {
+        try {
+          headers = JSON.parse(bookSource.header) as Record<string, string>;
+        } catch (e) {
+          Logger.warn(TAG, `Failed to parse headers for ${bookSource.name}`);
+        }
       }
+      
+      let finalUrl = '';
+      
+      // 处理JavaScript书源
+      if (searchUrl.startsWith('@js:')) {
+        Logger.info(TAG, `执行JavaScript书源: ${bookSource.name}`);
+        
+        const context: SearchContext = {
+          key: keyword,
+          page: page,
+          baseUrl: bookSource.url
+        };
+        
+        finalUrl = await legadoJSRuntime.executeSearchUrl(searchUrl, context);
+        
+        if (!finalUrl) {
+          Logger.warn(TAG, `JavaScript执行未返回URL: ${bookSource.name}`);
+          return [];
+        }
+        
+        Logger.info(TAG, `JavaScript生成URL: ${finalUrl}`);
+      } else {
+        // 处理普通模板变量
+        finalUrl = searchUrl;
+        
+        // 替换 {{key}} 关键词
+        if (finalUrl.includes('{{key}}')) {
+          finalUrl = finalUrl.replace(/\{\{key\}\}/g, encodeURIComponent(keyword));
+        }
+        
+        // 替换 {{page}} 页码
+        if (finalUrl.includes('{{page}}')) {
+          finalUrl = finalUrl.replace(/\{\{page\}\}/g, String(page));
+        }
+        
+        // 替换 {{(page - 1) * 10}} 等偏移量表达式
+        if (finalUrl.includes('{{(page - 1) * 10}}')) {
+          finalUrl = finalUrl.replace(/\{\{\(page - 1\) \* 10\}\}/g, String((page - 1) * 10));
+        }
+        
+        // 处理URL中可能包含的JSON配置
+        const commaIndex = finalUrl.indexOf(',{');
+        if (commaIndex > 0 && finalUrl.endsWith('}')) {
+          try {
+            const urlPart = finalUrl.substring(0, commaIndex);
+            const configPart = finalUrl.substring(commaIndex + 1);
+            const config = JSON.parse(configPart) as Record<string, Record<string, string>>;
+            if (config.headers && headers) {
+              // 手动合并headers - 不使用spread
+              const configHeaderKeys = Object.keys(config.headers);
+              for (let i = 0; i < configHeaderKeys.length; i++) {
+                const key = configHeaderKeys[i];
+                headers[key] = config.headers[key];
+              }
+            }
+            finalUrl = urlPart;
+          } catch (e) {
+            // 如果解析失败，保持原URL
+          }
+        }
+      }
+      
+      // 验证URL
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        Logger.warn(TAG, `Invalid URL for ${bookSource.name}: ${finalUrl}`);
+        return [];
+      }
+      
+      Logger.info(TAG, `Searching with URL: ${finalUrl}`);
+      const html = await this.get(finalUrl, headers);
+      
+      // 使用规则解析引擎解析搜索结果
+      const results: ParsedBookItem[] = ContentParser.parseSearchResult(html, bookSource);
+      Logger.info(TAG, `Found ${results.length} results from ${bookSource.name}`);
+      
+      // 转换为Book对象
+      return results.map((item: ParsedBookItem) => this.convertToBook(item, bookSource));
+      
     } catch (error) {
-      console.error(`Search failed for ${bookSource.name}:`, error);
+      Logger.error(TAG, `Search failed for ${bookSource.name}: ${error}`);
       return [];
     }
   }
@@ -384,7 +296,8 @@ export class NetworkManager {
       lastUpdateTime: Date.now(),
       addTime: Date.now(),
       readProgress: 0,
-      lastReadChapter: undefined
+      lastReadChapter: undefined,
+      lastReadChapterIndex: undefined
     };
     return book;
   }
@@ -398,42 +311,37 @@ export class NetworkManager {
         ? (JSON.parse(bookSource.header) as Record<string, string>)
         : undefined;
       
-      // 处理相对URL
-      let fullUrl = this.resolveUrl(bookSource.url, bookUrl);
-      console.log(`Getting chapter list from: ${fullUrl}`);
+      const fullUrl = this.resolveUrl(bookSource.url, bookUrl);
+      Logger.info('NetworkManager', `Getting chapter list from: ${fullUrl}`);
       
       const html = await this.get(fullUrl, headers);
       
-      // 使用规则解析引擎解析章节列表
       const chapters: ParsedChapterItem[] = ContentParser.parseChapterList(html, bookSource);
-      console.log(`Found ${chapters.length} chapters`);
+      Logger.info('NetworkManager', `Found ${chapters.length} chapters`);
       
       // 处理相对URL并去重
       const uniqueChapters: ParsedChapterItem[] = [];
       const seenUrls = new Set<string>();
       
-      chapters.forEach((chapter: ParsedChapterItem) => {
+      for (let i = 0; i < chapters.length; i++) {
+        const chapter = chapters[i];
         if (chapter.url) {
-          // 处理相对URL
           if (!chapter.url.startsWith('http')) {
             chapter.url = this.resolveUrl(fullUrl, chapter.url);
           }
           
-          // 去重
           if (!seenUrls.has(chapter.url)) {
             seenUrls.add(chapter.url);
             uniqueChapters.push(chapter);
           }
         } else if (chapter.title) {
-          // 保留没有URL但有标题的章节
           uniqueChapters.push(chapter);
         }
-      });
+      }
       
-      console.log(`Unique chapters: ${uniqueChapters.length}`);
       return uniqueChapters;
     } catch (error) {
-      console.error('Failed to get chapter list:', error);
+      Logger.error('NetworkManager', `Failed to get chapter list: ${error}`);
       return [];
     }
   }
@@ -443,7 +351,7 @@ export class NetworkManager {
    */
   async getChapterContent(bookSource: BookSource, chapterUrl: string): Promise<string> {
     try {
-      console.log(`Getting chapter content from: ${chapterUrl}`);
+      Logger.info('NetworkManager', `Getting chapter content from: ${chapterUrl}`);
       
       const headers: Record<string, string> | undefined = bookSource.header
         ? (JSON.parse(bookSource.header) as Record<string, string>)
@@ -451,32 +359,27 @@ export class NetworkManager {
       
       const html = await this.get(chapterUrl, headers);
       
-      // 使用规则解析引擎解析并净化内容
       const content = ContentParser.parseChapterContent(html, bookSource);
       
-      // 验证内容
       if (!content || content.trim().length === 0) {
-        console.warn('Empty chapter content');
         return '本章内容为空';
       }
       
-      // 限制内容长度，防止过大
+      // 限制内容长度
       const maxContentLength = 50000;
       if (content.length > maxContentLength) {
-        console.warn(`Chapter content too long, truncating to ${maxContentLength} characters`);
         return content.substring(0, maxContentLength) + '...';
       }
       
-      console.log(`Chapter content length: ${content.length} characters`);
       return content;
     } catch (error) {
-      console.error('Failed to get chapter content:', error);
+      Logger.error('NetworkManager', `Failed to get chapter content: ${error}`);
       return `获取章节内容失败: ${error instanceof Error ? error.message : '未知错误'}`;
     }
   }
 
   /**
-   * 简单的 URL 解析与拼接，避免依赖全局 URL 类型
+   * URL解析与拼接
    */
   private resolveUrl(baseUrl: string, relative: string): string {
     if (relative.startsWith('http')) {

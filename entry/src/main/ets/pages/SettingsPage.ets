@@ -6,15 +6,18 @@
       @Local cacheSize: string = '128MB';
       @Local autoUpdate: boolean = true;
       @Local readModeIndex: number = 0;
+      private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
+        this.isLightMode = !isDark;
+      };
 
       aboutToAppear(): void {
-          // 初始化主题
           this.isLightMode = themeManager.isLightTheme();
-          // 监听主题变化
-          themeManager.addListener((isDark: boolean) => {
-            this.isLightMode = !isDark;
-          });
+          themeManager.addListener(this.themeListener);
         }
+
+      aboutToDisappear(): void {
+        themeManager.removeListener(this.themeListener);
+      }
       build() {
         Column() {
           // 顶部导航

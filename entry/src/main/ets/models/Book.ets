@@ -16,7 +16,8 @@ export interface Book {
   lastUpdateTime: number;        // 最后更新时间
   addTime: number;               // 添加时间
   readProgress: number;          // 阅读进度（百分比 0-100）
-  lastReadChapter: string | undefined; // 最后阅读章节
+  lastReadChapter: string | undefined; // 最后阅读章节名称
+  lastReadChapterIndex: number | undefined; // 最后阅读章节索引
 }
 
 /**

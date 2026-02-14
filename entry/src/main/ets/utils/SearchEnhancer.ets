@@ -242,7 +242,8 @@ class SearchEnhancer {
             lastUpdateTime: book.lastUpdateTime,
             addTime: book.addTime,
             readProgress: book.readProgress,
-            lastReadChapter: book.lastReadChapter
+            lastReadChapter: book.lastReadChapter,
+            lastReadChapterIndex: book.lastReadChapterIndex
           };
           return bookWithSource;
         });

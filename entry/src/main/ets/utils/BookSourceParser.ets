@@ -6,6 +6,52 @@
 import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../models/BookSource';
 import { Logger } from './Logger';
 
+/**
+ * 阅读APP书源规则对象
+ */
+interface RuleObject {
+  bookList?: string;
+  name?: string;
+  author?: string;
+  cover?: string;
+  intro?: string;
+  bookUrl?: string;
+  nextUrl?: string;
+  chapterList?: string;
+  chapterName?: string;
+  chapterUrl?: string;
+  content?: string;
+  replaceRule?: string;
+}
+
+/**
+ * 阅读APP书源数据结构
+ */
+interface LegadoSourceData {
+  bookSourceName?: string;
+  bookSourceUrl?: string;
+  bookSourceGroup?: string;
+  bookSourceComment?: string;
+  searchUrl?: string;
+  exploreUrl?: string;
+  enabled?: boolean;
+  enabledExplore?: boolean;
+  weight?: number;
+  customOrder?: number;
+  lastUpdateTime?: number;
+  respondTime?: number;
+  ruleSearch?: RuleObject;
+  ruleExplore?: RuleObject;
+  ruleBookInfo?: RuleObject;
+  ruleToc?: RuleObject;
+  ruleContent?: RuleObject;
+  header?: string;
+  concurrentRate?: string;
+  loginUrl?: string;
+  loginUi?: string;
+  jsLib?: string;
+}
+
 interface SourceData {
   name?: string;
   url?: string;
@@ -59,20 +105,20 @@ class BookSourceParser {
    */
   private parseJsonSources(content: string): Array<BookSource> {
     try {
-      const sourcesData = JSON.parse(content) as SourceData | SourceData[];
+      const sourcesData = JSON.parse(content) as LegadoSourceData | LegadoSourceData[];
       const sources: Array<BookSource> = [];
       
       // 处理数组格式
       if (Array.isArray(sourcesData)) {
         for (const sourceData of sourcesData) {
-          const source = this.buildBookSource(this.convertToRecord(sourceData));
+          const source = this.buildBookSourceFromLegado(sourceData);
           if (source) {
             sources.push(source);
           }
         }
       } else if (typeof sourcesData === 'object') {
         // 处理单个书源对象
-        const source = this.buildBookSource(this.convertToRecord(sourcesData));
+        const source = this.buildBookSourceFromLegado(sourcesData);
         if (source) {
           sources.push(source);
         }
@@ -87,48 +133,157 @@ class BookSourceParser {
   }
   
   /**
-   * 安全获取SourceData字段值
+   * 从阅读APP格式构建书源对象
    */
-  private getSourceDataValue(sourceData: SourceData, key: string): string | undefined {
-    switch (key) {
-      case 'name': return sourceData.name?.toString();
-      case 'url': return sourceData.url?.toString();
-      case 'searchUrl': return sourceData.searchUrl?.toString();
-      case 'search_url': return sourceData.search_url?.toString();
-      case 'bookUrl': return sourceData.bookUrl?.toString();
-      case 'book_url': return sourceData.book_url?.toString();
-      case 'chapterUrl': return sourceData.chapterUrl?.toString();
-      case 'chapter_url': return sourceData.chapter_url?.toString();
-      case 'contentUrl': return sourceData.contentUrl?.toString();
-      case 'content_url': return sourceData.content_url?.toString();
-      case 'enabled': return sourceData.enabled?.toString();
-      case 'weight': return sourceData.weight?.toString();
-      case 'lastUpdateTime': return sourceData.lastUpdateTime?.toString();
-      case 'description': return sourceData.description?.toString();
-      default: return undefined;
-    }
-  }
-
-  /**
-   * 将SourceData转换为Record<string, string>
-   */
-  private convertToRecord(sourceData: SourceData): Record<string, string> {
-    const record: Record<string, string> = {};
-    
-    // 手动映射所有已知字段
-    const fields = ['name', 'url', 'searchUrl', 'search_url', 'bookUrl', 'book_url', 
-                   'chapterUrl', 'chapter_url', 'contentUrl', 'content_url', 
-                   'enabled', 'weight', 'lastUpdateTime', 'description'];
-    
-    for (const key of fields) {
-      const value = this.getSourceDataValue(sourceData, key);
-      if (value !== undefined) {
-        record[key] = String(value);
+  private buildBookSourceFromLegado(data: LegadoSourceData): BookSource | null {
+    try {
+      const name = data.bookSourceName || '';
+      let url = data.bookSourceUrl || '';  // 改为let以支持URL处理
+      
+      if (!name || !url) {
+        Logger.warn(this.TAG, '书源缺少必要字段：bookSourceName或bookSourceUrl');
+        return null;
       }
+      
+      // 处理URL中的##注释（阅读APP格式支持在URL后添加注释）
+      if (url.includes('##')) {
+        url = url.split('##')[0];
+      }
+      
+      // 处理URL中的##注释（阅读APP格式支持在URL后添加注释）
+      if (url.includes('##')) {
+        url = url.split('##')[0];
+      }
+      
+      // 构建搜索规则
+      const searchRule: SearchRule = this.buildSearchRuleFromLegado(data.ruleSearch);
+      
+      // 构建章节规则
+      const chapterRule: ChapterRule = this.buildChapterRuleFromLegado(data.ruleToc);
+      
+      // 构建内容规则
+      const contentRule: ContentRule = this.buildContentRuleFromLegado(data.ruleContent);
+      
+      // 构建发现规则
+      const findRule: FindRule | undefined = this.buildFindRuleFromLegado(data.ruleExplore, data.exploreUrl);
+      
+      const source: BookSource = {
+        id: '',
+        name: name,
+        url: url,
+        enabled: data.enabled !== false,
+        header: data.header || undefined,
+        searchUrl: data.searchUrl || '',
+        searchRule: searchRule,
+        findRule: findRule,
+        chapterRule: chapterRule,
+        contentRule: contentRule,
+        ruleType: this.detectRuleType(data.ruleSearch, data.ruleToc, data.ruleContent),
+        sort: data.customOrder || data.weight || 1,
+        lastUpdateTime: data.lastUpdateTime || Date.now(),
+        addTime: Date.now()
+      };
+      
+      // 验证书源有效性 - 放宽验证，允许非标准URL
+      if (!source.name || source.name.trim().length === 0) {
+        return null;
+      }
+      
+      return source;
+    } catch (error) {
+      Logger.error(this.TAG, `构建书源对象失败：${JSON.stringify(error)}`);
+      return null;
+    }
+  }
+  
+  /**
+   * 从阅读APP规则构建搜索规则
+   */
+  private buildSearchRuleFromLegado(rule?: RuleObject): SearchRule {
+    if (!rule) {
+      return {
+        bookList: '',
+        name: '',
+        author: '',
+        cover: undefined,
+        intro: undefined,
+        bookUrl: '',
+        nextUrl: undefined
+      };
     }
     
-    return record;
+    return {
+      bookList: rule.bookList || '',
+      name: rule.name || '',
+      author: rule.author || '',
+      cover: rule.cover || undefined,
+      intro: rule.intro || undefined,
+      bookUrl: rule.bookUrl || '',
+      nextUrl: rule.nextUrl || undefined
+    };
   }
+  
+  /**
+   * 从阅读APP规则构建章节规则
+   */
+  private buildChapterRuleFromLegado(rule?: RuleObject): ChapterRule {
+    if (!rule) {
+      return {
+        chapterList: '',
+        chapterName: '',
+        chapterUrl: '',
+        nextUrl: undefined
+      };
+    }
+    
+    return {
+      chapterList: rule.chapterList || rule.bookList || '',
+      chapterName: rule.chapterName || rule.name || '',
+      chapterUrl: rule.chapterUrl || rule.bookUrl || '',
+      nextUrl: rule.nextUrl || undefined
+    };
+  }
+  
+  /**
+   * 从阅读APP规则构建内容规则
+   */
+  private buildContentRuleFromLegado(rule?: RuleObject): ContentRule {
+    if (!rule) {
+      return {
+        content: '',
+        nextUrl: undefined,
+        prevUrl: undefined,
+        replaceRule: undefined
+      };
+    }
+    
+    return {
+      content: rule.content || '',
+      nextUrl: rule.nextUrl || undefined,
+      prevUrl: undefined,
+      replaceRule: rule.replaceRule || undefined
+    };
+  }
+  
+  /**
+   * 从阅读APP规则构建发现规则
+   */
+  private buildFindRuleFromLegado(rule?: RuleObject, exploreUrl?: string): FindRule | undefined {
+    if (!rule && !exploreUrl) {
+      return undefined;
+    }
+    
+    return {
+      url: exploreUrl || '',
+      bookList: rule?.bookList || '',
+      name: rule?.name || '',
+      author: rule?.author || '',
+      cover: rule?.cover || undefined,
+      intro: rule?.intro || undefined,
+      bookUrl: rule?.bookUrl || ''
+    };
+  }
+  
   
   /**
    * 解析XML格式书源
@@ -268,7 +423,7 @@ class BookSourceParser {
         findRule: this.buildFindRule(sourceData),
         chapterRule: chapterRule,
         contentRule: contentRule,
-        ruleType: 'jsonpath',
+        ruleType: 'xpath', // 默认使用xpath类型
         sort: parseInt(sourceData['weight'] || sourceData['sort'] || '1'),
         lastUpdateTime: parseInt(sourceData['lastUpdateTime'] || Date.now().toString()),
         addTime: Date.now()
@@ -411,6 +566,119 @@ class BookSourceParser {
     // TXT检测（默认格式）
     return 'txt';
   }
-}
+  /**
+   * 检测规则类型
+   * 根据规则字符串判断是xpath、jsonpath还是regex
+   */
+  private detectRuleType(searchRule?: RuleObject, chapterRule?: RuleObject, contentRule?: RuleObject): 'xpath' | 'jsonpath' | 'regex' {
+    // 检查所有规则中是否包含jsonpath标识
+    const rules = [searchRule, chapterRule, contentRule];
+    
+    for (const rule of rules) {
+      if (!rule) continue;
+      
+      // 检查规则字符串中的标识
+        if (rule.bookList && typeof rule.bookList === 'string') {
+          if (rule.bookList.includes('$.') || rule.bookList.includes('$[') || rule.bookList.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.bookList.startsWith('##') || rule.bookList.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.name && typeof rule.name === 'string') {
+          if (rule.name.includes('$.') || rule.name.includes('$[') || rule.name.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.name.startsWith('##') || rule.name.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.author && typeof rule.author === 'string') {
+          if (rule.author.includes('$.') || rule.author.includes('$[') || rule.author.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.author.startsWith('##') || rule.author.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.cover && typeof rule.cover === 'string') {
+          if (rule.cover.includes('$.') || rule.cover.includes('$[') || rule.cover.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.cover.startsWith('##') || rule.cover.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.intro && typeof rule.intro === 'string') {
+          if (rule.intro.includes('$.') || rule.intro.includes('$[') || rule.intro.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.intro.startsWith('##') || rule.intro.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.bookUrl && typeof rule.bookUrl === 'string') {
+          if (rule.bookUrl.includes('$.') || rule.bookUrl.includes('$[') || rule.bookUrl.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.bookUrl.startsWith('##') || rule.bookUrl.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.nextUrl && typeof rule.nextUrl === 'string') {
+          if (rule.nextUrl.includes('$.') || rule.nextUrl.includes('$[') || rule.nextUrl.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.nextUrl.startsWith('##') || rule.nextUrl.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.chapterList && typeof rule.chapterList === 'string') {
+          if (rule.chapterList.includes('$.') || rule.chapterList.includes('$[') || rule.chapterList.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.chapterList.startsWith('##') || rule.chapterList.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.chapterName && typeof rule.chapterName === 'string') {
+          if (rule.chapterName.includes('$.') || rule.chapterName.includes('$[') || rule.chapterName.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.chapterName.startsWith('##') || rule.chapterName.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.chapterUrl && typeof rule.chapterUrl === 'string') {
+          if (rule.chapterUrl.includes('$.') || rule.chapterUrl.includes('$[') || rule.chapterUrl.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.chapterUrl.startsWith('##') || rule.chapterUrl.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.content && typeof rule.content === 'string') {
+          if (rule.content.includes('$.') || rule.content.includes('$[') || rule.content.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.content.startsWith('##') || rule.content.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+        if (rule.replaceRule && typeof rule.replaceRule === 'string') {
+          if (rule.replaceRule.includes('$.') || rule.replaceRule.includes('$[') || rule.replaceRule.startsWith('@json:')) {
+            return 'jsonpath';
+          }
+          if (rule.replaceRule.startsWith('##') || rule.replaceRule.startsWith('@regex:')) {
+            return 'regex';
+          }
+        }
+    }
+    
+    // 默认返回xpath
+    return 'xpath';
+  }
+  }
 
 export default new BookSourceParser();

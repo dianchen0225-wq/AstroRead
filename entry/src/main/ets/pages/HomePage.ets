@@ -6,12 +6,17 @@
     @Local isLightMode: boolean = themeManager.isLightTheme();
     @Local buttonPressedMap: Map<string, boolean> = new Map<string, boolean>();
     @Param safeAreaTop: number = 0;
+    private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
+      this.isLightMode = !isDark;
+    };
 
     aboutToAppear(): void {
       this.isLightMode = themeManager.isLightTheme();
-      themeManager.addListener((isDark: boolean) => {
-        this.isLightMode = !isDark;
-      });
+      themeManager.addListener(this.themeListener);
+    }
+
+    aboutToDisappear(): void {
+      themeManager.removeListener(this.themeListener);
     }
 
     build() {

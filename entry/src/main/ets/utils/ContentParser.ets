@@ -1,4 +1,5 @@
 import { BookSource, SearchRule, ChapterRule } from '../models/BookSource';
+import { CssSelectorParser } from './CssSelectorParser';
 
 /**
  * 解析后的搜索结果条目
@@ -708,32 +709,118 @@ export class ContentParser {
     return decoded;
   }
 
-  // 以下方法需要实现，但当前版本暂时使用正则表达式替代
-  private static parseByXPath(_html: string, listRule: string, _rule: SearchRule): ParsedBookItem[] {
-    // 简化实现：使用正则表达式替代XPath
-    console.warn('XPath解析功能未完全实现，使用正则表达式回退');
-    // TODO: 待实现XPath解析功能
-    return ContentParser.parseByRegex(_html, listRule, _rule);
+  /**
+   * 使用XPath/CSS选择器解析搜索结果
+   * 支持阅读APP的CSS选择器语法
+   */
+  private static parseByXPath(html: string, listRule: string, rule: SearchRule): ParsedBookItem[] {
+    try {
+      const books: ParsedBookItem[] = [];
+      
+      // 处理JavaScript规则（以<js>或@js:开头）
+      if (listRule.startsWith('<js>') || listRule.startsWith('@js:')) {
+        console.warn('JavaScript规则暂不支持，使用正则表达式回退');
+        return ContentParser.parseByRegex(html, listRule, rule);
+      }
+      
+      // 提取书籍列表元素
+      const listElements = CssSelectorParser.selectElements(html, listRule);
+      
+      for (const elementHtml of listElements) {
+        const bookItem: ParsedBookItem = {};
+        
+        // 提取书名
+        if (rule.name) {
+          bookItem.name = CssSelectorParser.extractValue(elementHtml, rule.name);
+        }
+        
+        // 提取作者
+        if (rule.author) {
+          bookItem.author = CssSelectorParser.extractValue(elementHtml, rule.author);
+        }
+        
+        // 提取封面
+        if (rule.cover) {
+          bookItem.cover = CssSelectorParser.extractValue(elementHtml, rule.cover);
+        }
+        
+        // 提取简介
+        if (rule.intro) {
+          bookItem.intro = CssSelectorParser.extractValue(elementHtml, rule.intro);
+        }
+        
+        // 提取书籍URL
+        if (rule.bookUrl) {
+          bookItem.bookUrl = CssSelectorParser.extractValue(elementHtml, rule.bookUrl);
+        }
+        
+        if (bookItem.name && bookItem.bookUrl) {
+          books.push(bookItem);
+        }
+      }
+      
+      return books;
+    } catch (error) {
+      console.error('XPath/CSS选择器解析失败:', error);
+      return [];
+    }
   }
-
-  private static parseChaptersByXPath(_html: string, listRule: string, _rule: ChapterRule): ParsedChapterItem[] {
-    // 简化实现：使用正则表达式替代XPath
-    console.warn('XPath章节解析功能未完全实现，使用正则表达式回退');
-    // TODO: 待实现XPath解析功能
-    return ContentParser.parseChaptersByRegex(_html, listRule, _rule);
+  
+  /**
+   * 使用XPath/CSS选择器解析章节列表
+   */
+  private static parseChaptersByXPath(html: string, listRule: string, rule: ChapterRule): ParsedChapterItem[] {
+    try {
+      const chapters: ParsedChapterItem[] = [];
+      
+      // 提取章节列表元素
+      const listElements = CssSelectorParser.selectElements(html, listRule);
+      
+      let order = 0;
+      for (const elementHtml of listElements) {
+        const chapterItem: ParsedChapterItem = {
+          title: '',
+          url: '',
+          isVip: false,
+          order: 0
+        };
+        
+        // 提取章节名
+        if (rule.chapterName) {
+          chapterItem.title = CssSelectorParser.extractValue(elementHtml, rule.chapterName);
+        }
+        
+        // 提取章节URL
+        if (rule.chapterUrl) {
+          chapterItem.url = CssSelectorParser.extractValue(elementHtml, rule.chapterUrl);
+        }
+        
+        // 判断是否VIP章节
+        chapterItem.isVip = /vip|收费|会员|付费/i.test(chapterItem.title || '');
+        chapterItem.order = order++;
+        
+        if (chapterItem.title && chapterItem.url) {
+          chapters.push(chapterItem);
+        }
+      }
+      
+      return chapters;
+    } catch (error) {
+      console.error('XPath章节解析失败:', error);
+      return [];
+    }
   }
-
-  private static extractByXPath(_html: string, _rule: string): string {
-    // 简化实现：使用正则表达式替代XPath
-    console.warn('XPath文本提取功能未完全实现');
-    // TODO: 待实现XPath解析功能
-    return '';
+  
+  /**
+   * 使用XPath/CSS选择器提取内容
+   */
+  private static extractByXPath(html: string, rule: string): string {
+    return CssSelectorParser.extractValue(html, rule);
   }
-
+  
   private static extractElementAttribute(_html: string, _selector: string, _attr: string): string {
     // 简化实现：返回空字符串
     console.warn('XPath属性提取功能未实现');
-    // TODO: 待实现XPath属性提取功能
     return '';
   }
 }

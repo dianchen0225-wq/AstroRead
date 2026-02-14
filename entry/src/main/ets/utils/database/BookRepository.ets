@@ -128,7 +128,10 @@ export class BookRepository {
         readProgress: resultSet.getDouble(readProgressIndex) || 0,
         lastReadChapter: resultSet.isColumnNull(lastReadChapterIndex)
           ? undefined
-          : resultSet.getString(lastReadChapterIndex) || ''
+          : resultSet.getString(lastReadChapterIndex) || '',
+        lastReadChapterIndex: resultSet.isColumnNull(lastReadChapterIndex)
+          ? undefined
+          : resultSet.getLong(lastReadChapterIndex) || 0
       };
     } catch (error) {
       console.error(`Failed to parse book: ${error instanceof Error ? error.message : String(error)}`);
@@ -147,7 +150,8 @@ export class BookRepository {
         lastUpdateTime: 0,
         addTime: 0,
         readProgress: 0,
-        lastReadChapter: undefined
+        lastReadChapter: undefined,
+        lastReadChapterIndex: undefined
       };
     }
   }

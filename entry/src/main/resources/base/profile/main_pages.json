@@ -1,5 +1,7 @@
-{
-  "src": [
-    "pages/MainPage"
-  ]
-}
+  {
+    "src": [
+      "pages/MainPage",
+      "pages/ReadPage",
+      "pages/BookDetailPage"
+    ]
+  }

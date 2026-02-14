@@ -35,6 +35,7 @@ export class ReadConfigRepository {
         const config: ReadConfig = {
           fontSize: resultSet.getLong(resultSet.getColumnIndex('font_size')) || 16,
           lineSpacing: resultSet.getDouble(resultSet.getColumnIndex('line_spacing')) || 1.5,
+          letterSpacing: resultSet.getDouble(resultSet.getColumnIndex('letter_spacing')) || 0,
           pageTurnMode: (resultSet.getString(resultSet.getColumnIndex('page_turn_mode')) as 'cover' | 'slide' | 'scroll' | 'simulation') || 'cover',
           backgroundColor: resultSet.getString(resultSet.getColumnIndex('background_color')) || '#FFFFFF',
           textColor: resultSet.getString(resultSet.getColumnIndex('text_color')) || '#333333',
@@ -52,6 +53,7 @@ export class ReadConfigRepository {
         const defaultConfig: ReadConfig = {
           fontSize: 16,
           lineSpacing: 1.5,
+          letterSpacing: 0,
           pageTurnMode: 'cover',
           backgroundColor: '#FFFFFF',
           textColor: '#333333',

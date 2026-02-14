@@ -23,13 +23,18 @@
     @Local isLightMode: boolean = themeManager.isLightTheme();
     @Local safeAreaTop: number = 0;
     @Local safeAreaBottom: number = 0;
+    private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
+      this.isLightMode = !isDark;
+    };
 
     aboutToAppear(): void {
-      themeManager.addListener((isDark: boolean) => {
-        this.isLightMode = !isDark;
-      });
+      themeManager.addListener(this.themeListener);
       this.isLightMode = themeManager.isLightTheme();
       this.setWindowImmersive();
+    }
+
+    aboutToDisappear(): void {
+      themeManager.removeListener(this.themeListener);
     }
 
     async setWindowImmersive(): Promise<void> {

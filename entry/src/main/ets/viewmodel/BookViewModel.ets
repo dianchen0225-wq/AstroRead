@@ -258,4 +258,12 @@ export class BookViewModel {
       return true;
     });
   }
+
+  /**
+   * 判断书籍是否已添加
+   */
+  async isBookAdded(bookId: string): Promise<boolean> {
+    const books = await this.loadAllBooks();
+    return books.some((book: Book) => book.id === bookId);
+  }
 }
