@@ -8,6 +8,7 @@ import BookSourceParser from './BookSourceParser';
 import SourceValidator from './SourceValidator';
 import { databaseManager } from './DatabaseManager';
 import { Logger } from './Logger';
+import { util } from '@kit.ArkTS';
 
 /**
  * 导入结果接口
@@ -53,30 +54,44 @@ class SourceImportManager {
   
   private TAG: string = 'SourceImportManager';
   
-  // 安全配置 - 增强安全限制
-  private readonly MAX_CONTENT_SIZE = 5 * 1024 * 1024; // 降低到5MB
-  private readonly MAX_SOURCES_PER_IMPORT = 500; // 降低导入数量限制
-  private readonly MAX_SOURCES_PER_BATCH = 20; // 降低批量处理数量
-  private readonly MAX_ERROR_MESSAGE_LENGTH = 100; // 限制错误信息长度
-  private readonly MAX_SOURCE_NAME_LENGTH = 100; // 限制书源名称长度
-  private readonly MAX_URL_LENGTH = 2048; // URL长度限制
-  private readonly MAX_HEADER_LENGTH = 5000; // 请求头长度限制
-  private readonly MAX_NESTING_DEPTH = 50; // 最大嵌套深度
-  private readonly MAX_LINE_COUNT = 10000; // 最大行数限制
+  private readonly MAX_CONTENT_SIZE = 50 * 1024 * 1024;
+  private readonly MAX_SOURCES_PER_IMPORT = 5000;
+  private readonly MAX_SOURCES_PER_BATCH = 100;
+  private readonly MAX_ERROR_MESSAGE_LENGTH = 100;
+  private readonly MAX_SOURCE_NAME_LENGTH = 100;
+  private readonly MAX_URL_LENGTH = 2048;
+  private readonly MAX_HEADER_LENGTH = 5000;
+  private readonly MAX_NESTING_DEPTH = 50;
+  private readonly MAX_LINE_COUNT = 100000;
+  private sourceCache: Map<string, BookSource> | null = null;
+  private importProgressCallback: ((current: number, total: number, message: string) => void) | null = null;
+  private isImportCancelled: boolean = false;
+
+  setProgressCallback(callback: (current: number, total: number, message: string) => void): void {
+    this.importProgressCallback = callback;
+  }
+
+  cancelImport(): void {
+    this.isImportCancelled = true;
+  }
+
+  private reportProgress(current: number, total: number, message: string): void {
+    if (this.importProgressCallback) {
+      this.importProgressCallback(current, total, message);
+    }
+  }
 
   /**
-   * 导入书源 - 增强安全验证
-   * @param content 书源内容
-   * @param format 格式类型（可选，自动检测）
-   * @returns 导入结果
+   * 导入书源 - 支持大规模导入
    */
-  async importSources(content: string, format?: string): Promise<ImportResult> {
+  async importSources(content: string, format?: string, skipSafetyCheck: boolean = false): Promise<ImportResult> {
     const startTime = Date.now();
+    this.isImportCancelled = false;
     
     try {
       Logger.info(this.TAG, '开始导入书源');
+      this.reportProgress(0, 100, '验证书源内容...');
       
-      // 增强输入内容验证
       if (!content || content.trim().length === 0) {
         return {
           success: false,
@@ -87,7 +102,6 @@ class SourceImportManager {
         };
       }
       
-      // 验证内容大小 - 增强安全限制
       if (content.length > this.MAX_CONTENT_SIZE) {
         return {
           success: false,
@@ -98,19 +112,21 @@ class SourceImportManager {
         };
       }
       
-      // 检查内容安全性
-      const safetyCheck = this.performContentSafetyCheck(content);
-      if (!safetyCheck.isSafe) {
-        return {
-          success: false,
-          message: safetyCheck.message || '书源内容包含可疑代码',
-          importedCount: 0,
-          totalCount: 0,
-          errors: safetyCheck.errors || ['检测到潜在的安全威胁']
-        };
+      if (!skipSafetyCheck) {
+        const safetyCheck = this.performContentSafetyCheck(content);
+        if (!safetyCheck.isSafe) {
+          return {
+            success: false,
+            message: safetyCheck.message || '书源内容包含可疑代码',
+            importedCount: 0,
+            totalCount: 0,
+            errors: safetyCheck.errors || ['检测到潜在的安全威胁']
+          };
+        }
+      } else {
+        Logger.warn(this.TAG, '用户选择跳过安全检查，继续导入');
       }
-      
-      // 自动检测格式
+
       const detectedFormat = format || BookSourceParser.detectFormat(content);
       
       if (detectedFormat === 'unknown') {
@@ -123,7 +139,7 @@ class SourceImportManager {
         };
       }
       
-      // 安全解析书源
+      this.reportProgress(10, 100, '解析书源数据...');
       const parsedSources = await this.safeParseSources(content, detectedFormat);
       
       if (parsedSources.length === 0) {
@@ -136,16 +152,25 @@ class SourceImportManager {
         };
       }
       
-      // 限制导入数量 - 增强安全限制
       if (parsedSources.length > this.MAX_SOURCES_PER_IMPORT) {
         Logger.warn(this.TAG, `导入书源数量过多，限制为${this.MAX_SOURCES_PER_IMPORT}个`);
         this.truncateSourcesArray(parsedSources, this.MAX_SOURCES_PER_IMPORT);
       }
       
       Logger.debug(this.TAG, `解析到${parsedSources.length}个书源，开始验证`);
+      this.reportProgress(20, 100, `验证${parsedSources.length}个书源...`);
       
-      // 验证书源 - 增强安全验证
-      const validationResults = await this.validateAndFilterSources(parsedSources);
+      const validationResults = await this.validateAndFilterSourcesWithProgress(parsedSources);
+      
+      if (this.isImportCancelled) {
+        return {
+          success: false,
+          message: '导入已取消',
+          importedCount: 0,
+          totalCount: parsedSources.length,
+          errors: ['用户取消导入']
+        };
+      }
       
       if (validationResults.validSources.length === 0) {
         return {
@@ -157,12 +182,22 @@ class SourceImportManager {
         };
       }
       
-      // 保存到数据库
-      const savedCount = await this.saveSources(validationResults.validSources);
+      this.reportProgress(60, 100, `保存${validationResults.validSources.length}个书源...`);
+      const savedCount = await this.saveSourcesWithProgress(validationResults.validSources);
       
-      // 修复：使用duration变量
+      if (this.isImportCancelled) {
+        return {
+          success: false,
+          message: '导入已取消',
+          importedCount: savedCount,
+          totalCount: parsedSources.length,
+          errors: ['用户取消导入']
+        };
+      }
+      
       const duration = Date.now() - startTime;
       Logger.info(this.TAG, `书源导入完成，成功导入${savedCount}/${parsedSources.length}个书源，耗时${duration}ms`);
+      this.reportProgress(100, 100, `导入完成，共${savedCount}个书源`);
       
       return {
           success: savedCount > 0,
@@ -176,7 +211,6 @@ class SourceImportManager {
       };
       
     } catch (error) {
-      // 修复：使用duration变量
       const duration = Date.now() - startTime;
       Logger.error(this.TAG, `书源导入异常，耗时${duration}ms`);
       
@@ -227,38 +261,44 @@ class SourceImportManager {
   }
   
   /**
-   * 验证并过滤书源 - 增强安全验证
+   * 验证并过滤书源 - 带进度回调
    */
-  private async validateAndFilterSources(sources: BookSource[]): Promise<ValidationResult> {
+  private async validateAndFilterSourcesWithProgress(sources: BookSource[], skipNetworkValidation: boolean = true): Promise<ValidationResult> {
     const validSources: BookSource[] = [];
     const warnings: string[] = [];
     const errors: string[] = [];
     
+    await this.initSourceCache();
+    
+    const total = sources.length;
+    let processed = 0;
+    
     for (const source of sources) {
+      if (this.isImportCancelled) {
+        break;
+      }
+      
       try {
-        // 前置安全检查
         if (!this.isSafeSource(source)) {
           errors.push(`书源"${this.sanitizeString(source.name)}"包含不安全配置`);
+          processed++;
           continue;
         }
         
-        // 格式验证
         const formatResult = SourceValidator.validateSourceFormat(source);
         if (!formatResult.isValid) {
           errors.push(`书源"${this.sanitizeString(source.name)}"格式错误：${formatResult.errors.join(', ')}`);
+          processed++;
           continue;
         }
         
-        // 可用性验证
-        const availabilityResult = await SourceValidator.validateSourceAvailability(source);
-        
-        if (!availabilityResult.isAvailable) {
-          warnings.push(`书源"${this.sanitizeString(source.name)}"暂时不可用：${this.sanitizeString(availabilityResult.error || '未知错误')}`);
-          // 仍然保存，但标记为需要检查
-          source.enabled = false;
+        if (!skipNetworkValidation) {
+          const availabilityResult = await SourceValidator.validateSourceAvailability(source);
+          if (!availabilityResult.isAvailable) {
+            warnings.push(`书源"${this.sanitizeString(source.name)}"暂时不可用：${this.sanitizeString(availabilityResult.error || '未知错误')}`);
+          }
         }
         
-        // 生成唯一ID
         if (!source.id) {
           source.id = this.generateSourceId(source);
         }
@@ -267,6 +307,12 @@ class SourceImportManager {
         
       } catch (error) {
         errors.push(`书源"${this.sanitizeString(source.name)}"验证异常：${this.getSafeErrorMessage(error)}`);
+      }
+      
+      processed++;
+      if (processed % 50 === 0 || processed === total) {
+        const progress = 20 + Math.floor((processed / total) * 40);
+        this.reportProgress(progress, 100, `验证进度: ${processed}/${total}`);
       }
     }
     
@@ -278,90 +324,116 @@ class SourceImportManager {
   }
   
   /**
-   * 保存书源到数据库 - 增强错误处理
+   * 初始化书源缓存
    */
-  private async saveSources(sources: BookSource[]): Promise<number> {
+  private async initSourceCache(): Promise<void> {
+    if (this.sourceCache !== null) {
+      return;
+    }
+    
+    this.sourceCache = new Map<string, BookSource>();
+    try {
+      const allSources = await databaseManager.getAllEnabledBookSources();
+      for (const source of allSources) {
+        const key = `${source.name}_${source.url}`.toLowerCase();
+        this.sourceCache.set(key, source);
+      }
+      Logger.debug(this.TAG, `缓存了${this.sourceCache.size}个已存在书源`);
+    } catch (error) {
+      Logger.error(this.TAG, `初始化书源缓存失败`);
+    }
+  }
+  
+  /**
+   * 保存书源到数据库 - 带进度回调
+   */
+  private async saveSourcesWithProgress(sources: BookSource[]): Promise<number> {
     if (sources.length === 0) {
       return 0;
     }
     
+    await this.initSourceCache();
     let savedCount = 0;
+    const now = Date.now();
+    const total = sources.length;
     
-    // 分批保存，避免数据库压力过大
     for (let i = 0; i < sources.length; i += this.MAX_SOURCES_PER_BATCH) {
+      if (this.isImportCancelled) {
+        break;
+      }
+      
       const batch = this.getBatchSlice(sources, i, this.MAX_SOURCES_PER_BATCH);
       
+      const savePromises: Promise<void>[] = [];
+      
       for (const source of batch) {
-        try {
-          // 检查是否已存在（基于名称和URL）
-          const existingSource = await this.findExistingSource(source);
-          
-          if (existingSource) {
-            // 更新现有书源 - 使用对象合并而不是spread
-            const updatedSource: BookSource = {
-              id: existingSource.id,
-              name: source.name,
-              url: source.url,
-              enabled: source.enabled,
-              header: source.header,
-              searchUrl: source.searchUrl,
-              searchRule: source.searchRule,
-              findRule: source.findRule,
-              chapterRule: source.chapterRule,
-              contentRule: source.contentRule,
-              ruleType: source.ruleType,
-              sort: source.sort,
-              lastUpdateTime: Date.now(),
-              addTime: existingSource.addTime
-            };
-            
-            await databaseManager.upsertBookSource(updatedSource);
-            Logger.debug(this.TAG, `更新书源：${this.sanitizeString(source.name)}`);
-          } else {
-            // 添加新书源
-            await databaseManager.upsertBookSource(source);
-            Logger.debug(this.TAG, `添加新书源：${this.sanitizeString(source.name)}`);
-          }
-          
+        const promise = this.saveSingleSource(source, now).then(() => {
           savedCount++;
-          
-        } catch (error) {
+        }).catch((err: Error) => {
           Logger.error(this.TAG, `保存书源"${this.sanitizeString(source.name)}"失败`);
-        }
+        });
+        savePromises.push(promise);
       }
       
-      // 批次间延迟 - 增强性能保护
-      if (i + this.MAX_SOURCES_PER_BATCH < sources.length) {
-        // 修复：明确指定Promise的泛型类型
-        await new Promise<void>((resolve: () => void) => {
-          setTimeout(() => resolve(), 1000); // 增加到1秒延迟
-        });
-      }
+      await Promise.all(savePromises);
+      
+      const progress = 60 + Math.floor((savedCount / total) * 35);
+      this.reportProgress(progress, 100, `保存进度: ${savedCount}/${total}`);
     }
+    
+    this.sourceCache = null;
     
     return savedCount;
   }
   
   /**
-   * 查找已存在的书源 - 增强错误处理
+   * 保存单个书源
    */
-  private async findExistingSource(source: BookSource): Promise<BookSource | null> {
-    try {
-      // 这里需要根据实际的数据访问方法实现
-      // 简化实现：基于名称和URL匹配
-      const allSources: BookSource[] = await databaseManager.getAllEnabledBookSources();
+  private async saveSingleSource(source: BookSource, now: number): Promise<void> {
+    const existingSource = this.findExistingSourceFromCache(source);
+    
+    if (existingSource) {
+      const updatedSource: BookSource = {
+        id: existingSource.id,
+        name: source.name,
+        url: source.url,
+        enabled: source.enabled,
+        header: source.header,
+        searchUrl: source.searchUrl,
+        searchRule: source.searchRule,
+        findRule: source.findRule,
+        chapterRule: source.chapterRule,
+        contentRule: source.contentRule,
+        ruleType: source.ruleType,
+        sort: source.sort,
+        lastUpdateTime: now,
+        addTime: existingSource.addTime
+      };
       
-      for (let i = 0; i < allSources.length; i++) {
-        if (allSources[i].name === source.name || allSources[i].url === source.url) {
-          return allSources[i];
-        }
+      await databaseManager.upsertBookSource(updatedSource);
+    } else {
+      if (!source.id || source.id.trim() === '') {
+        source.id = util.generateRandomUUID(true);
       }
-      return null;
+      source.addTime = now;
+      source.lastUpdateTime = now;
+      await databaseManager.upsertBookSource(source);
       
-    } catch (error) {
-      Logger.error(this.TAG, `查找已存在书源失败`);
+      const key = `${source.name}_${source.url}`.toLowerCase();
+      this.sourceCache!.set(key, source);
+    }
+  }
+  
+  /**
+   * 从缓存查找已存在的书源
+   */
+  private findExistingSourceFromCache(source: BookSource): BookSource | null {
+    if (!this.sourceCache) {
       return null;
     }
+    
+    const key = `${source.name}_${source.url}`.toLowerCase();
+    return this.sourceCache.get(key) || null;
   }
   
   /**
@@ -491,6 +563,7 @@ class SourceImportManager {
    */
   private containsSuspiciousContent(content: string): boolean {
     // 使用安全的正则表达式模式，避免ReDoS攻击
+    // 注意：移除了对模板语法 ${} 和 {{}} 的检测，因为书源中经常使用这些语法
     const suspiciousPatterns = [
       /<(script|iframe|object|embed)[^>]*>/gi,
       /javascript:/gi,
@@ -501,27 +574,27 @@ class SourceImportManager {
       /document\.(cookie|write)/gi,
       /window\.(location|open)/gi,
       /XMLHttpRequest/gi,
-      /fetch\s*\(/gi,
-      /\$\{.*\}/gi,
-      /\{\{.*\}\}/gi
+      /fetch\s*\(/gi
+      // 移除了 /\$\{.*\}/gi 和 /\{\{.*\}\}/gi
+      // 因为书源中经常使用 {{key}} 等模板语法，这是正常的
     ];
-    
+
     for (const pattern of suspiciousPatterns) {
       // 限制正则表达式执行时间
       const startTime = Date.now();
       const result = pattern.test(content);
       const elapsed = Date.now() - startTime;
-      
+
       // 如果正则表达式执行时间过长，视为可疑
       if (elapsed > 100) {
         return true;
       }
-      
+
       if (result) {
         return true;
       }
     }
-    
+
     return false;
   }
 

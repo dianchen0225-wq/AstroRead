@@ -9,6 +9,10 @@ const DB_DEFAULT_TIME: number = 0;
 const DB_UPDATED_ROWS_ZERO: number = 0;
 
 const DB_COLUMN_ID: string = 'id';
+export interface PagedBookSourcesResult {
+  sources: BookSource[];
+  total: number;
+}
 
 export class BookSourceRepository {
   private static readonly TAG = 'BookSourceRepository';
@@ -66,6 +70,59 @@ export class BookSourceRepository {
     }
   }
 
+  async getBookSourcesPaged(page: number, pageSize: number): Promise<PagedBookSourcesResult> {
+    const offset = (page - 1) * pageSize;
+    const predicates = new relationalStore.RdbPredicates('book_source');
+    predicates.orderByAsc('sort');
+    predicates.limitAs(pageSize);
+    predicates.offsetAs(offset);
+
+    try {
+      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      const bookSources: BookSource[] = [];
+
+      while (resultSet.goToNextRow()) {
+        const bookSource = this.parseBookSource(resultSet);
+        bookSources.push(bookSource);
+      }
+
+      resultSet.close();
+      
+      const totalPredicates = new relationalStore.RdbPredicates('book_source');
+      const totalResultSet = await this.rdbStore.query(totalPredicates, ['COUNT(*) as count']);
+      let total = 0;
+      if (totalResultSet.goToNextRow()) {
+        total = totalResultSet.getLong(totalResultSet.getColumnIndex('count'));
+      }
+      totalResultSet.close();
+
+      const result: PagedBookSourcesResult = { sources: bookSources, total: total };
+      return result;
+    }
+    catch (error) {
+      Logger.error(BookSourceRepository.TAG, `分页查询书源失败: ${error instanceof Error ? error.message : String(error)}`);
+      const emptyResult: PagedBookSourcesResult = { sources: [], total: 0 };
+      return emptyResult;
+    }
+  }
+
+  async getBookSourcesCount(): Promise<number> {
+    try {
+      const predicates = new relationalStore.RdbPredicates('book_source');
+      const resultSet = await this.rdbStore.query(predicates, ['COUNT(*) as count']);
+      let count = 0;
+      if (resultSet.goToNextRow()) {
+        count = resultSet.getLong(resultSet.getColumnIndex('count'));
+      }
+      resultSet.close();
+      return count;
+    }
+    catch (error) {
+      Logger.error(BookSourceRepository.TAG, `查询书源数量失败: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
+  }
+
   async upsertBookSource(bookSource: BookSource): Promise<void> {
     const valueBucket: relationalStore.ValuesBucket = {
       'id': bookSource.id,
@@ -94,9 +151,12 @@ export class BookSourceRepository {
       if (updatedRows === DB_UPDATED_ROWS_ZERO) {
         await this.rdbStore.insert('book_source', valueBucket);
       }
+
+      Logger.debug(BookSourceRepository.TAG, `书源保存成功: ${bookSource.name}`);
     }
     catch (error) {
       Logger.error(BookSourceRepository.TAG, `插入或更新书源失败: ${error instanceof Error ? error.message : String(error)}`);
+      throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -116,7 +176,11 @@ export class BookSourceRepository {
       this.rdbStore.commit();
     }
     catch (error) {
-      await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
+      try {
+        await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
+      } catch (rollbackError) {
+        Logger.error(BookSourceRepository.TAG, `回滚失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
       Logger.error(BookSourceRepository.TAG, `批量插入或更新书源失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }

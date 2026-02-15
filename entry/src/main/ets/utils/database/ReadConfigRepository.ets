@@ -15,77 +15,100 @@ export class ReadConfigRepository {
    */
   async getOrCreateReadConfig(): Promise<ReadConfig> {
     const predicates = new relationalStore.RdbPredicates('read_config');
-    
+
     try {
       const resultSet = await this.rdbStore.query(predicates, ['*']);
-      
-      if (resultSet.rowCount > 0) {
-        resultSet.goToFirstRow();
-        const marginsString = resultSet.getString(resultSet.getColumnIndex('margins'));
-        let margins: MarginsConfig = { top: 20, bottom: 20, left: 20, right: 20 };
-        try {
-          if (marginsString) {
-            margins = JSON.parse(marginsString) as MarginsConfig;
-          }
-        } catch (error) {
-          Logger.warn(ReadConfigRepository.TAG, `解析边距配置失败，使用默认值: ${error instanceof Error ? error.message : String(error)}`);
-        }
 
-        const config: ReadConfig = {
-          fontSize: resultSet.getLong(resultSet.getColumnIndex('font_size')) || 16,
-          lineSpacing: resultSet.getDouble(resultSet.getColumnIndex('line_spacing')) || 1.5,
-          letterSpacing: resultSet.getDouble(resultSet.getColumnIndex('letter_spacing')) || 0,
-          pageTurnMode: (resultSet.getString(resultSet.getColumnIndex('page_turn_mode')) as 'cover' | 'slide' | 'scroll' | 'simulation') || 'cover',
-          backgroundColor: resultSet.getString(resultSet.getColumnIndex('background_color')) || '#FFFFFF',
-          textColor: resultSet.getString(resultSet.getColumnIndex('text_color')) || '#333333',
-          isNightMode: resultSet.getLong(resultSet.getColumnIndex('is_night_mode')) === 1,
-          brightness: resultSet.getDouble(resultSet.getColumnIndex('brightness')) || 0.5,
-          autoScroll: resultSet.getLong(resultSet.getColumnIndex('auto_scroll')) === 1,
-          scrollSpeed: resultSet.getLong(resultSet.getColumnIndex('scroll_speed')) || 50,
-          fontFamily: resultSet.getString(resultSet.getColumnIndex('font_family')) || 'HarmonyOS Sans',
-          margins: margins
-        };
-        resultSet.close();
-        return config;
+      const hasData = resultSet.rowCount > 0 && resultSet.goToFirstRow();
+      
+      if (hasData) {
+        try {
+          const marginsString = resultSet.getString(resultSet.getColumnIndex('margins'));
+          let margins: MarginsConfig = { top: 20, bottom: 20, left: 20, right: 20 };
+          try {
+            if (marginsString) {
+              margins = JSON.parse(marginsString) as MarginsConfig;
+            }
+          } catch (error) {
+            Logger.warn(ReadConfigRepository.TAG, `解析边距配置失败，使用默认值: ${error instanceof Error ? error.message : String(error)}`);
+          }
+
+          const config: ReadConfig = {
+            fontSize: resultSet.getLong(resultSet.getColumnIndex('font_size')) || 16,
+            lineSpacing: resultSet.getDouble(resultSet.getColumnIndex('line_spacing')) || 1.5,
+            letterSpacing: resultSet.getDouble(resultSet.getColumnIndex('letter_spacing')) || 0,
+            pageTurnMode: (resultSet.getString(resultSet.getColumnIndex('page_turn_mode')) as 'cover' | 'slide' | 'scroll' | 'simulation') || 'cover',
+            backgroundColor: resultSet.getString(resultSet.getColumnIndex('background_color')) || '#FFFFFF',
+            textColor: resultSet.getString(resultSet.getColumnIndex('text_color')) || '#333333',
+            isNightMode: resultSet.getLong(resultSet.getColumnIndex('is_night_mode')) === 1,
+            brightness: resultSet.getDouble(resultSet.getColumnIndex('brightness')) || 0.5,
+            autoScroll: resultSet.getLong(resultSet.getColumnIndex('auto_scroll')) === 1,
+            scrollSpeed: resultSet.getLong(resultSet.getColumnIndex('scroll_speed')) || 50,
+            fontFamily: resultSet.getString(resultSet.getColumnIndex('font_family')) || 'HarmonyOS Sans',
+            margins: margins
+          };
+          resultSet.close();
+          return config;
+        } catch (parseError) {
+          Logger.warn(ReadConfigRepository.TAG, `解析配置失败，将创建默认配置: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+          resultSet.close();
+        }
       } else {
-        // 创建默认配置
-        const defaultConfig: ReadConfig = {
-          fontSize: 16,
-          lineSpacing: 1.5,
-          letterSpacing: 0,
-          pageTurnMode: 'cover',
-          backgroundColor: '#FFFFFF',
-          textColor: '#333333',
-          isNightMode: false,
-          brightness: 0.5,
-          autoScroll: false,
-          scrollSpeed: 50,
-          fontFamily: 'HarmonyOS Sans',
-          margins: { top: 20, bottom: 20, left: 20, right: 20 }
-        };
-        
-        const valueBucket: relationalStore.ValuesBucket = {
-          'id': 'default',
-          'font_size': defaultConfig.fontSize,
-          'line_spacing': defaultConfig.lineSpacing,
-          'page_turn_mode': defaultConfig.pageTurnMode,
-          'background_color': defaultConfig.backgroundColor,
-          'text_color': defaultConfig.textColor,
-          'is_night_mode': defaultConfig.isNightMode ? 1 : 0,
-          'brightness': defaultConfig.brightness,
-          'auto_scroll': defaultConfig.autoScroll ? 1 : 0,
-          'scroll_speed': defaultConfig.scrollSpeed,
-          'font_family': defaultConfig.fontFamily,
-          'margins': JSON.stringify(defaultConfig.margins),
-          'update_time': Date.now()
-        };
-        
-        await this.rdbStore.insert('read_config', valueBucket);
-        return defaultConfig;
+        resultSet.close();
       }
+
+      // 创建默认配置
+      Logger.info(ReadConfigRepository.TAG, '创建默认阅读配置');
+      const defaultConfig: ReadConfig = {
+        fontSize: 16,
+        lineSpacing: 1.5,
+        letterSpacing: 0,
+        pageTurnMode: 'cover',
+        backgroundColor: '#FFFFFF',
+        textColor: '#333333',
+        isNightMode: false,
+        brightness: 0.5,
+        autoScroll: false,
+        scrollSpeed: 50,
+        fontFamily: 'HarmonyOS Sans',
+        margins: { top: 20, bottom: 20, left: 20, right: 20 }
+      };
+
+      const valueBucket: relationalStore.ValuesBucket = {
+        'id': 'default',
+        'font_size': defaultConfig.fontSize,
+        'line_spacing': defaultConfig.lineSpacing,
+        'page_turn_mode': defaultConfig.pageTurnMode,
+        'background_color': defaultConfig.backgroundColor,
+        'text_color': defaultConfig.textColor,
+        'is_night_mode': defaultConfig.isNightMode ? 1 : 0,
+        'brightness': defaultConfig.brightness,
+        'auto_scroll': defaultConfig.autoScroll ? 1 : 0,
+        'scroll_speed': defaultConfig.scrollSpeed,
+        'font_family': defaultConfig.fontFamily,
+        'margins': JSON.stringify(defaultConfig.margins),
+        'update_time': Date.now()
+      };
+
+      await this.rdbStore.insert('read_config', valueBucket);
+      return defaultConfig;
     } catch (error) {
       Logger.error(ReadConfigRepository.TAG, `获取或创建阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw (error instanceof Error ? error : new Error(String(error)));
+      // 返回默认配置，不抛出异常
+      return {
+        fontSize: 16,
+        lineSpacing: 1.5,
+        letterSpacing: 0,
+        pageTurnMode: 'cover',
+        backgroundColor: '#FFFFFF',
+        textColor: '#333333',
+        isNightMode: false,
+        brightness: 0.5,
+        autoScroll: false,
+        scrollSpeed: 50,
+        fontFamily: 'HarmonyOS Sans',
+        margins: { top: 20, bottom: 20, left: 20, right: 20 }
+      };
     }
   }
 

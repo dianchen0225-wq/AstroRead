@@ -1,0 +1,17 @@
+# 预览缓存目录
+.preview/
+
+# 构建缓存目录
+build/
+.hvigor/
+
+# 依赖目录
+node_modules/
+oh_modules/
+
+# 编译产物
+*.protoBin
+
+# 只检查 .ets 源文件，忽略 .ts 编译产物
+**/*.ts
+!**/*.ets

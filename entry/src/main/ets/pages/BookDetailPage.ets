@@ -1,8 +1,21 @@
+/**
+ * Copyright (c) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
-import { BookViewModel } from '../viewmodel/BookViewModel';
-import { ChapterViewModel } from '../viewmodel/ChapterViewModel';
-import { BookSourceViewModel } from '../viewmodel/BookSourceViewModel';
+import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
@@ -15,9 +28,10 @@ import common from '@ohos.app.ability.common';
 interface RouterParams {
   bookId?: string;
 }
+
 @Entry
 @ComponentV2
-export struct BookDetailPage {
+struct BookDetailPage {
   @Local isLightMode: boolean = true;
   @Local book: Book | null = null;
   @Local chapters: Chapter[] = [];
@@ -28,101 +42,168 @@ export struct BookDetailPage {
   @Local isAdded: boolean = false;
 
   private bookId: string = '';
-  private bookViewModel: BookViewModel = new BookViewModel();
-  private chapterViewModel: ChapterViewModel = new ChapterViewModel();
-  private bookSourceViewModel: BookSourceViewModel = new BookSourceViewModel();
+  private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
 
   aboutToAppear(): void {
+    this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-    this.bookViewModel.setContext(getContext(this) as common.UIAbilityContext);
-    this.chapterViewModel.setContext(getContext(this) as common.UIAbilityContext);
-    this.bookSourceViewModel.setContext(getContext(this) as common.UIAbilityContext);
+    
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    viewModelManager.setContext(context);
+    
     this.loadBookDetail();
   }
 
   aboutToDisappear(): void {
+    this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
+    this.chapters = [];
+    this.book = null;
+    this.bookSource = null;
   }
+
   async loadBookDetail() {
+    if (!this.isComponentActive) return;
+    
     const params = router.getParams() as RouterParams;
     this.bookId = params?.bookId || '';
     Logger.info('BookDetailPage', `bookId: ${this.bookId}`);
+    
     if (this.bookId) {
-      this.book = await this.bookViewModel.getBookById(this.bookId);
-      if (this.book) {
-        this.bookSource = this.bookSourceViewModel.getBookSourceById(this.book.bookSourceId) || null;
+      try {
+        const bookViewModel = viewModelManager.getBookViewModel();
+        this.book = await bookViewModel.getBookById(this.bookId);
+        
+        if (this.book && this.isComponentActive) {
+          const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+          this.bookSource = bookSourceViewModel.getBookSourceById(this.book.bookSourceId) || null;
+        }
+      } catch (error) {
+        Logger.error('BookDetailPage', `加载书籍详情失败: ${error}`);
       }
     }
+    
     await this.loadChapters();
-    this.isAdded = await this.bookViewModel.isBookAdded(this.bookId);
+    
+    if (this.isComponentActive && this.bookId) {
+      try {
+        const bookViewModel = viewModelManager.getBookViewModel();
+        this.isAdded = await bookViewModel.isBookAdded(this.bookId);
+      } catch (error) {
+        Logger.error('BookDetailPage', `检查书籍状态失败: ${error}`);
+      }
+    }
   }
 
   async loadChapters() {
-    if (!this.book) {
+    if (!this.book || !this.isComponentActive) {
       return;
     }
+    
     this.isLoadingChapters = true;
     try {
-      this.chapters = await this.chapterViewModel.getChapters(this.bookId);
-      if (this.chapters.length === 0 && this.bookSource) {
-        this.chapters = await this.chapterViewModel.fetchAndSaveChapters(this.bookId, this.bookSource, this.book.bookUrl);
+      const chapterViewModel = viewModelManager.getChapterViewModel();
+      this.chapters = await chapterViewModel.getChapters(this.bookId);
+      
+      if (this.chapters.length === 0 && this.bookSource && this.isComponentActive) {
+        this.chapters = await chapterViewModel.fetchAndSaveChapters(
+          this.bookId, 
+          this.bookSource, 
+          this.book.bookUrl
+        );
       }
     } catch (error) {
       Logger.error('BookDetailPage', `加载章节失败: ${error}`);
     } finally {
-      this.isLoadingChapters = false;
+      if (this.isComponentActive) {
+        this.isLoadingChapters = false;
+      }
     }
   }
 
   async addBook() {
-    if (!this.book) {
+    if (!this.book || !this.isComponentActive) {
       return;
     }
+    
     try {
-      await this.bookViewModel.addBook(this.book);
+      const bookViewModel = viewModelManager.getBookViewModel();
+      await bookViewModel.addBook(this.book);
       this.isAdded = true;
-      promptAction.showToast({
+      try {
+        promptAction.showDialog({
+        title: '提示',
         message: '添加成功',
-        duration: 2000
+        buttons: [
+          {
+            text: '确定',
+            color: '#007DFF'
+          }
+        ]
       });
+      } catch (e) {
+        Logger.error('BookDetailPage', `showDialog failed: ${e}`);
+      }
     } catch (error) {
-      promptAction.showToast({
-        message: '添加失败',
-        duration: 2000
-      });
+      Logger.error('BookDetailPage', `添加书籍失败: ${error}`);
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '添加失败',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('BookDetailPage', `showDialog failed: ${e}`);
+      }
     }
   }
 
   async startRead() {
     if (this.chapters.length === 0) {
-      promptAction.showToast({
-        message: '暂无章节',
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '暂无章节',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('BookDetailPage', `showDialog failed: ${e}`);
+      }
       return;
     }
-    const chapterIndex = this.book?.lastReadChapterIndex ? this.book.lastReadChapterIndex : 0;
-    router.pushUrl({
-      url: 'pages/ReadPage',
-      params: {
-        bookId: this.bookId,
-        chapterIndex: chapterIndex,
-        chapterUrl: this.chapters[chapterIndex].url
-      }
-    }).then(() => {
-      hilog.info(0, 'testTag', 'push page success');
-    }).catch((err: Error) => {
-      hilog.error(0, 'testTag', `pushPage failed: ${err}`);
-    });
+
+    try {
+      const chapterIndex = this.book?.lastReadChapterIndex ? this.book.lastReadChapterIndex : 0;
+      router.push({
+        url: 'pages/ReadPage',
+        params: {
+          bookId: this.bookId,
+          chapterIndex: chapterIndex,
+          chapterUrl: this.chapters[chapterIndex].url
+        }
+      });
+      hilog.info(0, 'BookDetailPage', 'push page success');
+    } catch (err) {
+      hilog.error(0, 'BookDetailPage', `pushPage failed: ${err}`);
+    }
   }
 
   build() {
     Column() {
-      // 顶部导航栏
       Row() {
         Row() {
           Text('‹')
@@ -144,8 +225,12 @@ export struct BookDetailPage {
 
         Button(this.isAdded ? '已添加' : '添加书架')
           .fontSize(14)
-          .fontColor(this.isAdded ? DesignSystem.getSecondaryTextColor(this.isLightMode) : DesignSystem.Colors.text.primary.light)
-          .backgroundColor(this.isAdded ? DesignSystem.getSecondaryBackgroundColor(this.isLightMode) : DesignSystem.getPrimaryColor(this.isLightMode))
+          .fontColor(this.isAdded ? 
+            DesignSystem.getSecondaryTextColor(this.isLightMode) : 
+            DesignSystem.Colors.text.primary.light)
+          .backgroundColor(this.isAdded ? 
+            DesignSystem.getSecondaryBackgroundColor(this.isLightMode) : 
+            DesignSystem.getPrimaryColor(this.isLightMode))
           .borderRadius(8)
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
           .margin({ left: 10 })
@@ -278,49 +363,54 @@ export struct BookDetailPage {
                 .width('100%')
                 .margin({ bottom: 12 })
 
-              Column() {
+              List() {
                 ForEach(this.chapters, (chapter: Chapter, index: number) => {
-                  Row() {
-                    Text(chapter.title)
-                      .fontSize(14)
-                      .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      .layoutWeight(1)
+                  ListItem() {
+                    Row() {
+                      Text(chapter.title)
+                        .fontSize(14)
+                        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .layoutWeight(1)
 
-                    if (chapter.isVip) {
-                      Text('VIP')
-                        .fontSize(10)
-                        .fontColor(DesignSystem.Colors.text.primary.light)
-                        .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-                        .padding({ left: 4, right: 4, top: 2, bottom: 2 })
-                        .borderRadius(4)
-                        .margin({ left: 8 })
+                      if (chapter.isVip) {
+                        Text('VIP')
+                          .fontSize(10)
+                          .fontColor(DesignSystem.Colors.text.primary.light)
+                          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                          .padding({ left: 4, right: 4, top: 2, bottom: 2 })
+                          .borderRadius(4)
+                          .margin({ left: 8 })
+                      }
                     }
+                    .width('100%')
+                    .padding(12)
+                    .borderRadius(8)
+                    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
                   }
-                  .width('100%')
-                  .padding(12)
-                  .borderRadius(8)
-                  .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
                   .margin({ bottom: 8 })
                   .onClick(() => {
                     this.currentChapterIndex = index;
-                    router.pushUrl({
-                      url: 'pages/ReadPage',
-                      params: {
-                        bookId: this.bookId,
-                        chapterIndex: index,
-                        chapterUrl: chapter.url
-                      }
-                    }).then(() => {
-                      hilog.info(0, 'testTag', 'push page success');
-                    }).catch((err: Error) => {
-                      hilog.error(0, 'testTag', `pushPage failed: ${err}`);
-                    });
+                    try {
+                      router.push({
+                        url: 'pages/ReadPage',
+                        params: {
+                          bookId: this.bookId,
+                          chapterIndex: index,
+                          chapterUrl: chapter.url
+                        }
+                      });
+                      hilog.info(0, 'BookDetailPage', 'push page success');
+                    } catch (err) {
+                      hilog.error(0, 'BookDetailPage', `pushPage failed: ${err}`);
+                    }
                   })
-                })
+                }, (chapter: Chapter) => chapter.id || chapter.url)
               }
               .width('100%')
+              .height('100%')
+              .cachedCount(10)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -340,3 +430,5 @@ export struct BookDetailPage {
     .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
   }
 }
+
+export default BookDetailPage;

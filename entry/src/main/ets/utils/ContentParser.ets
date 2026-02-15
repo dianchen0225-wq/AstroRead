@@ -48,26 +48,41 @@ export class ContentParser {
       Logger.error(ContentParser.TAG, '解析参数异常：缺少必要的参数');
       return [];
     }
-    
+
     if (typeof html !== 'string') {
       Logger.error(ContentParser.TAG, '解析异常：HTML内容必须是字符串类型');
       return [];
     }
-    
+
     try {
       const rule = bookSource.searchRule;
-      
+
+      Logger.debug(ContentParser.TAG, `开始解析搜索结果，书源: ${bookSource.name}, 规则类型: ${bookSource.ruleType}`);
+      Logger.debug(ContentParser.TAG, `bookList规则: ${rule.bookList}`);
+      Logger.debug(ContentParser.TAG, `name规则: ${rule.name}`);
+      Logger.debug(ContentParser.TAG, `author规则: ${rule.author}`);
+      Logger.debug(ContentParser.TAG, `bookUrl规则: ${rule.bookUrl}`);
+      Logger.debug(ContentParser.TAG, `HTML长度: ${html.length}字符`);
+
+      let results: ParsedBookItem[];
+
       switch (bookSource.ruleType) {
         case 'jsonpath':
-          return ContentParser.parseByJsonPath(html, rule.bookList, rule);
+          results = ContentParser.parseByJsonPath(html, rule.bookList, rule);
+          break;
         case 'xpath':
-          return ContentParser.parseByXPath(html, rule.bookList, rule);
+          results = ContentParser.parseByXPath(html, rule.bookList, rule);
+          break;
         case 'regex':
-          return ContentParser.parseByRegex(html, rule.bookList, rule);
+          results = ContentParser.parseByRegex(html, rule.bookList, rule);
+          break;
         default:
           Logger.error(ContentParser.TAG, `不支持的规则类型: ${bookSource.ruleType}`);
           return [];
       }
+
+      Logger.info(ContentParser.TAG, `解析完成，书源: ${bookSource.name}, 找到 ${results.length} 条结果`);
+      return results;
     } catch (error) {
       Logger.error(ContentParser.TAG, `搜索解析异常: ${error instanceof Error ? error.message : String(error)}`);
       return [];
@@ -149,16 +164,19 @@ export class ContentParser {
    */
   private static parseByJsonPath(html: string, listRule: string, rule: SearchRule): ParsedBookItem[] {
     try {
+      Logger.debug(ContentParser.TAG, `JSONPath解析 - listRule: ${listRule}`);
+
       // 尝试解析JSON
       let jsonData: object | null | string | number | boolean;
       try {
         jsonData = JSON.parse(html);
       } catch (e) {
-        // 如果不是纯JSON，尝试提取JSON部分（更安全的匹配方式）
-        const jsonMatch = html.match(/\{[\s\S]*?\}(?=\s*(?:\{|\}|$))/);
+        // 如果不是纯JSON，尝试提取JSON部分
+        const jsonMatch = html.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           try {
             jsonData = JSON.parse(jsonMatch[0]);
+            Logger.debug(ContentParser.TAG, '从HTML中提取JSON成功');
           } catch (parseError) {
             Logger.error(ContentParser.TAG, `JSON解析失败: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
             return [];
@@ -168,28 +186,32 @@ export class ContentParser {
           return [];
         }
       }
-      
-      const pathParts = listRule.replace(/^\$\.?/, '').split('.');
-      let currentData: object | null | string | number | boolean = jsonData;
-      
-      for (const part of pathParts) {
-        if (currentData !== null && typeof currentData === 'object' && !Array.isArray(currentData)) {
-          const currentObj = currentData as Record<string, object | null | string | number | boolean>;
-          currentData = currentObj[part];
+
+      // 使用增强的JSONPath解析
+      let currentData: object | null | string | number | boolean | undefined | Array<object | null | string | number | boolean> = jsonData;
+      currentData = ContentParser.resolveJsonPath(currentData, listRule);
+
+      if (currentData === null || currentData === undefined) {
+        Logger.error(ContentParser.TAG, `JSONPath路径解析失败: ${listRule}`);
+        return [];
+      }
+
+      if (!Array.isArray(currentData)) {
+        // 如果结果不是数组，尝试包装成数组
+        if (typeof currentData === 'object') {
+          currentData = [currentData];
+          Logger.debug(ContentParser.TAG, '将单个对象包装为数组');
         } else {
-          Logger.error(ContentParser.TAG, `JSONPath路径解析失败: ${part}`);
+          Logger.error(ContentParser.TAG, `JSONPath解析结果不是数组类型: ${typeof currentData}`);
           return [];
         }
       }
-      
-      if (!Array.isArray(currentData)) {
-        Logger.error(ContentParser.TAG, 'JSONPath解析结果不是数组类型');
-        return [];
-      }
-      
+
+      Logger.debug(ContentParser.TAG, `JSONPath解析找到 ${Array.isArray(currentData) ? currentData.length : 0} 个元素`);
+
       // 提取书籍信息
       const books: ParsedBookItem[] = [];
-      const dataArray: Array<object | null | string | number | boolean> = currentData;
+      const dataArray: Array<object | null | string | number | boolean> = Array.isArray(currentData) ? currentData : [];
       for (let i = 0; i < dataArray.length; i++) {
         const item = dataArray[i];
         if (item === null || typeof item !== 'object' || Array.isArray(item)) {
@@ -197,7 +219,7 @@ export class ContentParser {
         }
         const sourceObj = item as Record<string, object | null | string | number | boolean>;
         const book: ParsedBookItem = {};
-        
+
         if (rule.name) {
           book.name = ContentParser.extractJsonValue(sourceObj, rule.name);
         }
@@ -213,12 +235,13 @@ export class ContentParser {
         if (rule.bookUrl) {
           book.bookUrl = ContentParser.extractJsonValue(sourceObj, rule.bookUrl);
         }
-        
+
         if (book.name && book.bookUrl) {
           books.push(book);
+          Logger.debug(ContentParser.TAG, `JSONPath解析成功 - 书名: ${book.name}`);
         }
       }
-      
+
       return books;
     } catch (error) {
       Logger.error(ContentParser.TAG, `JSONPath解析失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -226,29 +249,87 @@ export class ContentParser {
     }
   }
 
+  /**
+   * 增强的JSONPath解析，支持多种格式
+   */
+  private static resolveJsonPath(data: object | null | string | number | boolean, path: string): object | null | string | number | boolean | undefined {
+    if (!data || !path) {
+      return data;
+    }
+
+    let processedPath = path.trim();
+
+    // 移除 $ 前缀
+    if (processedPath.startsWith('$')) {
+      processedPath = processedPath.substring(1);
+      if (processedPath.startsWith('.')) {
+        processedPath = processedPath.substring(1);
+      }
+    }
+
+    // 处理 from(...) 格式 (Legado格式)
+    const fromMatch = processedPath.match(/^from\(([^)]+)\)$/);
+    if (fromMatch) {
+      processedPath = fromMatch[1];
+    }
+
+    // 处理空路径
+    if (!processedPath || processedPath === '.') {
+      return data;
+    }
+
+    let currentData: object | null | string | number | boolean | undefined = data;
+
+    // 分割路径
+    const parts = processedPath.split(/[.\[\]]+/).filter(p => p.length > 0);
+
+    for (const part of parts) {
+      if (currentData === null || currentData === undefined) {
+        return undefined;
+      }
+
+      // 处理数组通配符 *
+      if (part === '*') {
+        if (Array.isArray(currentData)) {
+          // 返回整个数组
+          continue;
+        }
+        continue;
+      }
+
+      // 处理数字索引
+      const index = parseInt(part, 10);
+      if (!isNaN(index)) {
+        if (Array.isArray(currentData)) {
+          currentData = currentData[index];
+          continue;
+        }
+        return undefined;
+      }
+
+      // 处理对象属性
+      if (typeof currentData === 'object' && !Array.isArray(currentData)) {
+        const obj = currentData as Record<string, object | null | string | number | boolean>;
+        currentData = obj[part];
+      } else {
+        return undefined;
+      }
+    }
+
+    return currentData;
+  }
+
   private static extractJsonValue(obj: Record<string, object | null | string | number | boolean>, path: string): string {
     if (!obj || !path) {
       return '';
     }
-    
-    const cleanPath = path.replace(/^\$\.?/, '');
-    const parts = cleanPath.split('.');
-    
-    let value: object | null | string | number | boolean = obj;
-    for (const part of parts) {
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        const valueObj = value as Record<string, object | null | string | number | boolean>;
-        value = valueObj[part];
-      } else {
-        Logger.error(ContentParser.TAG, `JSON值提取失败: ${part}`);
-        return '';
-      }
-    }
-    
+
+    const value = ContentParser.resolveJsonPath(obj, path);
+
     if (value === undefined || value === null) {
       return '';
     }
-    
+
     return String(value).trim();
   }
 
@@ -689,48 +770,54 @@ export class ContentParser {
   private static parseByXPath(html: string, listRule: string, rule: SearchRule): ParsedBookItem[] {
     try {
       const books: ParsedBookItem[] = [];
-      
+
       if (listRule.startsWith('<js>') || listRule.startsWith('@js:')) {
         Logger.warn(ContentParser.TAG, 'JavaScript规则暂不支持，使用正则表达式回退');
         return ContentParser.parseByRegex(html, listRule, rule);
       }
-      
+
+      Logger.debug(ContentParser.TAG, `XPath解析 - listRule: ${listRule}`);
+
       // 提取书籍列表元素
       const listElements = CssSelectorParser.selectElements(html, listRule);
-      
+      Logger.debug(ContentParser.TAG, `XPath解析 - 找到 ${listElements.length} 个列表元素`);
+
       for (const elementHtml of listElements) {
         const bookItem: ParsedBookItem = {};
-        
+
         // 提取书名
         if (rule.name) {
           bookItem.name = CssSelectorParser.extractValue(elementHtml, rule.name);
         }
-        
+
         // 提取作者
         if (rule.author) {
           bookItem.author = CssSelectorParser.extractValue(elementHtml, rule.author);
         }
-        
+
         // 提取封面
         if (rule.cover) {
           bookItem.cover = CssSelectorParser.extractValue(elementHtml, rule.cover);
         }
-        
+
         // 提取简介
         if (rule.intro) {
           bookItem.intro = CssSelectorParser.extractValue(elementHtml, rule.intro);
         }
-        
+
         // 提取书籍URL
         if (rule.bookUrl) {
           bookItem.bookUrl = CssSelectorParser.extractValue(elementHtml, rule.bookUrl);
         }
-        
+
         if (bookItem.name && bookItem.bookUrl) {
           books.push(bookItem);
+          Logger.debug(ContentParser.TAG, `XPath解析成功 - 书名: ${bookItem.name}, 作者: ${bookItem.author || '未知'}`);
+        } else {
+          Logger.debug(ContentParser.TAG, `XPath解析跳过 - name: ${bookItem.name || '空'}, bookUrl: ${bookItem.bookUrl || '空'}`);
         }
       }
-      
+
       return books;
     } catch (error) {
       Logger.error(ContentParser.TAG, `XPath/CSS选择器解析失败: ${error instanceof Error ? error.message : String(error)}`);

@@ -5,6 +5,7 @@
 
 import { preferences } from '@kit.ArkData';
 import { Logger } from '../utils/Logger';
+import common from '@ohos.app.ability.common';
 
 const THEME_PREFERENCES_NAME = 'theme_preferences';
 const THEME_MODE_KEY = 'theme_mode';
@@ -22,9 +23,11 @@ export class ThemeManager {
   private isDarkMode: boolean = false;
   private listeners: Array<(isDark: boolean) => void> = [];
   private preferences: preferences.Preferences | null = null;
+  private initPromise: Promise<void> | null = null;
+  private isInitialized: boolean = false;
+  private context: common.UIAbilityContext | null = null;
 
   private constructor() {
-    this.initPreferences();
   }
 
   public static getInstance(): ThemeManager {
@@ -34,34 +37,70 @@ export class ThemeManager {
     return ThemeManager.instance;
   }
 
+  setContext(context: common.UIAbilityContext): void {
+    this.context = context;
+    if (!this.initPromise) {
+      this.initPromise = this.initPreferences();
+    }
+  }
+
+  async ensureInitialized(): Promise<void> {
+    if (this.initPromise) {
+      await this.initPromise;
+    }
+  }
+
+  isReady(): boolean {
+    return this.isInitialized;
+  }
+
   private async initPreferences(): Promise<void> {
+    if (!this.context) {
+      Logger.error(ThemeManager.TAG, 'Context未设置，无法初始化主题偏好设置');
+      this.isInitialized = true;
+      return;
+    }
     try {
-      this.preferences = await preferences.getPreferences(getContext(), THEME_PREFERENCES_NAME);
+      this.preferences = await preferences.getPreferences(this.context, THEME_PREFERENCES_NAME);
       const savedMode = await this.preferences.get(THEME_MODE_KEY, ThemeMode.LIGHT) as ThemeMode;
-      await this.setThemeMode(savedMode);
+      this.currentMode = savedMode;
+      
+      if (savedMode === ThemeMode.AUTO) {
+        this.isDarkMode = this.isSystemDarkMode();
+      } else {
+        this.isDarkMode = savedMode === ThemeMode.DARK;
+      }
+      
+      this.isInitialized = true;
+      this.notifyListeners();
     } catch (error) {
       Logger.error(ThemeManager.TAG, `初始化主题偏好设置失败: ${error instanceof Error ? error.message : String(error)}`);
+      this.isInitialized = true;
     }
   }
 
   public async setThemeMode(mode: ThemeMode): Promise<void> {
+    const previousMode = this.currentMode;
     this.currentMode = mode;
 
     if (mode === ThemeMode.AUTO) {
-      // 根据系统主题自动切换
       this.isDarkMode = this.isSystemDarkMode();
     } else {
       this.isDarkMode = mode === ThemeMode.DARK;
     }
 
-    // 保存到持久化存储
     if (this.preferences) {
-      await this.preferences.put(THEME_MODE_KEY, mode);
-      await this.preferences.flush();
+      try {
+        await this.preferences.put(THEME_MODE_KEY, mode);
+        await this.preferences.flush();
+      } catch (error) {
+        Logger.error(ThemeManager.TAG, `保存主题设置失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
-    // 通知所有监听器
-    this.notifyListeners();
+    if (previousMode !== mode) {
+      this.notifyListeners();
+    }
   }
 
   public getThemeMode(): ThemeMode {
@@ -94,8 +133,13 @@ export class ThemeManager {
     }
   }
 
+  public removeAllListeners(): void {
+    this.listeners = [];
+  }
+
   private notifyListeners(): void {
-    this.listeners.forEach(listener => {
+    const listenersCopy = [...this.listeners];
+    listenersCopy.forEach(listener => {
       try {
         listener(this.isDarkMode);
       } catch (error) {
@@ -105,7 +149,6 @@ export class ThemeManager {
   }
 
   private isSystemDarkMode(): boolean {
-    // 检查系统是否处于深色模式
     try {
       const systemTheme = AppStorage.get('systemTheme') as string;
       return systemTheme === 'dark';
@@ -116,5 +159,4 @@ export class ThemeManager {
   }
 }
 
-// 导出单例实例
 export const themeManager = ThemeManager.getInstance();

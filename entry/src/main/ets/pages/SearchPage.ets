@@ -1,7 +1,21 @@
+/**
+ * Copyright (c) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
-import { BookSourceViewModel } from '../viewmodel/BookSourceViewModel';
-import { BookViewModel } from '../viewmodel/BookViewModel';
+import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { BookSource } from '../models/BookSource';
 import { Book } from '../models/Book';
 import { Logger } from '../utils/Logger';
@@ -19,7 +33,7 @@ interface RankColor {
 export struct SearchPage {
   @Local isLightMode: boolean = true;
   @Local searchText: string = '';
-  @Local searchHistory: string[] = ['斗破苍穹', '凡人修仙传', '三体', '活着'];
+  @Local searchHistory: string[] = [];
   @Local hotSearchList: string[] = ['完美世界', '雪中悍刀行', '诡秘之主', '庆余年', '赘婿'];
   @Local searchResults: Book[] = [];
   @Local isSearching: boolean = false;
@@ -27,29 +41,47 @@ export struct SearchPage {
   @Local errorMessage: string = '';
   @Local hasEnabledSources: boolean = true;
 
-  private bookSourceViewModel: BookSourceViewModel = new BookSourceViewModel();
-  private bookViewModel: BookViewModel = new BookViewModel();
   private bookSources: BookSource[] = [];
+  private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
 
   aboutToAppear(): void {
+    this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-    const context = getContext(this) as common.UIAbilityContext;
-    this.bookSourceViewModel.setContext(context);
+    
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    viewModelManager.setContext(context);
     NetworkManager.getInstance().setContext(context);
+    
+    this.loadSearchHistory();
     this.loadBookSources();
   }
 
   aboutToDisappear(): void {
+    this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
+    this.searchResults = [];
+    this.bookSources = [];
+  }
+
+  private async loadSearchHistory(): Promise<void> {
+    try {
+      const bookViewModel = viewModelManager.getBookViewModel();
+      this.searchHistory = bookViewModel.getSearchHistory();
+    } catch (error) {
+      Logger.error('SearchPage', `加载搜索历史失败: ${error}`);
+    }
   }
 
   private async loadBookSources(): Promise<void> {
+    if (!this.isComponentActive) return;
+    
     try {
-      this.bookSources = await this.bookSourceViewModel.loadEnabledBookSources();
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      this.bookSources = await bookSourceViewModel.loadEnabledBookSources();
       this.hasEnabledSources = this.bookSources.length > 0;
       Logger.info('SearchPage', `加载了${this.bookSources.length}个书源`);
     } catch (error) {
@@ -60,10 +92,20 @@ export struct SearchPage {
 
   private async performSearch(): Promise<void> {
     if (!this.searchText.trim()) {
-      promptAction.showToast({
-        message: '请输入搜索关键词',
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '请输入搜索关键词',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SearchPage', `showDialog failed: ${e}`);
+      }
       return;
     }
 
@@ -89,70 +131,94 @@ export struct SearchPage {
       const sourcesToUse = this.bookSources.slice(0, 5);
       Logger.info('SearchPage', `使用${sourcesToUse.length}个书源进行搜索`);
 
-      const results = await this.bookViewModel.searchBooks(this.searchText.trim(), sourcesToUse);
+      const bookViewModel = viewModelManager.getBookViewModel();
+      const results = await bookViewModel.searchBooks(this.searchText.trim(), sourcesToUse);
 
-      this.searchResults = results;
-      Logger.info('SearchPage', `搜索完成，找到${results.length}本书`);
+      if (this.isComponentActive) {
+        this.searchResults = results;
+        Logger.info('SearchPage', `搜索完成，找到${results.length}本书`);
 
-      if (results.length === 0) {
-        this.errorMessage = '当前启用的书源无匹配结果';
+        if (results.length === 0) {
+          this.errorMessage = '当前启用的书源无匹配结果';
+        }
       }
-
-      this.addToSearchHistory(this.searchText.trim());
 
     } catch (error) {
       Logger.error('SearchPage', `搜索失败: ${error}`);
-      const errorMsg = error instanceof Error ? error.message : '未知错误';
-      
-      if (errorMsg.includes('network') || errorMsg.includes('网络')) {
-        this.errorMessage = '网络连接失败，请检查网络设置';
-      } else if (errorMsg.includes('timeout') || errorMsg.includes('超时')) {
-        this.errorMessage = '搜索超时，请稍后重试';
-      } else {
-        this.errorMessage = `搜索失败: ${errorMsg}`;
+      if (this.isComponentActive) {
+        const errorMsg = error instanceof Error ? error.message : '未知错误';
+        
+        if (errorMsg.includes('network') || errorMsg.includes('网络')) {
+          this.errorMessage = '网络连接失败，请检查网络设置';
+        } else if (errorMsg.includes('timeout') || errorMsg.includes('超时')) {
+          this.errorMessage = '搜索超时，请稍后重试';
+        } else {
+          this.errorMessage = `搜索失败: ${errorMsg}`;
+        }
       }
     } finally {
-      this.isSearching = false;
-    }
-  }
-
-  private addToSearchHistory(keyword: string): void {
-    const trimmedKeyword = keyword.trim();
-    if (!trimmedKeyword) {
-      return;
-    }
-
-    this.searchHistory = this.searchHistory.filter(item => item !== trimmedKeyword);
-    this.searchHistory.unshift(trimmedKeyword);
-
-    if (this.searchHistory.length > 10) {
-      this.searchHistory = this.searchHistory.slice(0, 10);
+      if (this.isComponentActive) {
+        this.isSearching = false;
+      }
     }
   }
 
   private async addToBookshelf(book: Book): Promise<void> {
     try {
-      await this.bookViewModel.addBook(book);
-      promptAction.showToast({
-        message: '已添加到书架',
-        duration: 2000
-      });
+      const bookViewModel = viewModelManager.getBookViewModel();
+      await bookViewModel.addBook(book);
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '已添加到书架',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SearchPage', `showDialog failed: ${e}`);
+      }
     } catch (error) {
       Logger.error('SearchPage', `添加到书架失败: ${error}`);
-      promptAction.showToast({
-        message: '添加失败',
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '添加失败',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SearchPage', `showDialog failed: ${e}`);
+      }
     }
   }
 
   private navigateToSourcePage(): void {
-    router.pushUrl({
-      url: 'pages/MainPage',
-      params: { tabIndex: 3 }
-    }).catch((err: Error) => {
+    try {
+      router.push({
+        url: 'pages/MainPage',
+        params: { tabIndex: 3 }
+      });
+    } catch (err) {
       Logger.error('SearchPage', `跳转失败: ${err}`);
-    });
+    }
+  }
+
+  private async clearSearchHistory(): Promise<void> {
+    try {
+      const bookViewModel = viewModelManager.getBookViewModel();
+      await bookViewModel.clearSearchHistory();
+      this.searchHistory = [];
+    } catch (error) {
+      Logger.error('SearchPage', `清除搜索历史失败: ${error}`);
+    }
   }
 
   build() {
@@ -305,78 +371,85 @@ export struct SearchPage {
                   .width('100%')
                   .margin({ bottom: 12 })
 
-                ForEach(this.searchResults, (book: Book) => {
-                  Row() {
-                    if (book.cover) {
-                      Image(book.cover)
-                        .width(60)
-                        .height(80)
-                        .borderRadius(4)
-                        .objectFit(ImageFit.Cover)
-                    } else {
-                      Column() {
-                        Text('📖')
-                          .fontSize(24)
+                List() {
+                  ForEach(this.searchResults, (book: Book) => {
+                    ListItem() {
+                      Row() {
+                        if (book.cover) {
+                          Image(book.cover)
+                            .width(60)
+                            .height(80)
+                            .borderRadius(4)
+                            .objectFit(ImageFit.Cover)
+                        } else {
+                          Column() {
+                            Text('📖')
+                              .fontSize(24)
+                          }
+                          .width(60)
+                          .height(80)
+                          .borderRadius(4)
+                          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                          .justifyContent(FlexAlign.Center)
+                        }
+
+                        Column() {
+                          Text(book.name)
+                            .fontSize(16)
+                            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                            .fontWeight(500)
+                            .maxLines(1)
+                            .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                          if (book.author) {
+                            Text(book.author)
+                              .fontSize(12)
+                              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                              .margin({ top: 4 })
+                          }
+
+                          if (book.intro) {
+                            Text(book.intro)
+                              .fontSize(12)
+                              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                              .margin({ top: 4 })
+                              .maxLines(2)
+                              .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          }
+
+                          if (book.bookSourceName) {
+                            Text(`来源: ${book.bookSourceName}`)
+                              .fontSize(10)
+                              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                              .margin({ top: 4 })
+                          }
+                        }
+                        .layoutWeight(1)
+                        .alignItems(HorizontalAlign.Start)
+                        .margin({ left: 12 })
+
+                        Button('加入书架')
+                          .fontSize(12)
+                          .fontColor(DesignSystem.Colors.text.primary.light)
+                          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                          .borderRadius(6)
+                          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+                          .margin({ left: 8 })
+                          .onClick(() => {
+                            this.addToBookshelf(book);
+                          })
                       }
-                      .width(60)
-                      .height(80)
-                      .borderRadius(4)
+                      .width('100%')
+                      .padding(12)
+                      .borderRadius(8)
                       .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                      .justifyContent(FlexAlign.Center)
                     }
-
-                    Column() {
-                      Text(book.name)
-                        .fontSize(16)
-                        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                        .fontWeight(500)
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                      if (book.author) {
-                        Text(book.author)
-                          .fontSize(12)
-                          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                          .margin({ top: 4 })
-                      }
-
-                      if (book.intro) {
-                        Text(book.intro)
-                          .fontSize(12)
-                          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                          .margin({ top: 4 })
-                          .maxLines(2)
-                          .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      }
-
-                      if (book.bookSourceName) {
-                        Text(`来源: ${book.bookSourceName}`)
-                          .fontSize(10)
-                          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                          .margin({ top: 4 })
-                      }
-                    }
-                    .layoutWeight(1)
-                    .alignItems(HorizontalAlign.Start)
-                    .margin({ left: 12 })
-
-                    Button('加入书架')
-                      .fontSize(12)
-                      .fontColor(DesignSystem.Colors.text.primary.light)
-                      .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-                      .borderRadius(6)
-                      .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-                      .margin({ left: 8 })
-                      .onClick(() => {
-                        this.addToBookshelf(book);
-                      })
-                  }
-                  .width('100%')
-                  .padding(12)
-                  .margin({ bottom: 8 })
-                  .borderRadius(8)
-                  .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                })
+                    .margin({ bottom: 8 })
+                  }, (book: Book) => `${book.id}-${book.bookSourceId}`)
+                }
+                .width('100%')
+                .height('100%')
+                .cachedCount(5)
               }
               .width('100%')
             }
@@ -412,43 +485,45 @@ export struct SearchPage {
               .margin({ bottom: 20 })
             }
 
-            Column() {
-              Row() {
-                Text($r('app.string.search_history'))
-                  .fontSize(14)
-                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                  .fontWeight(500)
+            if (this.searchHistory.length > 0) {
+              Column() {
+                Row() {
+                  Text($r('app.string.search_history'))
+                    .fontSize(14)
+                    .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                    .fontWeight(500)
 
-                Blank()
+                  Blank()
 
-                Text($r('app.string.clear_history'))
-                  .fontSize(12)
-                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                  .onClick(() => {
-                    this.searchHistory = [];
-                  })
-              }
-              .width('100%')
-              .margin({ bottom: 12 })
-
-              Flex({ wrap: FlexWrap.Wrap }) {
-                ForEach(this.searchHistory, (item: string) => {
-                  Text(item)
-                    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                    .borderRadius(15)
+                  Text($r('app.string.clear_history'))
                     .fontSize(12)
                     .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                    .margin({ right: 8, bottom: 8 })
                     .onClick(() => {
-                      this.searchText = item;
-                      this.performSearch();
+                      this.clearSearchHistory();
                     })
-                })
+                }
+                .width('100%')
+                .margin({ bottom: 12 })
+
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(this.searchHistory, (item: string) => {
+                    Text(item)
+                      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                      .borderRadius(15)
+                      .fontSize(12)
+                      .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                      .margin({ right: 8, bottom: 8 })
+                      .onClick(() => {
+                        this.searchText = item;
+                        this.performSearch();
+                      })
+                  })
+                }
               }
+              .width('100%')
+              .margin({ bottom: 25 })
             }
-            .width('100%')
-            .margin({ bottom: 25 })
 
             Column() {
               Text($r('app.string.hot_search'))

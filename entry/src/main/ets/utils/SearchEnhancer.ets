@@ -1,8 +1,3 @@
-/**
- * 搜索匹配增强器 - 优化书本搜索匹配算法
- * 提供智能匹配、模糊搜索、权重排序等功能
- */
-
 import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from './Logger';
@@ -10,6 +5,7 @@ import { Logger } from './Logger';
 interface MatchedBook {
   book: Book;
   score: number;
+  matchType: string;
 }
 
 interface BookWithSource extends Book {
@@ -17,18 +13,39 @@ interface BookWithSource extends Book {
   bookSourceName: string;
 }
 
+interface FuzzyMatchConfig {
+  enablePinyin: boolean;
+  enablePartialMatch: boolean;
+  enableInitialsMatch: boolean;
+  minScore: number;
+  maxResults: number;
+}
+
+interface FieldMatchResult {
+  score: number;
+  matchType: string;
+}
+
+interface ScoreDetails {
+  score: number;
+  matchType: string;
+}
+
+const DEFAULT_FUZZY_CONFIG: FuzzyMatchConfig = {
+  enablePinyin: true,
+  enablePartialMatch: true,
+  enableInitialsMatch: true,
+  minScore: 0.3,
+  maxResults: 50
+};
+
 class SearchEnhancer {
   
   private TAG: string = 'SearchEnhancer';
   
-  /**
-   * 搜索匹配算法
-   * @param books 待匹配的书籍列表
-   * @param keyword 搜索关键词
-   * @param source 书源信息
-   * @returns 匹配的书籍列表
-   */
-  searchBooks(books: Array<Book>, keyword: string, source?: BookSource): Array<Book> {
+  searchBooks(books: Array<Book>, keyword: string, source?: BookSource, config?: FuzzyMatchConfig): Array<Book> {
+    const actualConfig: FuzzyMatchConfig = config || DEFAULT_FUZZY_CONFIG;
+    
     if (!books || books.length === 0 || !keyword || keyword.trim().length === 0) {
       return [];
     }
@@ -36,111 +53,311 @@ class SearchEnhancer {
     const trimmedKeyword = keyword.trim().toLowerCase();
     const matchedBooks: Array<MatchedBook> = [];
     
-    for (const book of books) {
-      const score = this.calculateMatchScore(book, trimmedKeyword, source);
-      if (score > 0) {
-        matchedBooks.push({ book, score });
+    Logger.debug(this.TAG, `开始模糊搜索: "${trimmedKeyword}", 书籍数量: ${books.length}`);
+    
+    for (let i = 0; i < books.length; i++) {
+      const book = books[i];
+      const result = this.calculateMatchScoreWithDetails(book, trimmedKeyword, source, actualConfig);
+      if (result.score >= actualConfig.minScore) {
+        const matchedBook: MatchedBook = { 
+          book: book, 
+          score: result.score,
+          matchType: result.matchType
+        };
+        matchedBooks.push(matchedBook);
       }
     }
     
-    // 按匹配度排序
     matchedBooks.sort((a: MatchedBook, b: MatchedBook) => b.score - a.score);
     
-    Logger.debug(this.TAG, `搜索"${keyword}"匹配到${matchedBooks.length}本书`);
-    return matchedBooks.map(item => item.book);
+    const limitedResults = matchedBooks.slice(0, actualConfig.maxResults);
+    Logger.debug(this.TAG, `搜索"${keyword}"匹配到${limitedResults.length}本书`);
+    
+    const resultBooks: Array<Book> = [];
+    for (let i = 0; i < limitedResults.length; i++) {
+      resultBooks.push(limitedResults[i].book);
+    }
+    return resultBooks;
   }
   
-  /**
-   * 计算匹配分数
-   */
-  private calculateMatchScore(book: Book, keyword: string, source?: BookSource): number {
+  private calculateMatchScoreWithDetails(book: Book, keyword: string, source?: BookSource, config?: FuzzyMatchConfig): ScoreDetails {
     let score = 0;
+    let matchType = 'none';
+    const actualConfig: FuzzyMatchConfig = config || DEFAULT_FUZZY_CONFIG;
     
-    // 书名匹配（权重最高）
     if (book.name) {
-      const nameScore = this.calculateStringMatchScore(book.name.toLowerCase(), keyword);
-      score += nameScore * 0.6; // 书名权重60%
+      const nameResult = this.calculateFieldMatch(book.name.toLowerCase(), keyword, actualConfig);
+      if (nameResult.score > 0) {
+        score += nameResult.score * 0.6;
+        matchType = nameResult.matchType;
+      }
     }
     
-    // 作者匹配
     if (book.author) {
-      const authorScore = this.calculateStringMatchScore(book.author.toLowerCase(), keyword);
-      score += authorScore * 0.2; // 作者权重20%
+      const authorResult = this.calculateFieldMatch(book.author.toLowerCase(), keyword, actualConfig);
+      if (authorResult.score > 0) {
+        score += authorResult.score * 0.25;
+        if (matchType === 'none') {
+          matchType = `author_${authorResult.matchType}`;
+        }
+      }
     }
     
-    // 简介匹配（使用intro替代description）
     if (book.intro) {
-      const introScore = this.calculateStringMatchScore(book.intro.toLowerCase(), keyword);
-      score += introScore * 0.1; // 简介权重10%
+      const introScore = this.calculateFieldMatch(book.intro.toLowerCase(), keyword, actualConfig).score;
+      score += introScore * 0.1;
     }
     
-    // 分类匹配（使用kind替代category）
     if (book.kind) {
-      const kindScore = this.calculateStringMatchScore(book.kind.toLowerCase(), keyword);
-      score += kindScore * 0.1; // 分类权重10%
+      const kindScore = this.calculateFieldMatch(book.kind.toLowerCase(), keyword, actualConfig).score;
+      score += kindScore * 0.05;
     }
     
-    // 书源权重调整（根据sort字段计算权重）
     if (source) {
       const sourceWeight = this.calculateSourceWeight(source);
       score *= sourceWeight;
     }
     
-    return score;
+    const result: ScoreDetails = { score: score, matchType: matchType };
+    return result;
   }
   
-  /**
-   * 计算书源权重
-   */
-  private calculateSourceWeight(source: BookSource): number {
-    // 基于书源的sort字段计算权重，sort值越大权重越高
-    const baseWeight = 1.0;
-    const sortBonus = source.sort ? source.sort / 100 : 0; // 最大增加1.0
-    const enabledBonus = source.enabled ? 0.2 : 0; // 启用的书源额外权重
+  private calculateFieldMatch(text: string, keyword: string, config: FuzzyMatchConfig): FieldMatchResult {
+    if (!text || !keyword) {
+      const noResult: FieldMatchResult = { score: 0, matchType: 'none' };
+      return noResult;
+    }
     
-    return baseWeight + sortBonus + enabledBonus;
-  }
-  
-  /**
-   * 计算字符串匹配分数
-   */
-  private calculateStringMatchScore(text: string, keyword: string): number {
-    if (!text || !keyword) return 0;
-    
-    // 完全匹配
     if (text === keyword) {
-      return 1.0;
+      const exactResult: FieldMatchResult = { score: 1.0, matchType: 'exact' };
+      return exactResult;
     }
     
-    // 包含匹配
     if (text.includes(keyword)) {
-      return 0.8;
+      const position = text.indexOf(keyword);
+      const positionBonus = position === 0 ? 0.1 : 0;
+      const containsResult: FieldMatchResult = { score: 0.85 + positionBonus, matchType: 'contains' };
+      return containsResult;
     }
     
-    // 分词匹配
-    const words = keyword.split(/\s+/).filter(word => word.length > 1);
-    if (words.length > 1) {
-      let wordMatchCount = 0;
-      for (const word of words) {
-        if (text.includes(word)) {
-          wordMatchCount++;
+    if (keyword.length >= 2) {
+      const words = keyword.split(/\s+/).filter((w: string) => w.length > 0);
+      if (words.length > 1) {
+        let matchCount = 0;
+        for (let i = 0; i < words.length; i++) {
+          if (text.includes(words[i])) {
+            matchCount++;
+          }
+        }
+        if (matchCount > 0) {
+          const multiResult: FieldMatchResult = { score: (matchCount / words.length) * 0.7, matchType: 'multi_word' };
+          return multiResult;
         }
       }
-      return wordMatchCount / words.length * 0.6;
     }
     
-    // 模糊匹配（编辑距离）
+    if (config.enablePartialMatch) {
+      const partialScore = this.calculatePartialMatchScore(text, keyword);
+      if (partialScore > 0.5) {
+        const partialResult: FieldMatchResult = { score: partialScore * 0.6, matchType: 'partial' };
+        return partialResult;
+      }
+    }
+    
+    if (config.enablePinyin) {
+      const pinyinScore = this.calculatePinyinMatchScore(text, keyword);
+      if (pinyinScore > 0.5) {
+        const pinyinResult: FieldMatchResult = { score: pinyinScore * 0.5, matchType: 'pinyin' };
+        return pinyinResult;
+      }
+    }
+    
+    if (config.enableInitialsMatch) {
+      const initialsScore = this.calculateInitialsMatchScore(text, keyword);
+      if (initialsScore > 0.5) {
+        const initialsResult: FieldMatchResult = { score: initialsScore * 0.4, matchType: 'initials' };
+        return initialsResult;
+      }
+    }
+    
     const fuzzyScore = this.calculateFuzzyMatchScore(text, keyword);
-    if (fuzzyScore > 0.5) {
-      return fuzzyScore * 0.4;
+    if (fuzzyScore > 0.6) {
+      const fuzzyResult: FieldMatchResult = { score: fuzzyScore * 0.35, matchType: 'fuzzy' };
+      return fuzzyResult;
+    }
+    
+    const noMatchResult: FieldMatchResult = { score: 0, matchType: 'none' };
+    return noMatchResult;
+  }
+  
+  private calculatePartialMatchScore(text: string, keyword: string): number {
+    if (keyword.length < 2) return 0;
+    
+    let maxScore = 0;
+    const minLen = Math.min(3, keyword.length);
+    
+    for (let len = minLen; len <= keyword.length; len++) {
+      for (let i = 0; i <= keyword.length - len; i++) {
+        const subPart = keyword.substring(i, i + len);
+        if (text.includes(subPart)) {
+          const score = len / keyword.length;
+          maxScore = Math.max(maxScore, score);
+        }
+      }
+    }
+    
+    return maxScore;
+  }
+  
+  private calculatePinyinMatchScore(text: string, keyword: string): number {
+    const textPinyin = this.convertToPinyin(text);
+    const keywordLower = keyword.toLowerCase();
+    
+    if (textPinyin.includes(keywordLower)) {
+      return 0.9;
+    }
+    
+    const textPinyinNoSpace = textPinyin.replace(/\s+/g, '');
+    if (textPinyinNoSpace.includes(keywordLower)) {
+      return 0.85;
     }
     
     return 0;
   }
   
-  /**
-   * 计算模糊匹配分数（基于编辑距离）
-   */
+  private calculateInitialsMatchScore(text: string, keyword: string): number {
+    const initials = this.getInitials(text);
+    const keywordUpper = keyword.toUpperCase();
+    
+    if (initials === keywordUpper) {
+      return 1.0;
+    }
+    
+    if (initials.includes(keywordUpper)) {
+      return 0.8;
+    }
+    
+    return 0;
+  }
+  
+  private convertToPinyin(text: string): string {
+    let result = '';
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charAt(i);
+      const pinyin = this.getPinyin(char);
+      if (pinyin.length > 0) {
+        result += pinyin + ' ';
+      } else if (/[a-zA-Z0-9]/.test(char)) {
+        result += char.toLowerCase();
+      }
+    }
+    return result.trim();
+  }
+  
+  private getPinyin(char: string): string {
+    if (char === '啊' || char === '阿') return 'a';
+    if (char === '爱') return 'ai';
+    if (char === '安' || char === '按') return 'an';
+    if (char === '吧' || char === '把') return 'ba';
+    if (char === '被') return 'bei';
+    if (char === '本') return 'ben';
+    if (char === '不') return 'bu';
+    if (char === '才') return 'cai';
+    if (char === '从') return 'cong';
+    if (char === '错') return 'cuo';
+    if (char === '大') return 'da';
+    if (char === '到') return 'dao';
+    if (char === '的' || char === '地' || char === '得') return 'de';
+    if (char === '儿') return 'er';
+    if (char === '发') return 'fa';
+    if (char === '方') return 'fang';
+    if (char === '分') return 'fen';
+    if (char === '风') return 'feng';
+    if (char === '个') return 'ge';
+    if (char === '给') return 'gei';
+    if (char === '更') return 'geng';
+    if (char === '工') return 'gong';
+    if (char === '过') return 'guo';
+    if (char === '还') return 'hai';
+    if (char === '好') return 'hao';
+    if (char === '和') return 'he';
+    if (char === '很') return 'hen';
+    if (char === '会') return 'hui';
+    if (char === '几') return 'ji';
+    if (char === '家') return 'jia';
+    if (char === '见') return 'jian';
+    if (char === '叫') return 'jiao';
+    if (char === '就') return 'jiu';
+    if (char === '可') return 'ke';
+    if (char === '看') return 'kan';
+    if (char === '空') return 'kong';
+    if (char === '了') return 'le';
+    if (char === '来') return 'lai';
+    if (char === '老') return 'lao';
+    if (char === '里') return 'li';
+    if (char === '两') return 'liang';
+    if (char === '吗') return 'ma';
+    if (char === '没') return 'mei';
+    if (char === '们') return 'men';
+    if (char === '名') return 'ming';
+    if (char === '那') return 'na';
+    if (char === '你') return 'ni';
+    if (char === '年') return 'nian';
+    if (char === '能') return 'neng';
+    if (char === '哦') return 'o';
+    if (char === '平') return 'ping';
+    if (char === '去') return 'qu';
+    if (char === '人') return 'ren';
+    if (char === '日') return 'ri';
+    if (char === '上') return 'shang';
+    if (char === '谁') return 'shei';
+    if (char === '什') return 'shen';
+    if (char === '生') return 'sheng';
+    if (char === '时') return 'shi';
+    if (char === '他' || char === '她' || char === '它') return 'ta';
+    if (char === '天') return 'tian';
+    if (char === '听') return 'ting';
+    if (char === '为') return 'wei';
+    if (char === '我') return 'wo';
+    if (char === '无') return 'wu';
+    if (char === '下') return 'xia';
+    if (char === '想') return 'xiang';
+    if (char === '小') return 'xiao';
+    if (char === '些') return 'xie';
+    if (char === '学') return 'xue';
+    if (char === '一') return 'yi';
+    if (char === '有' || char === '又') return 'you';
+    if (char === '与') return 'yu';
+    if (char === '元') return 'yuan';
+    if (char === '在') return 'zai';
+    if (char === '这') return 'zhe';
+    if (char === '中') return 'zhong';
+    if (char === '主') return 'zhu';
+    if (char === '作') return 'zuo';
+    return '';
+  }
+  
+  private getInitials(text: string): string {
+    let initials = '';
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charAt(i);
+      const pinyin = this.getPinyin(char);
+      if (pinyin.length > 0) {
+        initials += pinyin.charAt(0).toUpperCase();
+      } else if (/[a-zA-Z]/.test(char)) {
+        initials += char.toUpperCase();
+      }
+    }
+    return initials;
+  }
+  
+  private calculateSourceWeight(source: BookSource): number {
+    const baseWeight = 1.0;
+    const sortBonus = source.sort ? source.sort / 100 : 0;
+    const enabledBonus = source.enabled ? 0.2 : 0;
+    return baseWeight + sortBonus + enabledBonus;
+  }
+  
   private calculateFuzzyMatchScore(text: string, keyword: string): number {
     const distance = this.calculateLevenshteinDistance(text, keyword);
     const maxLength = Math.max(text.length, keyword.length);
@@ -150,13 +367,9 @@ class SearchEnhancer {
     return 1.0 - distance / maxLength;
   }
   
-  /**
-   * 计算编辑距离（Levenshtein距离）
-   */
   private calculateLevenshteinDistance(str1: string, str2: string): number {
     const matrix: number[][] = [];
     
-    // 初始化矩阵
     for (let i = 0; i <= str2.length; i++) {
       matrix[i] = [i];
     }
@@ -165,16 +378,15 @@ class SearchEnhancer {
       matrix[0][j] = j;
     }
     
-    // 填充矩阵
     for (let i = 1; i <= str2.length; i++) {
       for (let j = 1; j <= str1.length; j++) {
         if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
           matrix[i][j] = matrix[i - 1][j - 1];
         } else {
           matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1, // 替换
-            matrix[i][j - 1] + 1,     // 插入
-            matrix[i - 1][j] + 1      // 删除
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
           );
         }
       }
@@ -183,9 +395,6 @@ class SearchEnhancer {
     return matrix[str2.length][str1.length];
   }
   
-  /**
-   * 智能搜索建议
-   */
   generateSearchSuggestions(keyword: string, searchHistory: Array<string>): Array<string> {
     const suggestions: Array<string> = [];
     
@@ -195,38 +404,47 @@ class SearchEnhancer {
     
     const trimmedKeyword = keyword.trim().toLowerCase();
     
-    // 从搜索历史中获取建议
-    for (const historyItem of searchHistory) {
+    for (let i = 0; i < searchHistory.length; i++) {
+      const historyItem = searchHistory[i];
       if (historyItem.toLowerCase().includes(trimmedKeyword) && 
           historyItem !== trimmedKeyword) {
         suggestions.push(historyItem);
       }
     }
     
-    // 去重并限制数量
-    const uniqueSuggestions = Array.from(new Set(suggestions));
-    return uniqueSuggestions.slice(0, 5); // 最多返回5个建议
+    const uniqueSuggestions: Array<string> = [];
+    const seen: Set<string> = new Set<string>();
+    for (let i = 0; i < suggestions.length; i++) {
+      if (!seen.has(suggestions[i])) {
+        seen.add(suggestions[i]);
+        uniqueSuggestions.push(suggestions[i]);
+      }
+    }
+    return uniqueSuggestions.slice(0, 5);
   }
   
-  /**
-   * 多书源搜索聚合
-   */
   async searchMultipleSources(
     keyword: string, 
     sources: Array<BookSource>,
     searchFunction: (keyword: string, source: BookSource) => Promise<Array<Book>>
   ): Promise<Array<Book>> {
     const allResults: Array<Book> = [];
-    const enabledSources = sources.filter(source => source.enabled);
+    const enabledSources: Array<BookSource> = [];
+    
+    for (let i = 0; i < sources.length; i++) {
+      if (sources[i].enabled) {
+        enabledSources.push(sources[i]);
+      }
+    }
     
     Logger.debug(this.TAG, `开始在${enabledSources.length}个书源中搜索"${keyword}"`);
     
-    // 并行搜索所有启用的书源
-    const searchPromises = enabledSources.map(async (source) => {
+    const searchPromises = enabledSources.map(async (source: BookSource) => {
       try {
         const results = await searchFunction(keyword, source);
-        // 为搜索结果添加书源信息（创建新对象避免修改原对象）
-        return results.map(book => {
+        const mappedResults: Array<Book> = [];
+        for (let i = 0; i < results.length; i++) {
+          const book = results[i];
           const bookWithSource: BookWithSource = {
             id: book.id,
             name: book.name,
@@ -245,8 +463,9 @@ class SearchEnhancer {
             lastReadChapter: book.lastReadChapter,
             lastReadChapterIndex: book.lastReadChapterIndex
           };
-          return bookWithSource;
-        });
+          mappedResults.push(bookWithSource);
+        }
+        return mappedResults;
       } catch (error) {
         Logger.error(this.TAG, `书源${source.name}搜索失败：${JSON.stringify(error)}`);
         return [];
@@ -254,53 +473,72 @@ class SearchEnhancer {
     });
     
     const resultsArray = await Promise.allSettled(searchPromises);
-    
-    // 合并结果
-    for (const result of resultsArray) {
+
+    for (let i = 0; i < resultsArray.length; i++) {
+      const result = resultsArray[i];
       if (result.status === 'fulfilled') {
-        allResults.push(...result.value);
+        for (let j = 0; j < result.value.length; j++) {
+          allResults.push(result.value[j]);
+        }
       }
     }
-    
-    // 去重（基于书名和作者）
+
+    Logger.debug(this.TAG, `合并所有书源结果: ${allResults.length}本`);
+
     const uniqueResults = this.removeDuplicateBooks(allResults);
-    
-    // 按匹配度排序
-    const sortedResults = this.searchBooks(uniqueResults, keyword);
-    
+    const sortedResults = this.sortBooksBySourcePriority(uniqueResults);
+
     Logger.debug(this.TAG, `多书源搜索完成，共找到${sortedResults.length}本唯一书籍`);
     return sortedResults;
   }
   
-  /**
-   * 去除重复书籍
-   */
   private removeDuplicateBooks(books: Array<Book>): Array<Book> {
     const seen = new Set<string>();
     const uniqueBooks: Array<Book> = [];
-    
-    for (const book of books) {
-      const key = `${book.name}_${book.author}`.toLowerCase().replace(/\s+/g, '');
+
+    for (let i = 0; i < books.length; i++) {
+      const book = books[i];
+      const authorPart = book.author ? `_${book.author}` : '';
+      const key = `${book.name}${authorPart}_${book.bookSourceId || 'unknown'}`.toLowerCase().replace(/\s+/g, '');
+
       if (!seen.has(key)) {
         seen.add(key);
         uniqueBooks.push(book);
+      } else {
+        Logger.debug(this.TAG, `去重跳过: ${book.name}`);
       }
     }
-    
+
+    Logger.debug(this.TAG, `去重前: ${books.length}本, 去重后: ${uniqueBooks.length}本`);
     return uniqueBooks;
   }
-  
-  /**
-   * 验证搜索结果有效性
-   */
-  validateSearchResults(books: Array<Book>): Array<Book> {
-    return books.filter(book => {
-      return book && 
-             book.name && 
-             book.name.trim().length > 0 &&
-             book.author &&
-             book.author.trim().length > 0;
+
+  private sortBooksBySourcePriority(books: Array<Book>): Array<Book> {
+    return books.sort(() => {
+      return 0;
     });
+  }
+
+  validateSearchResults(books: Array<Book>): Array<Book> {
+    const validBooks: Array<Book> = [];
+    for (let i = 0; i < books.length; i++) {
+      const book = books[i];
+      const hasName = book && book.name && book.name.trim().length > 0;
+      const hasUrl = book && book.bookUrl && book.bookUrl.trim().length > 0;
+
+      if (!hasName) {
+        Logger.debug(this.TAG, '过滤掉没有书名的搜索结果');
+        continue;
+      }
+
+      if (!hasUrl) {
+        Logger.debug(this.TAG, `过滤掉没有URL的书籍: ${book.name}`);
+        continue;
+      }
+
+      validBooks.push(book);
+    }
+    return validBooks;
   }
 }
 

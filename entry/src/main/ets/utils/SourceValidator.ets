@@ -41,13 +41,13 @@ class SourceValidator {
   
   // 安全配置 - 增强安全限制
   private readonly MAX_URL_LENGTH = 2048;
-  private readonly MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 降低到5MB
-  private readonly REQUEST_TIMEOUT = 10000; // 10秒
-  private readonly MAX_SOURCES_PER_BATCH = 20; // 降低批量处理数量
-  private readonly MAX_SEARCH_KEYWORD_LENGTH = 50; // 限制搜索关键词长度
-  private readonly MAX_HEADER_KEY_LENGTH = 50; // 限制请求头键名长度
-  private readonly MAX_HEADER_VALUE_LENGTH = 500; // 限制请求头值长度
-  private readonly MAX_ERROR_MESSAGE_LENGTH = 100; // 限制错误信息长度
+  private readonly MAX_RESPONSE_SIZE = 5 * 1024 * 1024;
+  private readonly REQUEST_TIMEOUT = 10000;
+  private readonly MAX_SOURCES_PER_BATCH = 50;
+  private readonly MAX_SEARCH_KEYWORD_LENGTH = 50;
+  private readonly MAX_HEADER_KEY_LENGTH = 50;
+  private readonly MAX_HEADER_VALUE_LENGTH = 500;
+  private readonly MAX_ERROR_MESSAGE_LENGTH = 100;
 
   /**
    * 验证书源基本格式 - 增强安全验证
@@ -165,10 +165,11 @@ class SourceValidator {
       Logger.debug(this.TAG, `开始验证书源可用性：${this.sanitizeLogOutput(source.name)}`);
       
       const networkManager = NetworkManager.getInstance();
-      
-      const headers: Record<string, string> | undefined = source.header
+      const headersRecord: Record<string, string> | undefined = source.header
         ? this.parseHeadersSafely(source.header)
         : undefined;
+      
+      const headers: Map<string, string> | undefined = headersRecord ? new Map(Object.entries(headersRecord)) : undefined;
       
       // 使用Promise.race实现超时控制
       const timeoutPromise = new Promise<AvailabilityResult>((resolve) => {
@@ -446,15 +447,14 @@ class SourceValidator {
         return false;
       }
       
-      // 更严格的URL验证
-      const urlPattern = /^https?:\/\/([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d{1,5})?(\/[a-zA-Z0-9-._~:/?#[\]@!$&'()*+,;=]*)?$/;
-      
-      if (!urlPattern.test(url)) {
+      // 放宽URL验证，只检查基本格式
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
         return false;
       }
       
-      // 验证协议
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      // 检查是否有基本的域名结构
+      const urlWithoutProtocol = url.replace(/^https?:\/\//, '');
+      if (urlWithoutProtocol.length === 0) {
         return false;
       }
       
@@ -505,12 +505,16 @@ class SourceValidator {
       
       // 检查是否为公共可访问域名
       const tld = hostname.split('.').pop();
-      const commonTlds = ['com', 'org', 'net', 'edu', 'gov', 'cn', 'io', 'dev'];
+      const commonTlds = ['com', 'org', 'net', 'edu', 'gov', 'cn', 'io', 'dev',
+                           'cc', 'co', 'info', 'biz', 'me', 'tv', 'xyz', 'top',
+                           'vip', 'site', 'online', 'store', 'app', 'pro', 'tech',
+                           'fun', 'club', 'shop', 'ltd', 'work', 'live', 'world',
+                           'asia', 'mobi', 'name', 'tel', 'travel', 'int', 'mil'];
       if (!tld || !commonTlds.includes(tld)) {
         // 非常见顶级域名，需要额外检查
         return this.isPublicDomain(hostname);
       }
-      
+
       return true;
     } catch (error) {
       return false;
@@ -560,20 +564,20 @@ class SourceValidator {
    * 检查可疑请求头 - 新增安全防护
    */
   private isSuspiciousHeader(key: string, value: string): boolean {
+    // 只检查真正危险的请求头，放宽对正常请求头的限制
     const suspiciousKeys = [
-      'cookie', 'authorization', 'proxy-authorization', 'x-forwarded-for',
-      'x-real-ip', 'referer', 'origin'
+      'cookie', 'authorization', 'proxy-authorization'
     ];
-    
+
     const lowerKey = key.toLowerCase();
-    
+
     if (suspiciousKeys.includes(lowerKey)) {
       return true;
     }
-    
-    // 检查可疑内容
-    if (value.includes('script') || value.includes('javascript') || 
-        value.includes('eval') || value.includes('alert')) {
+
+    // 检查可疑内容 - 只检查真正危险的脚本注入
+    if (value.includes('javascript:') || value.includes('vbscript:') ||
+        value.includes('eval(') || value.includes('alert(')) {
       return true;
     }
     

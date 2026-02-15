@@ -109,7 +109,11 @@ export class ChapterRepository {
       this.rdbStore.commit();
     }
     catch (error) {
-      await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
+      try {
+        await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
+      } catch (rollbackError) {
+        Logger.error(ChapterRepository.TAG, `回滚失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
       Logger.error(ChapterRepository.TAG, `批量插入或更新章节失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }

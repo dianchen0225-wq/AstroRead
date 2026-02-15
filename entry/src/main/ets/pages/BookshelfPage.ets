@@ -1,10 +1,26 @@
+/**
+ * Copyright (c) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
-import { BookViewModel } from '../viewmodel/BookViewModel';
+import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book } from '../models/Book';
 import { Logger } from '../utils/Logger';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import common from '@ohos.app.ability.common';
 
 @ComponentV2
 export struct BookshelfPage {
@@ -12,37 +28,48 @@ export struct BookshelfPage {
   @Local activeTabIndex: number = 0;
   @Local bookList: Book[] = [];
   @Local isLoading: boolean = false;
-
-  private bookViewModel: BookViewModel = new BookViewModel();
+  
+  private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
 
   aboutToAppear(): void {
+    this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     this.activeTabIndex = 0;
     themeManager.addListener(this.themeListener);
+    
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    viewModelManager.setContext(context);
+    
     this.loadBooks();
   }
 
   aboutToDisappear(): void {
+    this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
+    this.bookList = [];
   }
 
-  async loadBooks() {
+  async loadBooks(): Promise<void> {
+    if (!this.isComponentActive) return;
+    
     this.isLoading = true;
     try {
-      this.bookList = await this.bookViewModel.loadAllBooks();
+      const bookViewModel = viewModelManager.getBookViewModel();
+      this.bookList = await bookViewModel.loadAllBooks();
     } catch (error) {
       Logger.error('BookshelfPage', `加载书籍失败: ${error}`);
     } finally {
-      this.isLoading = false;
+      if (this.isComponentActive) {
+        this.isLoading = false;
+      }
     }
   }
 
   build() {
     Column() {
-      // 顶部导航
       Row() {
         Row() {
           Text('‹')
@@ -70,7 +97,6 @@ export struct BookshelfPage {
         color: DesignSystem.getBorderColor(this.isLightMode)
       })
 
-      // 标签页
       Row() {
         Column() {
           Text($r('app.string.recent_read'))
@@ -153,7 +179,6 @@ export struct BookshelfPage {
         .height(300)
         .justifyContent(FlexAlign.Center)
       } else {
-        // 书籍列表
         List({ space: 12 }) {
           ForEach(this.bookList, (book: Book) => {
             ListItem() {
@@ -217,24 +242,25 @@ export struct BookshelfPage {
               .borderRadius(12)
               .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
               .onClick(() => {
-                router.pushUrl({
+                router.push({
                   url: 'pages/BookDetailPage',
                   params: {
                     bookId: book.id
                   }
                 }).then(() => {
-                  hilog.info(0, 'testTag', 'push page success');
+                  hilog.info(0, 'BookshelfPage', 'push page success');
                 }).catch((err: Error) => {
-                  hilog.error(0, 'testTag', `pushPage failed: ${err}`);
+                  hilog.error(0, 'BookshelfPage', `pushPage failed: ${err}`);
                 });
               })
             }
-          })
+          }, (book: Book) => book.id)
         }
         .width('100%')
         .height('100%')
         .padding({ left: 20, right: 20 })
         .margin({ top: 15 })
+        .cachedCount(5)
       }
     }
     .width('100%')

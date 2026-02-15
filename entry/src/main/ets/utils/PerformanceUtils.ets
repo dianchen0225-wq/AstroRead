@@ -69,6 +69,8 @@ export class ImageLazyLoader {
   private static instance: ImageLazyLoader | null = null;
   private loadedImages: Set<string> = new Set();
   private imageCache: Map<string, string> = new Map();
+  private loadingImages: Map<string, Promise<string>> = new Map();
+  private readonly maxCacheSize: number = 100;
 
   static getInstance(): ImageLazyLoader {
     if (ImageLazyLoader.instance === null) {
@@ -82,6 +84,21 @@ export class ImageLazyLoader {
   }
 
   markImageLoaded(url: string): void {
+    this.loadedImages.add(url);
+  }
+
+  getCachedImage(url: string): string | undefined {
+    return this.imageCache.get(url);
+  }
+
+  cacheImage(url: string, data: string): void {
+    if (this.imageCache.size >= this.maxCacheSize) {
+      const firstKey = this.imageCache.keys().next().value;
+      if (firstKey) {
+        this.imageCache.delete(firstKey);
+      }
+    }
+    this.imageCache.set(url, data);
     this.loadedImages.add(url);
   }
 
@@ -109,9 +126,45 @@ export class ImageLazyLoader {
     return config.placeholderUrl;
   }
 
+  async loadImageWithCache(url: string): Promise<string> {
+    const cached = this.getCachedImage(url);
+    if (cached) {
+      return cached;
+    }
+
+    const loading = this.loadingImages.get(url);
+    if (loading) {
+      return loading;
+    }
+
+    const loadPromise = this.doLoadImage(url);
+    this.loadingImages.set(url, loadPromise);
+
+    try {
+      const result = await loadPromise;
+      this.cacheImage(url, result);
+      return result;
+    } finally {
+      this.loadingImages.delete(url);
+    }
+  }
+
+  private async doLoadImage(url: string): Promise<string> {
+    return url;
+  }
+
   clearCache(): void {
     this.loadedImages.clear();
     this.imageCache.clear();
+    this.loadingImages.clear();
+  }
+
+  getCacheStats(): { loaded: number; cached: number; loading: number } {
+    return {
+      loaded: this.loadedImages.size,
+      cached: this.imageCache.size,
+      loading: this.loadingImages.size
+    };
   }
 }
 

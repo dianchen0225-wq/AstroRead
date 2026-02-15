@@ -7,19 +7,12 @@
 import webview from '@ohos.web.webview';
 import { Logger } from './Logger';
 
-/**
- * JavaScript执行结果
- */
 export interface JSExecutionResult {
   success: boolean;
   result: string;
   error?: string;
 }
 
-/**
- * 书源Java对象模拟
- * 提供阅读APP书源中常用的java对象方法
- */
 export interface AstroReadJavaObject {
   ajax: (url: string) => string;
   get: (url: string) => string;
@@ -36,21 +29,72 @@ export interface AstroReadJavaObject {
   parseHtml: (html: string) => object;
 }
 
-/**
- * JavaScript引擎管理器
- * 使用WebView执行JavaScript代码
- */
+interface SecurityConfig {
+  maxScriptLength: number;
+  maxExecutionTime: number;
+  maxNestedDepth: number;
+}
+
+interface ValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
+  maxScriptLength: 50000,
+  maxExecutionTime: 5000,
+  maxNestedDepth: 10
+};
+
+const FORBIDDEN_PATTERNS: RegExp[] = [
+  /eval\s*\(/gi,
+  /Function\s*\(/gi,
+  /new\s+Function\s*\(/gi,
+  /document\.\s*/gi,
+  /window\.\s*/gi,
+  /globalThis\.\s*/gi,
+  /process\.\s*/gi,
+  /require\s*\(/gi,
+  /import\s+/gi,
+  /WebSocket\s*\(/gi,
+  /XMLHttpRequest\s*\(/gi,
+  /fetch\s*\(/gi,
+  /localStorage/gi,
+  /sessionStorage/gi,
+  /indexedDB/gi,
+  /openDatabase/gi,
+  /Worker\s*\(/gi,
+  /SharedArrayBuffer/gi,
+  /Atomics\./gi,
+  /__proto__/gi,
+  /prototype\s*\[/gi,
+  /constructor\s*\(/gi,
+  /Object\.defineProperty/gi,
+  /Object\.setPrototypeOf/gi,
+  /Reflect\./gi,
+  /Proxy\s*\(/gi,
+  /\.innerHTML\s*=/gi,
+  /\.outerHTML\s*=/gi,
+  /alert\s*\(/gi,
+  /confirm\s*\(/gi,
+  /prompt\s*\(/gi
+];
+
 export class JSEngine {
   private static instance: JSEngine | null = null;
   private webController: webview.WebviewController | null = null;
   private isInitialized: boolean = false;
   private readonly TAG = 'JSEngine';
+  private securityConfig: SecurityConfig;
 
-  private constructor() {}
+  private constructor(config: Partial<SecurityConfig> = {}) {
+    this.securityConfig = {
+      maxScriptLength: config.maxScriptLength ?? DEFAULT_SECURITY_CONFIG.maxScriptLength,
+      maxExecutionTime: config.maxExecutionTime ?? DEFAULT_SECURITY_CONFIG.maxExecutionTime,
+      maxNestedDepth: config.maxNestedDepth ?? DEFAULT_SECURITY_CONFIG.maxNestedDepth
+    };
+  }
 
-  /**
-   * 获取单例实例
-   */
   static getInstance(): JSEngine {
     if (JSEngine.instance === null) {
       JSEngine.instance = new JSEngine();
@@ -58,9 +102,6 @@ export class JSEngine {
     return JSEngine.instance;
   }
 
-  /**
-   * 初始化JavaScript引擎
-   */
   async initialize(): Promise<boolean> {
     if (this.isInitialized) {
       return true;
@@ -68,10 +109,7 @@ export class JSEngine {
 
     try {
       Logger.info(this.TAG, '初始化JavaScript引擎...');
-      
-      // 创建WebView控制器
       this.webController = new webview.WebviewController();
-      
       this.isInitialized = true;
       Logger.info(this.TAG, 'JavaScript引擎初始化成功');
       return true;
@@ -81,113 +119,172 @@ export class JSEngine {
     }
   }
 
-  /**
-   * 执行JavaScript代码
-   * @param script JavaScript代码
-   * @param timeout 超时时间（毫秒）
-   * @returns 执行结果
-   */
+  validateScript(script: string): ValidationResult {
+    if (!script || script.trim().length === 0) {
+      const result: ValidationResult = { valid: false, error: '脚本为空' };
+      return result;
+    }
+
+    if (script.length > this.securityConfig.maxScriptLength) {
+      const result: ValidationResult = { valid: false, error: `脚本长度超过限制 (${this.securityConfig.maxScriptLength}字符)` };
+      return result;
+    }
+
+    for (const pattern of FORBIDDEN_PATTERNS) {
+      if (pattern.test(script)) {
+        Logger.warn(this.TAG, `脚本包含禁止的模式: ${pattern.source}`);
+        const result: ValidationResult = { valid: false, error: `脚本包含不安全的代码模式` };
+        return result;
+      }
+    }
+
+    const bracketCount = (script.match(/\(/g) || []).length;
+    const closeBracketCount = (script.match(/\)/g) || []).length;
+    if (Math.abs(bracketCount - closeBracketCount) > this.securityConfig.maxNestedDepth) {
+      const result: ValidationResult = { valid: false, error: '脚本嵌套深度超过限制' };
+      return result;
+    }
+
+    const result: ValidationResult = { valid: true };
+    return result;
+  }
+
+  sanitizeInput(input: string): string {
+    return input
+      .replace(/\\/g, '\\\\')
+      .replace(/`/g, '\\`')
+      .replace(/\$/g, '\\$')
+      .replace(/"/g, '\\"')
+      .replace(/'/g, "\\'")
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+  }
+
   async execute(script: string, timeout: number = 5000): Promise<JSExecutionResult> {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
+    const validation = this.validateScript(script);
+    if (!validation.valid) {
+      return {
+        success: false,
+        result: '',
+        error: validation.error
+      };
+    }
+
+    const actualTimeout = Math.min(timeout, this.securityConfig.maxExecutionTime);
+
     return new Promise<JSExecutionResult>((resolve) => {
+      let resolved = false;
+      
       try {
-        // 包装脚本，捕获结果和错误
         const wrappedScript = `
           (function() {
+            'use strict';
             try {
               const result = (function() {
                 ${script}
               })();
-              return JSON.stringify({ success: true, result: result });
+              if (result === undefined) {
+                return JSON.stringify({ success: true, result: '' });
+              }
+              if (typeof result === 'object') {
+                return JSON.stringify({ success: true, result: JSON.stringify(result) });
+              }
+              return JSON.stringify({ success: true, result: String(result) });
             } catch (e) {
               return JSON.stringify({ success: false, error: e.message || String(e) });
             }
           })();
         `;
 
-        // 使用runJavaScript执行
         this.webController?.runJavaScript(wrappedScript)
           .then((result: string) => {
-            try {
-              const parsed = JSON.parse(result) as JSExecutionResult;
-              resolve(parsed);
-            } catch {
-              resolve({
-                success: true,
-                result: result
-              });
+            if (!resolved) {
+              resolved = true;
+              try {
+                const parsed = JSON.parse(result) as JSExecutionResult;
+                resolve(parsed);
+              } catch {
+                resolve({
+                  success: true,
+                  result: result
+                });
+              }
             }
           })
           .catch((error: Error) => {
+            if (!resolved) {
+              resolved = true;
+              resolve({
+                success: false,
+                result: '',
+                error: error.message
+              });
+            }
+          });
+
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
             resolve({
               success: false,
               result: '',
-              error: error.message
+              error: '执行超时'
             });
-          });
+          }
+        }, actualTimeout);
 
-        // 设置超时
-        setTimeout(() => {
+      } catch (error) {
+        if (!resolved) {
+          resolved = true;
           resolve({
             success: false,
             result: '',
-            error: '执行超时'
+            error: error instanceof Error ? error.message : '未知错误'
           });
-        }, timeout);
-
-      } catch (error) {
-        resolve({
-          success: false,
-          result: '',
-          error: error instanceof Error ? error.message : '未知错误'
-        });
+        }
       }
     });
   }
 
-  /**
-   * 执行书源搜索URL生成脚本
-   * @param script 书源中的@js脚本
-   * @param keyword 搜索关键词
-   * @param page 页码
-   * @returns 生成的搜索URL
-   */
   async executeSearchUrlScript(script: string, keyword: string, page: number = 1): Promise<string> {
-    // 构建执行环境
+    const sanitizedKeyword = this.sanitizeInput(keyword);
+    
     const envScript = `
-      // 模拟阅读APP的java对象
-      const java = {
-        ajax: function(url) { return url; },
-        get: function(url) { return url; },
-        post: function(url, body) { return url; },
-        log: function(msg) { console.log(msg); },
-        longToast: function(msg) { console.log(msg); },
-        encodeURI: function(str) { return encodeURI(str); },
-        decodeURI: function(str) { return decodeURI(str); },
-        encodeURIComponent: function(str) { return encodeURIComponent(str); },
-        decodeURIComponent: function(str) { return decodeURIComponent(str); },
-        t2s: function(str) { return str; },
-        s2t: function(str) { return str; },
-        put: function(key, value) { 
-          java._cache = java._cache || {};
-          java._cache[key] = value;
-          return value;
-        },
-        get: function(key) {
-          return java._cache ? java._cache[key] : null;
-        },
-        _cache: {}
-      };
+      (function() {
+        'use strict';
+        const java = {
+          ajax: function(url) { return String(url); },
+          get: function(url) { return String(url); },
+          post: function(url, body) { return String(url); },
+          log: function(msg) { },
+          longToast: function(msg) { },
+          encodeURI: function(str) { return encodeURI(str); },
+          decodeURI: function(str) { return decodeURI(str); },
+          encodeURIComponent: function(str) { return encodeURIComponent(str); },
+          decodeURIComponent: function(str) { return decodeURIComponent(str); },
+          t2s: function(str) { return String(str); },
+          s2t: function(str) { return String(str); },
+          put: function(key, value) { 
+            java._cache = java._cache || {};
+            java._cache[key] = value;
+            return value;
+          },
+          getCache: function(key) {
+            return java._cache ? java._cache[key] : null;
+          },
+          _cache: {}
+        };
 
-      // 搜索参数
-      const key = "${keyword.replace(/"/g, '\\"')}";
-      const page = ${page};
+        const key = "${sanitizedKeyword}";
+        const page = ${page};
 
-      // 执行脚本
-      ${script.replace('@js:', '')}
+        ${script.replace('@js:', '')}
+      })();
     `;
 
     const result = await this.execute(envScript, 3000);
@@ -200,35 +297,26 @@ export class JSEngine {
     }
   }
 
-  /**
-   * 执行书源规则脚本
-   * @param html HTML内容
-   * @param rule 规则脚本
-   * @returns 解析结果
-   */
   async executeRuleScript(html: string, rule: string): Promise<string> {
-    // 转义HTML内容
-    const escapedHtml = html
-      .replace(/\\/g, '\\\\')
-      .replace(/`/g, '\\`')
-      .replace(/\$/g, '\\$');
+    const sanitizedHtml = this.sanitizeInput(html);
+    const sanitizedRule = this.sanitizeInput(rule);
 
     const envScript = `
-      // 模拟阅读APP的java对象
-      const java = {
-        ajax: function(url) { return ''; },
-        getElements: function(html, rule) { return []; },
-        parseHtml: function(html) { return {}; },
-        log: function(msg) { console.log(msg); },
-        t2s: function(str) { return str; },
-        s2t: function(str) { return str; }
-      };
+      (function() {
+        'use strict';
+        const java = {
+          ajax: function(url) { return ''; },
+          getElements: function(html, rule) { return []; },
+          parseHtml: function(html) { return {}; },
+          log: function(msg) { },
+          t2s: function(str) { return String(str); },
+          s2t: function(str) { return String(str); }
+        };
 
-      // HTML内容
-      const result = \`${escapedHtml}\`;
+        const result = "${sanitizedHtml}";
 
-      // 执行规则
-      ${rule.replace('@js:', '').replace('<js>', '').replace('</js>', '')}
+        ${sanitizedRule.replace('@js:', '').replace('<js>', '').replace('</js>', '')}
+      })();
     `;
 
     const execResult = await this.execute(envScript, 3000);
@@ -241,25 +329,16 @@ export class JSEngine {
     }
   }
 
-  /**
-   * 检查是否为JavaScript脚本
-   */
   static isJavaScript(script: string): boolean {
     if (!script) return false;
     return script.startsWith('@js:') || 
            script.includes('<js>') || 
-           script.startsWith('javascript:');
+           script.includes('</js>');
   }
 
-  /**
-   * 清理资源
-   */
   destroy(): void {
     this.webController = null;
     this.isInitialized = false;
     Logger.info(this.TAG, 'JavaScript引擎已销毁');
   }
 }
-
-// 导出单例
-export default JSEngine.getInstance();

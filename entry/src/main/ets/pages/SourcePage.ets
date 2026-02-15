@@ -1,5 +1,21 @@
+/**
+ * Copyright (c) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import { themeManager } from '../common/ThemeManager';
-import { BookSourceViewModel, ImportResult } from '../viewmodel/BookSourceViewModel';
+import { viewModelManager } from '../viewmodel/ViewModelManager';
+import { ImportResult } from '../viewmodel/BookSourceViewModel';
 import { BookSource } from '../models/BookSource';
 import { SecurityScanResult, SecurityRisk, SecurityRiskLevel } from '../utils/SourceSandbox';
 import { promptAction } from '@kit.ArkUI';
@@ -10,6 +26,8 @@ import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import { DesignSystem } from '../common/DesignSystem';
 import { Logger } from '../utils/Logger';
+import { NetworkManager } from '../utils/NetworkManager';
+import { SourceImportTaskPool } from '../utils/SourceImportTaskPool';
 
 interface SourceItemData {
   name: string;
@@ -19,68 +37,135 @@ interface SourceItemData {
   isValidating: boolean;
 }
 
-interface DecodeOptions {
-  stream: boolean;
-}
-
 @ComponentV2
 export struct SourcePage {
-  @Local isLightMode: boolean = themeManager.isLightTheme();
+  @Local isLightMode: boolean = true;
   @Local sourceList: SourceItemData[] = [];
   @Local showImportDialog: boolean = false;
   @Local importUrl: string = '';
   @Local isImporting: boolean = false;
+  @Local importProgress: number = 0;
+  @Local importProgressMessage: string = '';
   @Local isUpdating: boolean = false;
   @Local updateProgress: string = '';
   @Local showSecurityWarning: boolean = false;
   @Local securityScanResult: SecurityScanResult | null = null;
   @Local pendingImportContent: string = '';
   @Local pendingImportFormat: string = '';
+  @Local riskConfirmCount: number = 0;
+  @Local totalCount: number = 0;
+  @Local currentPage: number = 1;
+  @Local isLoadingMore: boolean = false;
+  @Local hasMore: boolean = true;
   
-  private bookSourceViewModel: BookSourceViewModel = new BookSourceViewModel();
+  private readonly PAGE_SIZE: number = 50;
+  private isComponentActive: boolean = false;
   private decoder = util.TextDecoder.create('utf-8');
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
 
   aboutToAppear(): void {
+    this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-    this.bookSourceViewModel.setContext(getContext(this) as common.UIAbilityContext);
     this.loadSources();
   }
 
   aboutToDisappear(): void {
+    this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
+    this.sourceList = [];
+    this.securityScanResult = null;
+    this.pendingImportContent = '';
   }
 
   async loadSources() {
+    if (!this.isComponentActive) return;
+
     try {
-      const sources: BookSource[] = await this.bookSourceViewModel.loadAllBookSources();
-      this.sourceList = sources.map((source: BookSource) => {
-        const item: SourceItemData = {
-          name: source.name,
-          status: source.enabled ? '正常' : '已禁用',
-          enabled: source.enabled,
-          id: source.id,
-          isValidating: false
-        };
-        return item;
-      });
+      this.currentPage = 1;
+      this.hasMore = true;
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result = await bookSourceViewModel.loadBookSourcesPaged(this.currentPage, this.PAGE_SIZE);
+      
+      this.totalCount = result.total;
+      this.sourceList = result.sources
+        .filter((source: BookSource) => source.id && source.id.trim() !== '')
+        .map((source: BookSource) => {
+          const item: SourceItemData = {
+            name: source.name,
+            status: source.enabled ? '正常' : '已禁用',
+            enabled: source.enabled,
+            id: source.id,
+            isValidating: false
+          };
+          return item;
+        });
+      
+      this.hasMore = this.sourceList.length < this.totalCount;
+      Logger.info('SourcePage', `加载了 ${this.sourceList.length} 个书源，共 ${this.totalCount} 个`);
     } catch (error) {
       Logger.error('SourcePage', `加载书源失败: ${error}`);
-      promptAction.showToast({
-        message: '加载书源失败',
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '加载书源失败',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
+      }
+    }
+  }
+
+  async loadMoreSources() {
+    if (!this.isComponentActive || this.isLoadingMore || !this.hasMore) return;
+
+    try {
+      this.isLoadingMore = true;
+      this.currentPage++;
+
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result = await bookSourceViewModel.loadBookSourcesPaged(this.currentPage, this.PAGE_SIZE);
+
+      const newItems: SourceItemData[] = result.sources
+        .filter((source: BookSource) => source.id && source.id.trim() !== '')
+        .map((source: BookSource) => {
+          const item: SourceItemData = {
+            name: source.name,
+            status: source.enabled ? '正常' : '已禁用',
+            enabled: source.enabled,
+            id: source.id,
+            isValidating: false
+          };
+          return item;
+        });
+
+      for (let i: number = 0; i < newItems.length; i++) {
+        this.sourceList.push(newItems[i]);
+      }
+      this.hasMore = this.sourceList.length < this.totalCount;
+      Logger.info('SourcePage', `加载更多 ${newItems.length} 个书源`);
+    } catch (error) {
+      Logger.error('SourcePage', `加载更多书源失败: ${error}`);
+      this.currentPage--;
+    } finally {
+      this.isLoadingMore = false;
     }
   }
 
   async toggleSource(id: string) {
-    const source: BookSource | undefined = this.bookSourceViewModel.getBookSourceById(id);
+    const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+    const source: BookSource | undefined = bookSourceViewModel.getBookSourceById(id);
     if (source) {
       const enabled: boolean = !source.enabled;
-      await this.bookSourceViewModel.toggleBookSource(id, enabled);
+      await bookSourceViewModel.toggleBookSource(id, enabled);
       await this.loadSources();
     }
   }
@@ -93,15 +178,18 @@ export struct SourcePage {
   async importFromUrl(url: string): Promise<void> {
     if (!url || url.trim().length === 0) {
       try {
-        promptAction.showToast({
+        promptAction.showDialog({
+          title: '提示',
           message: '请输入书源URL',
-          duration: 2000
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
         });
       } catch (e) {
-        let code = e.code;
-        let name = e.name;
-        let message = e.message;
-        Logger.error('SourcePage', `promptAction.showToast call failed. code is ${code}, message is ${message}`);
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
       }
       return;
     }
@@ -110,15 +198,18 @@ export struct SourcePage {
     
     if (!this.isValidUrl(trimmedUrl)) {
       try {
-        promptAction.showToast({
+        promptAction.showDialog({
+          title: '提示',
           message: '请输入有效的URL地址',
-          duration: 2000
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
         });
       } catch (e) {
-        let code = e.code;
-        let name = e.name;
-        let message = e.message;
-        Logger.error('SourcePage', `promptAction.showToast call failed. code is ${code}, message is ${message}`);
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
       }
       return;
     }
@@ -127,51 +218,117 @@ export struct SourcePage {
     try {
       Logger.info('SourcePage', `开始从URL导入书源: ${trimmedUrl}`);
       
-      const scanResult = this.bookSourceViewModel.scanSourceSecurity(trimmedUrl);
+      const networkManager = NetworkManager.getInstance();
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      networkManager.setContext(context);
+      const content = await networkManager.get(trimmedUrl, undefined, 5 * 1024 * 1024);
+      
+      if (!content || content.trim().length === 0) {
+        throw new Error('从URL获取的书源内容为空');
+      }
+      
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const results = await Promise.all([
+        SourceImportTaskPool.scanSecurity(content),
+        SourceImportTaskPool.detectFormat(content)
+      ]);
+      const scanResult = results[0];
+      const format = results[1];
       
       if (scanResult.riskLevel === 'critical' || scanResult.riskLevel === 'high') {
         this.securityScanResult = scanResult;
-        this.pendingImportContent = trimmedUrl;
-        this.pendingImportFormat = 'url';
+        this.pendingImportContent = content;
+        this.pendingImportFormat = format;
+        this.riskConfirmCount = 0;
         this.showSecurityWarning = true;
         this.isImporting = false;
         return;
       }
       
-      const result: ImportResult = await this.bookSourceViewModel.importBookSource(trimmedUrl);
+      const result: ImportResult = await bookSourceViewModel.importBookSource(content, format, true);
       
       if (result.success) {
-        promptAction.showToast({
-          message: result.message || `成功导入${result.count || 0}个书源`,
-          duration: 2000
-        });
+        try {
+          promptAction.showDialog({
+            title: '提示',
+            message: result.message || `成功导入${result.count || 0}个书源`,
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } catch (e) {
+          Logger.error('SourcePage', `showDialog failed: ${e}`);
+        }
         await this.loadSources();
         this.showImportDialog = false;
       } else {
-        promptAction.showToast({
-          message: result.message || '导入失败',
-          duration: 3000
-        });
+        if (result.message && result.message.includes('安全风险')) {
+          const scanResult = await SourceImportTaskPool.scanSecurity(content);
+          this.securityScanResult = scanResult;
+          this.pendingImportContent = content;
+          this.pendingImportFormat = await SourceImportTaskPool.detectFormat(content);
+          this.riskConfirmCount = 0;
+          this.showSecurityWarning = true;
+        } else {
+          try {
+            promptAction.showDialog({
+              title: '提示',
+              message: result.message || '导入失败',
+              buttons: [
+                {
+                  text: '确定',
+                  color: '#007DFF'
+                }
+              ]
+            });
+          } catch (e) {
+            Logger.error('SourcePage', `showDialog failed: ${e}`);
+          }
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '未知错误';
       Logger.error('SourcePage', `导入失败: ${errorMessage}`);
-      
-      if (errorMessage.includes('network') || errorMessage.includes('网络')) {
-        promptAction.showToast({
-          message: '网络连接失败，请检查网络设置',
-          duration: 3000
-        });
-      } else if (errorMessage.includes('timeout') || errorMessage.includes('超时')) {
-        promptAction.showToast({
-          message: '请求超时，请稍后重试',
-          duration: 3000
-        });
-      } else {
-        promptAction.showToast({
-          message: `导入失败: ${errorMessage}`,
-          duration: 3000
-        });
+      try {
+        if (errorMessage.includes('network') || errorMessage.includes('网络')) {
+          promptAction.showDialog({
+            title: '提示',
+            message: '网络连接失败，请检查网络设置',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } else if (errorMessage.includes('timeout') || errorMessage.includes('超时')) {
+          promptAction.showDialog({
+            title: '提示',
+            message: '请求超时，请稍后重试',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } else {
+          promptAction.showDialog({
+            title: '提示',
+            message: `导入失败: ${errorMessage}`,
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        }
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
       }
     } finally {
       this.isImporting = false;
@@ -179,36 +336,85 @@ export struct SourcePage {
   }
 
   async confirmImportWithRisk(): Promise<void> {
+    if (this.riskConfirmCount < 1) {
+      this.riskConfirmCount++;
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '请再次点击确认导入（安全风险）',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
+      }
+      return;
+    }
+    
     this.showSecurityWarning = false;
     this.isImporting = true;
+    this.riskConfirmCount = 0;
     
     try {
-      let result: ImportResult;
-      
-      if (this.pendingImportFormat === 'url') {
-        result = await this.bookSourceViewModel.importBookSource(this.pendingImportContent);
-      } else {
-        result = await this.bookSourceViewModel.importBookSource(this.pendingImportContent, this.pendingImportFormat);
-      }
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result = await bookSourceViewModel.importBookSource(
+        this.pendingImportContent,
+        this.pendingImportFormat,
+        true
+      );
       
       if (result.success) {
-        promptAction.showToast({
-          message: result.message || `成功导入${result.count || 0}个书源`,
-          duration: 2000
-        });
+        try {
+          promptAction.showDialog({
+            title: '提示',
+            message: result.message || `成功导入${result.count || 0}个书源`,
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } catch (e) {
+          Logger.error('SourcePage', `showDialog failed: ${e}`);
+        }
         await this.loadSources();
         this.showImportDialog = false;
       } else {
-        promptAction.showToast({
-          message: result.message || '导入失败',
-          duration: 3000
-        });
+        try {
+          promptAction.showDialog({
+            title: '提示',
+            message: result.message || '导入失败',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } catch (e) {
+          Logger.error('SourcePage', `showDialog failed: ${e}`);
+        }
       }
     } catch (error) {
-      promptAction.showToast({
-        message: '导入失败: ' + (error instanceof Error ? error.message : '未知错误'),
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '导入失败: ' + (error instanceof Error ? error.message : '未知错误'),
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
+      }
     } finally {
       this.isImporting = false;
       this.pendingImportContent = '';
@@ -219,65 +425,118 @@ export struct SourcePage {
 
   cancelImportWithRisk() {
     this.showSecurityWarning = false;
+    this.riskConfirmCount = 0;
     this.pendingImportContent = '';
     this.pendingImportFormat = '';
     this.securityScanResult = null;
     try {
-      promptAction.showToast({
+      promptAction.showDialog({
+        title: '提示',
         message: '已取消导入',
-        duration: 2000
+        buttons: [
+          {
+            text: '确定',
+            color: '#007DFF'
+          }
+        ]
       });
     } catch (e) {
-      let code = e.code;
-      let name = e.name;
-      let message = e.message;
-      Logger.error('SourcePage', `promptAction.showToast call failed. code is ${code}, message is ${message}`);
+      Logger.error('SourcePage', `showDialog failed: ${e}`);
     }
   }
 
   private isValidUrl(url: string): boolean {
-    try {
-      return url.startsWith('http://') || url.startsWith('https://');
-    } catch (error) {
-      return false;
-    }
+    return url.startsWith('http://') || url.startsWith('https://');
   }
 
   async addSource(): Promise<void> {
     try {
-      const documentPicker = new picker.DocumentViewPicker(getContext(this) as common.UIAbilityContext);
+      const documentPicker = new picker.DocumentViewPicker(this.getUIContext().getHostContext() as common.UIAbilityContext);
       const documentSelectOptions = new picker.DocumentSelectOptions();
       const documentSelectResult = await documentPicker.select(documentSelectOptions);
       if (documentSelectResult) {
         const uri = documentSelectResult[0];
         const file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
         const arrayBuffer = new ArrayBuffer(1024 * 1024);
-        fs.readSync(file.fd, arrayBuffer);
-        let text = this.decoder.decodeWithStream(new Uint8Array(arrayBuffer), { stream: false } as DecodeOptions);
+        const readLen = fs.readSync(file.fd, arrayBuffer);
+        let text = this.decoder.decodeToString(new Uint8Array(arrayBuffer.slice(0, readLen)));
         
-        const scanResult = this.bookSourceViewModel.scanSourceSecurity(text);
+        const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+        const results = await Promise.all([
+          SourceImportTaskPool.scanSecurity(text),
+          SourceImportTaskPool.detectFormat(text)
+        ]);
+        const scanResult = results[0];
+        const format = results[1];
         
         if (scanResult.riskLevel === 'critical' || scanResult.riskLevel === 'high') {
           this.securityScanResult = scanResult;
           this.pendingImportContent = text;
-          this.pendingImportFormat = this.bookSourceViewModel.detectSourceFormat(text);
+          this.pendingImportFormat = format;
+          this.riskConfirmCount = 0;
           this.showSecurityWarning = true;
           return;
         }
         
         this.isImporting = true;
         try {
-          const result: ImportResult = await this.bookSourceViewModel.importBookSource(text);
-          promptAction.showToast({
-            message: result.message || `成功导入${result.count || 0}个书源`,
-            duration: 2000
-          });
-          await this.loadSources();
+          const result: ImportResult = await bookSourceViewModel.importBookSource(text, format, true);
+          if (result.success) {
+            try {
+              promptAction.showDialog({
+                title: '提示',
+                message: result.message || `成功导入${result.count || 0}个书源`,
+                buttons: [
+                  {
+                    text: '确定',
+                    color: '#007DFF'
+                  }
+                ]
+              });
+            } catch (e) {
+              Logger.error('SourcePage', `showDialog failed: ${e}`);
+            }
+            await this.loadSources();
+          } else {
+            if (result.message && result.message.includes('安全风险')) {
+              const scanResult = await SourceImportTaskPool.scanSecurity(text);
+              this.securityScanResult = scanResult;
+              this.pendingImportContent = text;
+              this.pendingImportFormat = await SourceImportTaskPool.detectFormat(text);
+              this.riskConfirmCount = 0;
+              this.showSecurityWarning = true;
+            } else {
+              try {
+                promptAction.showDialog({
+                  title: '提示',
+                  message: result.message || '导入失败',
+                  buttons: [
+                    {
+                      text: '确定',
+                      color: '#007DFF'
+                    }
+                  ]
+                });
+              } catch (e) {
+                Logger.error('SourcePage', `showDialog failed: ${e}`);
+              }
+            }
+          }
         } catch (error) {
-          promptAction.showToast({
-            message: '导入失败: ' + (error instanceof Error ? error.message : '未知错误'),
-            duration: 2000
-          });
+          try {
+            promptAction.showDialog({
+              title: '提示',
+              message: '导入失败: ' + (error instanceof Error ? error.message : '未知错误'),
+              buttons: [
+                {
+                  text: '确定',
+                  color: '#007DFF'
+                }
+              ]
+            });
+          } catch (e) {
+            Logger.error('SourcePage', `showDialog failed: ${e}`);
+          }
         } finally {
           this.isImporting = false;
         }
@@ -291,15 +550,18 @@ export struct SourcePage {
   async updateSource(): Promise<void> {
     if (this.sourceList.length === 0) {
       try {
-        promptAction.showToast({
+        promptAction.showDialog({
+          title: '提示',
           message: '暂无书源可更新',
-          duration: 2000
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
         });
       } catch (e) {
-        let code = e.code;
-        let name = e.name;
-        let message = e.message;
-        Logger.error('SourcePage', `promptAction.showToast call failed. code is ${code}, message is ${message}`);
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
       }
       return;
     }
@@ -308,19 +570,21 @@ export struct SourcePage {
     this.updateProgress = '正在验证书源...';
     
     try {
-      const sources: BookSource[] = await this.bookSourceViewModel.loadAllBookSources();
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const sources: BookSource[] = await bookSourceViewModel.loadAllBookSources();
       const totalSources = sources.length;
       
       let validCount = 0;
       let invalidCount = 0;
 
       for (let i = 0; i < sources.length; i++) {
+        if (!this.isComponentActive) break;
+        
         const source = sources[i];
         this.updateProgress = `正在验证 (${i + 1}/${totalSources})...`;
         
         try {
-          const isValid = await this.bookSourceViewModel.testBookSource(source);
-          
+          const isValid = await bookSourceViewModel.testBookSource(source);
           
           if (isValid) {
             validCount++;
@@ -330,7 +594,7 @@ export struct SourcePage {
             source.enabled = false;
           }
           
-          await this.bookSourceViewModel.upsertBookSource(source);
+          await bookSourceViewModel.upsertBookSource(source);
           
           if (i < sources.length - 1) {
             await new Promise<void>(resolve => setTimeout(resolve, 500));
@@ -343,16 +607,36 @@ export struct SourcePage {
 
       await this.loadSources();
       
-      promptAction.showToast({
-        message: `验证完成: 有效${validCount}个, 失效${invalidCount}个`,
-        duration: 3000
-      });
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: `验证完成: 有效${validCount}个, 失效${invalidCount}个`,
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
+      }
     } catch (error) {
       Logger.error('SourcePage', `更新书源失败: ${error}`);
-      promptAction.showToast({
-        message: '书源更新失败，请稍后重试',
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: '书源更新失败，请稍后重试',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
+        });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
+      }
     } finally {
       this.isUpdating = false;
       this.updateProgress = '';
@@ -361,32 +645,81 @@ export struct SourcePage {
 
   async validateSingleSource(id: string) {
     const item = this.sourceList.find(s => s.id === id);
-    if (!item) return;
-    
+    if (!item) {
+      Logger.warn('SourcePage', `未找到书源: ${id}`);
+      return;
+    }
+
     item.isValidating = true;
     item.status = '验证中...';
-    
+
     try {
-      const source = this.bookSourceViewModel.getBookSourceById(id);
-      if (source) {
-        const isValid = await this.bookSourceViewModel.testBookSource(source);
-        source.enabled = isValid;
-        await this.bookSourceViewModel.upsertBookSource(source);
-        
-        item.status = isValid ? '正常' : '失效';
-        item.enabled = isValid;
-        
-        promptAction.showToast({
-          message: isValid ? '书源有效' : '书源已失效',
-          duration: 2000
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      
+      await bookSourceViewModel.loadAllBookSources();
+      
+      const source = bookSourceViewModel.getBookSourceById(id);
+      if (!source) {
+        Logger.warn('SourcePage', `ViewModel中未找到书源: ${id}`);
+        item.status = '未找到';
+        try {
+          promptAction.showDialog({
+            title: '提示',
+            message: '书源数据不存在',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } catch (e) {
+          Logger.error('SourcePage', `showDialog failed: ${e}`);
+        }
+        return;
+      }
+
+      Logger.info('SourcePage', `开始验证书源: ${source.name}`);
+      const isValid = await bookSourceViewModel.testBookSource(source);
+
+      source.enabled = isValid;
+      await bookSourceViewModel.upsertBookSource(source);
+
+      item.status = isValid ? '正常' : '失效';
+      item.enabled = isValid;
+
+      Logger.info('SourcePage', `书源验证完成: ${source.name}, 状态: ${item.status}`);
+      try {
+        promptAction.showDialog({
+          title: '提示',
+          message: isValid ? '书源验证通过' : '书源已失效',
+          buttons: [
+            {
+              text: '确定',
+              color: '#007DFF'
+            }
+          ]
         });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
       }
     } catch (error) {
+      Logger.error('SourcePage', `验证书源失败: ${error}`);
       item.status = '验证失败';
-      promptAction.showToast({
-        message: '验证失败，请稍后重试',
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+            title: '提示',
+            message: '验证失败，请稍后重试',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
+      }
     } finally {
       item.isValidating = false;
     }
@@ -394,24 +727,55 @@ export struct SourcePage {
 
   async deleteSource(id: string) {
     try {
-      const result = await this.bookSourceViewModel.deleteBookSource(id);
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result = await bookSourceViewModel.deleteBookSource(id);
       if (result.success) {
-        promptAction.showToast({
-          message: '删除成功',
-          duration: 2000
-        });
+        try {
+          promptAction.showDialog({
+            title: '提示',
+            message: '删除成功',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } catch (e) {
+          Logger.error('SourcePage', `showDialog failed: ${e}`);
+        }
         await this.loadSources();
       } else {
-        promptAction.showToast({
-          message: result.message || '删除失败',
-          duration: 2000
-        });
+        try {
+          promptAction.showDialog({
+            title: '提示',
+            message: result.message || '删除失败',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+        } catch (e) {
+          Logger.error('SourcePage', `showDialog failed: ${e}`);
+        }
       }
     } catch (error) {
-      promptAction.showToast({
-        message: '删除失败',
-        duration: 2000
-      });
+      try {
+        promptAction.showDialog({
+            title: '提示',
+            message: '删除失败',
+            buttons: [
+              {
+                text: '确定',
+                color: '#007DFF'
+              }
+            ]
+          });
+      } catch (e) {
+        Logger.error('SourcePage', `showDialog failed: ${e}`);
+      }
     }
   }
 
@@ -436,6 +800,13 @@ export struct SourcePage {
             .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
             .fontWeight(600)
             .layoutWeight(1)
+          
+          if (this.totalCount > 0) {
+            Text(`(${this.sourceList.length}/${this.totalCount})`)
+              .fontSize(14)
+              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              .margin({ right: 8 })
+          }
         }
         .width('100%')
         .padding({ left: 15, right: 20, top: 15, bottom: 15 })
@@ -545,98 +916,139 @@ export struct SourcePage {
             .padding({ top: 8, bottom: 8 })
           }
 
-          Column() {
-            if (this.sourceList.length === 0) {
-              Column() {
-                Text('📚')
-                  .fontSize(48)
-                  .margin({ bottom: 16 })
-                Text('暂无书源')
-                  .fontSize(16)
-                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                  .margin({ bottom: 8 })
-                Text('点击"网络导入"按钮添加书源')
-                  .fontSize(14)
-                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                  .margin({ bottom: 16 })
-                Button('网络导入书源')
-                  .fontSize(14)
-                  .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-                  .fontColor('#fff')
-                  .borderRadius(8)
-                  .padding({ left: 20, right: 20, top: 10, bottom: 10 })
-                  .onClick(() => {
-                    this.showImportDialogUI();
-                  })
-              }
-              .width('100%')
-              .height(200)
-              .justifyContent(FlexAlign.Center)
-            } else {
-              ForEach(this.sourceList, (item: SourceItemData) => {
-                Row() {
-                  Column() {
-                    Text(item.name)
-                      .fontSize(14)
-                      .fontWeight(500)
-                      .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                      .margin({ bottom: 4 })
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                    Row() {
-                      Text(item.status)
-                        .fontSize(12)
-                        .fontColor(this.getStatusColor(item.status))
-                        .fontWeight(500)
-                      
-                      if (item.isValidating) {
-                        LoadingProgress()
-                          .width(12)
-                          .height(12)
-                          .color(DesignSystem.getPrimaryColor(this.isLightMode))
-                          .margin({ left: 8 })
-                      }
-                    }
-                  }
-                  .alignItems(HorizontalAlign.Start)
-                  .layoutWeight(1)
-
-                  Row() {
-                    Button('验证')
-                      .fontSize(12)
-                      .height(28)
-                      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                      .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                      .borderRadius(6)
-                      .margin({ right: 8 })
-                      .enabled(!item.isValidating)
-                      .onClick(() => {
-                        this.validateSingleSource(item.id);
-                      })
-
-                    Toggle({ type: ToggleType.Switch, isOn: item.enabled })
-                      .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-                      .onChange((isOn: boolean) => {
-                        item.enabled = isOn;
-                        this.toggleSource(item.id);
-                      })
-                  }
+          Scroll() {
+            Column() {
+              if (this.sourceList.length === 0) {
+                Column() {
+                  Text('📚')
+                    .fontSize(48)
+                    .margin({ bottom: 16 })
+                  Text('暂无书源')
+                    .fontSize(16)
+                    .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                    .margin({ bottom: 8 })
+                  Text('点击"网络导入"按钮添加书源')
+                    .fontSize(14)
+                    .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                    .margin({ bottom: 16 })
+                  Button('网络导入书源')
+                    .fontSize(14)
+                    .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                    .fontColor('#fff')
+                    .borderRadius(8)
+                    .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+                    .onClick(() => {
+                      this.showImportDialogUI();
+                    })
                 }
                 .width('100%')
-                .padding(15)
-                .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                .borderRadius(12)
-                .border({
-                  width: 1,
-                  color: DesignSystem.getBorderColor(this.isLightMode)
+                .height(200)
+                .justifyContent(FlexAlign.Center)
+              } else {
+                ForEach(this.sourceList, (item: SourceItemData) => {
+                  Row() {
+                    Column() {
+                      Text(item.name)
+                        .fontSize(14)
+                        .fontWeight(500)
+                        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                        .margin({ bottom: 4 })
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                      Row() {
+                        Text(item.status)
+                          .fontSize(12)
+                          .fontColor(this.getStatusColor(item.status))
+                          .fontWeight(500)
+
+                        if (item.isValidating) {
+                          LoadingProgress()
+                            .width(12)
+                            .height(12)
+                            .color(DesignSystem.getPrimaryColor(this.isLightMode))
+                            .margin({ left: 8 })
+                        }
+                      }
+                    }
+                    .alignItems(HorizontalAlign.Start)
+                    .layoutWeight(1)
+
+                    Row() {
+                      Button('验证')
+                        .fontSize(12)
+                        .height(28)
+                        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                        .borderRadius(6)
+                        .margin({ right: 8 })
+                        .enabled(!item.isValidating)
+                        .onClick(() => {
+                          this.validateSingleSource(item.id);
+                        })
+
+                      Toggle({ type: ToggleType.Switch, isOn: item.enabled })
+                        .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                        .onChange((isOn: boolean) => {
+                          item.enabled = isOn;
+                          this.toggleSource(item.id);
+                        })
+                    }
+                  }
+                  .width('100%')
+                  .padding(15)
+                  .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                  .borderRadius(12)
+                  .border({
+                    width: 1,
+                    color: DesignSystem.getBorderColor(this.isLightMode)
+                  })
+                  .margin({ bottom: 8 })
                 })
-                .margin({ bottom: 8 })
-              })
+                
+                if (this.hasMore && this.sourceList.length > 0) {
+                  Row() {
+                    if (this.isLoadingMore) {
+                      LoadingProgress()
+                        .width(20)
+                        .height(20)
+                        .color(DesignSystem.getPrimaryColor(this.isLightMode))
+                        .margin({ right: 8 })
+                      Text('加载中...')
+                        .fontSize(14)
+                        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                    } else {
+                      Button('加载更多')
+                        .fontSize(14)
+                        .height(36)
+                        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                        .borderRadius(8)
+                        .border({
+                          width: 1,
+                          color: DesignSystem.getBorderColor(this.isLightMode)
+                        })
+                        .onClick(() => {
+                          this.loadMoreSources();
+                        })
+                    }
+                  }
+                  .width('100%')
+                  .justifyContent(FlexAlign.Center)
+                  .padding({ top: 16, bottom: 16 })
+                }
+              }
             }
+            .width('100%')
           }
           .width('100%')
           .layoutWeight(1)
+          .scrollBar(BarState.Auto)
+          .scrollable(ScrollDirection.Vertical)
+          .edgeEffect(EdgeEffect.Spring)
+          .onScrollFrameBegin((offset: number, _state: ScrollState) => {
+            return { offsetRemain: offset };
+          })
         }
         .width('100%')
         .padding(20)
@@ -789,7 +1201,24 @@ export struct SourcePage {
               .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
               .width('100%')
               .textAlign(TextAlign.Center)
-              .margin({ bottom: 16 })
+              .margin({ bottom: 8 })
+            
+            if (this.riskConfirmCount === 0) {
+              Text('⚠️ 需要点击两次确认按钮才能导入')
+                .fontSize(11)
+                .fontColor('#FF6B00')
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .margin({ bottom: 16 })
+            } else {
+              Text('⚠️ 请再次点击确认按钮完成导入')
+                .fontSize(11)
+                .fontColor('#FF0000')
+                .fontWeight(500)
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .margin({ bottom: 16 })
+            }
 
             Row() {
               Button('取消导入')
@@ -803,10 +1232,10 @@ export struct SourcePage {
                   this.cancelImportWithRisk();
                 })
 
-              Button('继续导入')
+              Button(this.riskConfirmCount === 0 ? '无视风险，继续导入' : '再次点击确认导入')
                 .layoutWeight(1)
                 .height(44)
-                .backgroundColor('#FF6B00')
+                .backgroundColor(this.riskConfirmCount === 0 ? '#FF6B00' : '#FF0000')
                 .fontColor('#fff')
                 .borderRadius(8)
                 .onClick(() => {
@@ -846,7 +1275,8 @@ export struct SourcePage {
   }
 
   private getRiskLevelColor(level: SecurityRiskLevel): string {
-    return this.bookSourceViewModel.getSecurityRiskLevelColor(level);
+    const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+    return bookSourceViewModel.getSecurityRiskLevelColor(level);
   }
 
   private getStatusColor(status: string): string {

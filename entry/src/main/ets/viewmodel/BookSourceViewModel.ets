@@ -1,5 +1,7 @@
-import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../models/BookSource';
+
+import { BookSource, SearchRule, ChapterRule, ContentRule } from '../models/BookSource';
 import { databaseManager } from '../utils/DatabaseManager';
+import { PagedBookSourcesResult } from '../utils/database/BookSourceRepository';
 import { NetworkManager } from '../utils/NetworkManager';
 import SourceImportManager from '../utils/SourceImportManager';
 import SourceValidator from '../utils/SourceValidator';
@@ -9,6 +11,7 @@ import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from '../utils/S
 import fileio from '@ohos.fileio';
 import fs from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
+import { util } from '@kit.ArkTS';
 
 /**
  * 导入结果接口
@@ -234,10 +237,41 @@ export class BookSourceViewModel {
   }
 
   /**
+   * 分页加载书源
+   */
+  async loadBookSourcesPaged(page: number, pageSize: number): Promise<PagedBookSourcesResult> {
+    try {
+      const result = await this.databaseManager.getBookSourcesPaged(page, pageSize);
+      return result;
+    } catch (error) {
+      Logger.error('BookSourceViewModel', '分页加载书源失败');
+      throw new Error('加载书源失败');
+    }
+  }
+
+  /**
+   * 获取书源总数
+   */
+  async getBookSourcesCount(): Promise<number> {
+    try {
+      return await this.databaseManager.getBookSourcesCount();
+    } catch (error) {
+      Logger.error('BookSourceViewModel', '获取书源数量失败');
+      return 0;
+    }
+  }
+
+  /**
    * 添加或更新书源
    */
   async upsertBookSource(bookSource: BookSource): Promise<void> {
     try {
+      // 确保书源有唯一ID
+      if (!bookSource.id || bookSource.id.trim() === '') {
+        bookSource.id = util.generateRandomUUID(true);
+        Logger.debug('BookSourceViewModel', `为书源生成新ID: ${bookSource.name} -> ${bookSource.id}`);
+      }
+      
       // 验证书源数据
       this.validateBookSourceData(bookSource);
       
@@ -401,46 +435,65 @@ export class BookSourceViewModel {
         Logger.warn('BookSourceViewModel', '书源数据为空');
         return false;
       }
-      
+
       if (!bookSource.searchUrl) {
         Logger.warn('BookSourceViewModel', '书源没有配置搜索URL');
         return false;
       }
-      
+
       const networkManager = NetworkManager.getInstance();
       if (this.context) {
         networkManager.setContext(this.context);
       }
-      
-      const testKeyword = '测试';
-      let searchUrl = bookSource.searchUrl;
-      
-      if (searchUrl.includes('{{key}}')) {
-        searchUrl = searchUrl.replace('{{key}}', encodeURIComponent(testKeyword));
-      }
-      
-      if (searchUrl.includes('{key}')) {
-        searchUrl = searchUrl.replace('{key}', encodeURIComponent(testKeyword));
-      }
-      
-      if (!this.isValidUrl(searchUrl)) {
-        Logger.warn('BookSourceViewModel', `搜索URL格式无效: ${searchUrl}`);
-        return false;
-      }
-      
-      const headers: Record<string, string> | undefined = bookSource.header
+
+      // 使用多个测试关键词，提高验证成功率
+      const testKeywords = ['斗罗大陆', '斗破苍穹', '凡人修仙传', 'test', 'a'];
+      const headersRecord: Record<string, string> | undefined = bookSource.header
         ? this.parseHeadersSafely(bookSource.header)
         : undefined;
-      
+      const headers: Map<string, string> | undefined = headersRecord
+        ? this.recordToMap(headersRecord)
+        : undefined;
+
       Logger.info('BookSourceViewModel', `开始验证书源: ${bookSource.name}`);
-      const response = await networkManager.get(searchUrl, headers);
-      
-      if (response && response.length > 0) {
-        Logger.info('BookSourceViewModel', `书源验证成功: ${bookSource.name}`);
-        return true;
+
+      // 尝试多个关键词
+      for (const testKeyword of testKeywords) {
+        let searchUrl = bookSource.searchUrl;
+
+        // 替换关键词占位符
+        if (searchUrl.includes('{{key}}')) {
+          searchUrl = searchUrl.replace('{{key}}', encodeURIComponent(testKeyword));
+        } else if (searchUrl.includes('{key}')) {
+          searchUrl = searchUrl.replace('{key}', encodeURIComponent(testKeyword));
+        } else {
+          // 如果没有占位符，尝试直接追加
+          Logger.debug('BookSourceViewModel', `搜索URL没有关键词占位符: ${searchUrl}`);
+        }
+
+        // 放宽URL验证，允许更多格式
+        if (!searchUrl.startsWith('http://') && !searchUrl.startsWith('https://')) {
+          Logger.debug('BookSourceViewModel', `搜索URL格式无效，跳过: ${searchUrl}`);
+          continue;
+        }
+
+        try {
+          Logger.debug('BookSourceViewModel', `尝试关键词 "${testKeyword}" 验证: ${bookSource.name}`);
+          const response = await networkManager.get(searchUrl, headers);
+
+          // 放宽验证条件：只要响应非空且长度大于50就认为成功
+          if (response && response.length > 50) {
+            Logger.info('BookSourceViewModel', `书源验证成功: ${bookSource.name}, 关键词: ${testKeyword}, 响应长度: ${response.length}`);
+            return true;
+          }
+        } catch (e) {
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          Logger.debug('BookSourceViewModel', `关键词 "${testKeyword}" 验证失败: ${errorMsg}`);
+          // 继续尝试下一个关键词
+        }
       }
-      
-      Logger.warn('BookSourceViewModel', `书源响应为空: ${bookSource.name}`);
+
+      Logger.warn('BookSourceViewModel', `书源验证失败: ${bookSource.name}`);
       return false;
     } catch (error) {
       Logger.error('BookSourceViewModel', `测试书源有效性失败: ${error instanceof Error ? error.message : '未知错误'}`);
@@ -467,7 +520,7 @@ export class BookSourceViewModel {
    * 增强版书源导入功能
    * 支持多种格式：JSON、XML、TXT
    */
-  async importBookSource(input: string, format?: string): Promise<ImportResult> {
+  async importBookSource(input: string, format?: string, skipSafetyCheck: boolean = false): Promise<ImportResult> {
     try {
       Logger.info('BookSourceViewModel', '开始导入书源');
       
@@ -503,7 +556,7 @@ export class BookSourceViewModel {
       }
       
       // 使用增强的书源导入管理器
-      const result = await this.sourceImportManager.importSources(content, format);
+      const result = await this.sourceImportManager.importSources(content, format, skipSafetyCheck);
       
       // 重新加载书源列表
       await this.loadEnabledBookSources();
@@ -822,6 +875,22 @@ export class BookSourceViewModel {
   }
 
   /**
+   * 将 Record 转换为 Map
+   */
+  private recordToMap(record: Record<string, string>): Map<string, string> {
+    const map: Map<string, string> = new Map<string, string>();
+    const keys = Object.keys(record);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const value = record[key];
+      if (typeof value === 'string') {
+        map.set(key, value);
+      }
+    }
+    return map;
+  }
+
+  /**
    * 验证书源数据
    */
   private validateBookSourceData(source: BookSource): void {
@@ -837,12 +906,24 @@ export class BookSourceViewModel {
       throw new Error('书源名称不能超过100个字符');
     }
     
-    if (!source.url || !this.isValidUrl(source.url)) {
+    // 放宽URL验证，只检查基本格式
+    if (!source.url || (!source.url.startsWith('http://') && !source.url.startsWith('https://'))) {
       throw new Error('书源URL格式无效');
     }
     
-    if (source.searchUrl && !this.isValidUrl(source.searchUrl)) {
-      throw new Error('搜索URL格式无效');
+    // 放宽搜索URL验证，允许包含占位符
+    if (source.searchUrl) {
+      let testUrl = source.searchUrl;
+      // 替换占位符后再验证
+      if (testUrl.includes('{{key}}')) {
+        testUrl = testUrl.replace('{{key}}', 'test');
+      }
+      if (testUrl.includes('{key}')) {
+        testUrl = testUrl.replace('{key}', 'test');
+      }
+      if (!testUrl.startsWith('http://') && !testUrl.startsWith('https://')) {
+        throw new Error('搜索URL格式无效');
+      }
     }
     
     if (source.sort && (source.sort < 0 || source.sort > 1000)) {
@@ -856,68 +937,6 @@ export class BookSourceViewModel {
     }
   }
 
-
-  /**
-   * 转换搜索规则类型
-   */
-  private convertToSearchRule(rule: SearchRuleRaw | AstroReadSearchRule | SearchRule): SearchRule {
-    return {
-      bookList: rule.bookList || '',
-      name: rule.name || '',
-      author: rule.author || '',
-      cover: rule.cover || undefined,
-      intro: rule.intro || undefined,
-      bookUrl: rule.bookUrl || '',
-      nextUrl: rule.nextUrl || undefined
-    };
-  }
-
-  /**
-   * 转换发现规则类型
-   */
-  private convertToFindRule(rule: FindRuleRaw | AstroReadExploreRule): FindRule {
-    return {
-      url: rule.url || '',
-      bookList: rule.bookList || '',
-      name: rule.name || '',
-      author: rule.author || '',
-      cover: rule.cover || undefined,
-      intro: rule.intro || undefined,
-      bookUrl: rule.bookUrl || ''
-    };
-  }
-
-  /**
-   * 转换章节规则类型
-   */
-  private convertToChapterRule(rule: ChapterRuleRaw | AstroReadTocRule | ChapterRule): ChapterRule {
-    return {
-      chapterList: rule.chapterList || '',
-      chapterName: rule.chapterName || '',
-      chapterUrl: rule.chapterUrl || '',
-      nextUrl: rule.nextUrl || undefined
-    };
-  }
-
-  /**
-   * 转换内容规则类型
-   */
-  private convertToContentRule(rule: ContentRuleRaw | AstroReadContentRule | ContentRule): ContentRule {
-    return {
-      content: rule.content || '',
-      nextUrl: rule.nextUrl || undefined,
-      prevUrl: rule.prevUrl || undefined,
-      replaceRule: rule.replaceRule || undefined
-    };
-  }
-
-  /**
-   * 验证规则类型
-   */
-  private validateRuleType(ruleType: string): 'xpath' | 'jsonpath' | 'regex' {
-    const validTypes = ['xpath', 'jsonpath', 'regex'];
-    return validTypes.includes(ruleType) ? ruleType as 'xpath' | 'jsonpath' | 'regex' : 'xpath';
-  }
 
   /**
    * 获取书源列表

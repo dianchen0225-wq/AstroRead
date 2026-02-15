@@ -1,9 +1,8 @@
 import relationalStore from '@ohos.data.relationalStore';
 import common from '@ohos.app.ability.common';
-import { Logger } from './Logger';
 import { DatabaseSchema } from './database/DatabaseSchema';
 import { BookRepository } from './database/BookRepository';
-import { BookSourceRepository } from './database/BookSourceRepository';
+import { BookSourceRepository, PagedBookSourcesResult } from './database/BookSourceRepository';
 import { CategoryRepository } from './database/CategoryRepository';
 import { ReadConfigRepository } from './database/ReadConfigRepository';
 import { ChapterRepository } from './database/ChapterRepository';
@@ -25,6 +24,8 @@ export class DatabaseManager {
   private chapterRepository: ChapterRepository | null = null;
   private bookmarkRepository: BookmarkRepository | null = null;
 
+  private readonly TAG = 'DatabaseManager';
+
   private constructor() {
   }
 
@@ -37,14 +38,17 @@ export class DatabaseManager {
 
   private static instance: DatabaseManager | null = null;
 
+  private appContext: common.UIAbilityContext | null = null;
+
   async initDatabase(context: common.UIAbilityContext): Promise<void> {
     try {
+      this.appContext = context;
       this.rdbStore = await relationalStore.getRdbStore(context, DatabaseSchema.DB_CONFIG);
       await DatabaseSchema.createTables(this.rdbStore);
       this.initRepositories();
       await this.initDefaultData();
     } catch (error) {
-      Logger.error('DatabaseManager', `初始化数据库失败: ${error instanceof Error ? error.message : String(error)}`);
+      console.error('Failed to init database:', error);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }
@@ -186,6 +190,14 @@ export class DatabaseManager {
     return this.getBookSourceRepo().getAllBookSources();
   }
 
+  async getBookSourcesPaged(page: number, pageSize: number): Promise<PagedBookSourcesResult> {
+    return this.getBookSourceRepo().getBookSourcesPaged(page, pageSize);
+  }
+
+  async getBookSourcesCount(): Promise<number> {
+    return this.getBookSourceRepo().getBookSourcesCount();
+  }
+
   async upsertBookSource(bookSource: BookSource): Promise<void> {
     return this.getBookSourceRepo().upsertBookSource(bookSource);
   }
@@ -218,10 +230,38 @@ export class DatabaseManager {
   async removeBookFromCategory(bookId: string, categoryId: string): Promise<void> {
     return this.getCategoryRepo().removeBookFromCategory(bookId, categoryId);
   }
+
+  /**
+   * 关闭数据库连接
+   */
+  async closeDatabase(): Promise<void> {
+    try {
+      if (this.rdbStore) {
+        await relationalStore.deleteRdbStore(this.appContext!, DatabaseSchema.DB_CONFIG.name);
+        this.rdbStore = null;
+      }
+      this.bookRepository = null;
+      this.bookSourceRepository = null;
+      this.categoryRepository = null;
+      this.readConfigRepository = null;
+      this.chapterRepository = null;
+      this.bookmarkRepository = null;
+      console.info(this.TAG, 'Database closed successfully');
+    } catch (error) {
+      console.error(this.TAG, `Failed to close database: ${error}`);
+      throw (error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * 检查数据库是否已初始化
+   */
+  isInitialized(): boolean {
+    return this.rdbStore !== null;
+  }
 }
 
 // 导出默认实例
 export const databaseManager = DatabaseManager.getInstance();
-
 // 导出所有 Repository 类型以便按需使用
 export { BookRepository, BookSourceRepository, CategoryRepository, ReadConfigRepository, ChapterRepository, BookmarkRepository };
