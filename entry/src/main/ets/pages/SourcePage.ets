@@ -18,7 +18,7 @@ import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { ImportResult } from '../viewmodel/BookSourceViewModel';
 import { BookSource } from '../models/BookSource';
 import { SecurityScanResult, SecurityRisk, SecurityRiskLevel } from '../utils/SourceSandbox';
-import { promptAction } from '@kit.ArkUI';
+import { AlertDialog } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
@@ -108,18 +108,16 @@ export struct SourcePage {
     } catch (error) {
       Logger.error('SourcePage', `加载书源失败: ${error}`);
       try {
-        promptAction.showDialog({
-          title: '提示',
-          message: '加载书源失败',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
-            }
-          ]
+        AlertDialog.show({
+          primaryTitle: '提示',
+          content: '加载书源失败',
+          primaryButton: {
+            value: "确定",
+            action: () => {}
+          }
         });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     }
   }
@@ -178,18 +176,17 @@ export struct SourcePage {
   async importFromUrl(url: string): Promise<void> {
     if (!url || url.trim().length === 0) {
       try {
-        promptAction.showDialog({
+        let alertDialog = new AlertDialog({
           title: '提示',
           message: '请输入书源URL',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
-            }
-          ]
+          primaryButton: {
+            value: "确定",
+            action: () => {}
+          }
         });
+        alertDialog.show();
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
       return;
     }
@@ -198,18 +195,17 @@ export struct SourcePage {
     
     if (!this.isValidUrl(trimmedUrl)) {
       try {
-        promptAction.showDialog({
+        let alertDialog = new AlertDialog({
           title: '提示',
           message: '请输入有效的URL地址',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
-            }
-          ]
+          primaryButton: {
+            value: "确定",
+            action: () => {}
+          }
         });
+        alertDialog.show();
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
       return;
     }
@@ -244,23 +240,20 @@ export struct SourcePage {
         this.isImporting = false;
         return;
       }
-      
       const result: ImportResult = await bookSourceViewModel.importBookSource(content, format, true);
       
       if (result.success) {
         try {
-          promptAction.showDialog({
+          AlertDialog.show({
             title: '提示',
             message: result.message || `成功导入${result.count || 0}个书源`,
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            primaryButton: {
+              value: "确定",
+              action: () => {}
+            }
           });
         } catch (e) {
-          Logger.error('SourcePage', `showDialog failed: ${e}`);
+          Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
         }
         await this.loadSources();
         this.showImportDialog = false;
@@ -274,18 +267,16 @@ export struct SourcePage {
           this.showSecurityWarning = true;
         } else {
           try {
-            promptAction.showDialog({
+            AlertDialog.show({
               title: '提示',
               message: result.message || '导入失败',
-              buttons: [
-                {
-                  text: '确定',
-                  color: '#007DFF'
-                }
-              ]
+              confirm: {
+              value: "确定",
+              action: () => {}
+            }
             });
           } catch (e) {
-            Logger.error('SourcePage', `showDialog failed: ${e}`);
+            Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
           }
         }
       }
@@ -294,41 +285,35 @@ export struct SourcePage {
       Logger.error('SourcePage', `导入失败: ${errorMessage}`);
       try {
         if (errorMessage.includes('network') || errorMessage.includes('网络')) {
-          promptAction.showDialog({
-            title: '提示',
-            message: '网络连接失败，请检查网络设置',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
-          });
+        AlertDialog.show({
+          title: '提示',
+          message: '网络连接失败，请检查网络设置',
+          primaryButton: {
+            value: "确定",
+            action: () => {}
+          }
+        });
         } else if (errorMessage.includes('timeout') || errorMessage.includes('超时')) {
-          promptAction.showDialog({
-            title: '提示',
-            message: '请求超时，请稍后重试',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
-          });
+        AlertDialog.show({
+          title: '提示',
+          message: '请求超时，请稍后重试',
+          primaryButton: {
+            value: "确定",
+            action: () => {}
+          }
+        });
         } else {
-          promptAction.showDialog({
-            title: '提示',
-            message: `导入失败: ${errorMessage}`,
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
-          });
+        AlertDialog.show({
+          title: '提示',
+          message: `导入失败: ${errorMessage}`,
+          primaryButton: {
+            value: "确定",
+            action: () => {}
+          }
+        });
         }
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     } finally {
       this.isImporting = false;
@@ -339,18 +324,16 @@ export struct SourcePage {
     if (this.riskConfirmCount < 1) {
       this.riskConfirmCount++;
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '请再次点击确认导入（安全风险）',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          confirm: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
       return;
     }
@@ -369,51 +352,45 @@ export struct SourcePage {
       
       if (result.success) {
         try {
-          promptAction.showDialog({
+          AlertDialog.show({
             title: '提示',
             message: result.message || `成功导入${result.count || 0}个书源`,
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            confirm: {
+              value: "确定",
+              action: () => {}
+            }
           });
         } catch (e) {
-          Logger.error('SourcePage', `showDialog failed: ${e}`);
+          Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
         }
         await this.loadSources();
         this.showImportDialog = false;
       } else {
         try {
-          promptAction.showDialog({
+          AlertDialog.show({
             title: '提示',
             message: result.message || '导入失败',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            confirm: {
+              value: "确定",
+              action: () => {}
+            }
           });
         } catch (e) {
-          Logger.error('SourcePage', `showDialog failed: ${e}`);
+          Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
         }
       }
     } catch (error) {
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '导入失败: ' + (error instanceof Error ? error.message : '未知错误'),
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          confirm: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     } finally {
       this.isImporting = false;
@@ -430,18 +407,18 @@ export struct SourcePage {
     this.pendingImportFormat = '';
     this.securityScanResult = null;
     try {
-      promptAction.showDialog({
+      AlertDialog.show({
         title: '提示',
         message: '已取消导入',
         buttons: [
           {
-            text: '确定',
-            color: '#007DFF'
+            text: "确定",
+            action: () => {}
           }
         ]
       });
     } catch (e) {
-      Logger.error('SourcePage', `showDialog failed: ${e}`);
+      Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
     }
   }
 
@@ -483,18 +460,16 @@ export struct SourcePage {
           const result: ImportResult = await bookSourceViewModel.importBookSource(text, format, true);
           if (result.success) {
             try {
-              promptAction.showDialog({
+              AlertDialog.show({
                 title: '提示',
                 message: result.message || `成功导入${result.count || 0}个书源`,
-                buttons: [
-                  {
-                    text: '确定',
-                    color: '#007DFF'
-                  }
-                ]
+                confirm: {
+              value: "确定",
+              action: () => {}
+            }
               });
             } catch (e) {
-              Logger.error('SourcePage', `showDialog failed: ${e}`);
+              Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
             }
             await this.loadSources();
           } else {
@@ -507,35 +482,31 @@ export struct SourcePage {
               this.showSecurityWarning = true;
             } else {
               try {
-                promptAction.showDialog({
+                AlertDialog.show({
                   title: '提示',
                   message: result.message || '导入失败',
-                  buttons: [
-                    {
-                      text: '确定',
-                      color: '#007DFF'
-                    }
-                  ]
+                  confirm: {
+              value: "确定",
+              action: () => {}
+            }
                 });
               } catch (e) {
-                Logger.error('SourcePage', `showDialog failed: ${e}`);
+                Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
               }
             }
           }
         } catch (error) {
           try {
-            promptAction.showDialog({
+            AlertDialog.show({
               title: '提示',
               message: '导入失败: ' + (error instanceof Error ? error.message : '未知错误'),
-              buttons: [
-                {
-                  text: '确定',
-                  color: '#007DFF'
-                }
-              ]
+              confirm: {
+              value: "确定",
+              action: () => {}
+            }
             });
           } catch (e) {
-            Logger.error('SourcePage', `showDialog failed: ${e}`);
+            Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
           }
         } finally {
           this.isImporting = false;
@@ -550,18 +521,16 @@ export struct SourcePage {
   async updateSource(): Promise<void> {
     if (this.sourceList.length === 0) {
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '暂无书源可更新',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          confirm: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
       return;
     }
@@ -608,34 +577,30 @@ export struct SourcePage {
       await this.loadSources();
       
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: `验证完成: 有效${validCount}个, 失效${invalidCount}个`,
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          confirm: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     } catch (error) {
       Logger.error('SourcePage', `更新书源失败: ${error}`);
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '书源更新失败，请稍后重试',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          confirm: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     } finally {
       this.isUpdating = false;
@@ -663,18 +628,16 @@ export struct SourcePage {
         Logger.warn('SourcePage', `ViewModel中未找到书源: ${id}`);
         item.status = '未找到';
         try {
-          promptAction.showDialog({
+          AlertDialog.show({
             title: '提示',
             message: '书源数据不存在',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            confirm: {
+              value: "确定",
+              action: () => {}
+            }
           });
         } catch (e) {
-          Logger.error('SourcePage', `showDialog failed: ${e}`);
+          Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
         }
         return;
       }
@@ -690,35 +653,31 @@ export struct SourcePage {
 
       Logger.info('SourcePage', `书源验证完成: ${source.name}, 状态: ${item.status}`);
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: isValid ? '书源验证通过' : '书源已失效',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          confirm: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     } catch (error) {
       Logger.error('SourcePage', `验证书源失败: ${error}`);
       item.status = '验证失败';
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
             title: '提示',
             message: '验证失败，请稍后重试',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            confirm: {
+              value: "确定",
+              action: () => {}
+            }
           });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     } finally {
       item.isValidating = false;
@@ -731,50 +690,44 @@ export struct SourcePage {
       const result = await bookSourceViewModel.deleteBookSource(id);
       if (result.success) {
         try {
-          promptAction.showDialog({
+          AlertDialog.show({
             title: '提示',
             message: '删除成功',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            confirm: {
+              value: "确定",
+              action: () => {}
+            }
           });
         } catch (e) {
-          Logger.error('SourcePage', `showDialog failed: ${e}`);
+          Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
         }
         await this.loadSources();
       } else {
         try {
-          promptAction.showDialog({
+          AlertDialog.show({
             title: '提示',
             message: result.message || '删除失败',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            confirm: {
+              value: "确定",
+              action: () => {}
+            }
           });
         } catch (e) {
-          Logger.error('SourcePage', `showDialog failed: ${e}`);
+          Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
         }
       }
     } catch (error) {
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
             title: '提示',
             message: '删除失败',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            confirm: {
+              value: "确定",
+              action: () => {}
+            }
           });
       } catch (e) {
-        Logger.error('SourcePage', `showDialog failed: ${e}`);
+        Logger.error('SourcePage', `AlertDialog.show failed: ${e}`);
       }
     }
   }

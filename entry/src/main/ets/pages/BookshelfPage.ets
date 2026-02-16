@@ -242,16 +242,17 @@ export struct BookshelfPage {
               .borderRadius(12)
               .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
               .onClick(() => {
-                router.push({
-                  url: 'pages/BookDetailPage',
-                  params: {
-                    bookId: book.id
-                  }
-                }).then(() => {
+                try {
+                  router.pushUrl({
+                    url: 'pages/BookDetailPage',
+                    params: {
+                      bookId: book.id
+                    }
+                  });
                   hilog.info(0, 'BookshelfPage', 'push page success');
-                }).catch((err: Error) => {
+                } catch (err) {
                   hilog.error(0, 'BookshelfPage', `pushPage failed: ${err}`);
-                });
+                }
               })
             }
           }, (book: Book) => book.id)

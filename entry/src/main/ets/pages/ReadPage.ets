@@ -23,7 +23,7 @@ import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { router } from '@kit.ArkUI';
-import { promptAction } from '@kit.ArkUI';
+import { AlertDialog } from '@kit.ArkUI';
 import common from '@ohos.app.ability.common';
 
 interface RouterParams {
@@ -89,7 +89,6 @@ struct ReadPage {
 
   async loadBookDetail(): Promise<void> {
     if (!this.isComponentActive) return;
-    
     const params = router.getParams() as RouterParams;
     this.bookId = params?.bookId || '';
     this.chapterIndex = params?.chapterIndex || 0;
@@ -148,18 +147,16 @@ struct ReadPage {
       Logger.error('ReadPage', `加载章节内容失败: ${error}`);
       if (this.isComponentActive) {
         try {
-          promptAction.showDialog({
+          AlertDialog.show({
             title: '提示',
             message: '加载失败',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            primaryButton: {
+              value: "确定",
+              action: () => {}
+            }
           });
         } catch (e) {
-          Logger.error('ReadPage', `showDialog failed: ${e}`);
+          Logger.error('ReadPage', `AlertDialog.show failed: ${e}`);
         }
       }
     } finally {
@@ -176,18 +173,16 @@ struct ReadPage {
       await this.loadChapterContent();
     } else {
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
             title: '提示',
             message: '已经是最后一章了',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            primaryButton: {
+              value: "确定",
+              action: () => {}
+            }
           });
       } catch (e) {
-        Logger.error('ReadPage', `showDialog failed: ${e}`);
+        Logger.error('ReadPage', `AlertDialog.show failed: ${e}`);
       }
     }
   }
@@ -199,18 +194,16 @@ struct ReadPage {
       await this.loadChapterContent();
     } else {
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
             title: '提示',
             message: '已经是第一章了',
-            buttons: [
-              {
-                text: '确定',
-                color: '#007DFF'
-              }
-            ]
+            primaryButton: {
+              value: "确定",
+              action: () => {}
+            }
           });
       } catch (e) {
-        Logger.error('ReadPage', `showDialog failed: ${e}`);
+        Logger.error('ReadPage', `AlertDialog.show failed: ${e}`);
       }
     }
   }

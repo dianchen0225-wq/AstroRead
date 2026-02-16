@@ -19,7 +19,7 @@ import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { BookSource } from '../models/BookSource';
 import { Book } from '../models/Book';
 import { Logger } from '../utils/Logger';
-import { promptAction } from '@kit.ArkUI';
+import { AlertDialog, DialogAlignment } from '@kit.ArkUI';
 import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/NetworkManager';
@@ -89,22 +89,23 @@ export struct SearchPage {
       this.hasEnabledSources = false;
     }
   }
-
   private async performSearch(): Promise<void> {
     if (!this.searchText.trim()) {
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '请输入搜索关键词',
+          autoCancel: true,
+          alignment: DialogAlignment.Center,
           buttons: [
             {
               text: '确定',
-              color: '#007DFF'
+              action: () => {}
             }
           ]
         });
       } catch (e) {
-        Logger.error('SearchPage', `showDialog failed: ${e}`);
+        Logger.error('SearchPage', `AlertDialog.show failed: ${e}`);
       }
       return;
     }
@@ -168,41 +169,45 @@ export struct SearchPage {
       const bookViewModel = viewModelManager.getBookViewModel();
       await bookViewModel.addBook(book);
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '已添加到书架',
+          autoCancel: true,
+          alignment: DialogAlignment.Center,
           buttons: [
             {
               text: '确定',
-              color: '#007DFF'
+              action: () => {}
             }
           ]
         });
       } catch (e) {
-        Logger.error('SearchPage', `showDialog failed: ${e}`);
+        Logger.error('SearchPage', `AlertDialog.show failed: ${e}`);
       }
     } catch (error) {
       Logger.error('SearchPage', `添加到书架失败: ${error}`);
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '添加失败',
+          autoCancel: true,
+          alignment: DialogAlignment.Center,
           buttons: [
             {
               text: '确定',
-              color: '#007DFF'
+              action: () => {}
             }
           ]
         });
       } catch (e) {
-        Logger.error('SearchPage', `showDialog failed: ${e}`);
+        Logger.error('SearchPage', `AlertDialog.show failed: ${e}`);
       }
     }
   }
 
   private navigateToSourcePage(): void {
     try {
-      router.push({
+      router.pushUrl({
         url: 'pages/MainPage',
         params: { tabIndex: 3 }
       });

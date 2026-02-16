@@ -20,7 +20,7 @@ import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
-import { promptAction } from '@kit.ArkUI';
+import { AlertDialog } from '@kit.ArkUI';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import common from '@ohos.app.ability.common';
@@ -68,7 +68,6 @@ struct BookDetailPage {
 
   async loadBookDetail() {
     if (!this.isComponentActive) return;
-    
     const params = router.getParams() as RouterParams;
     this.bookId = params?.bookId || '';
     Logger.info('BookDetailPage', `bookId: ${this.bookId}`);
@@ -135,34 +134,30 @@ struct BookDetailPage {
       await bookViewModel.addBook(this.book);
       this.isAdded = true;
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
         title: '提示',
         message: '添加成功',
-        buttons: [
-          {
-            text: '确定',
-            color: '#007DFF'
-          }
-        ]
+        primaryButton: {
+              value: "确定",
+              action: () => {}
+            }
       });
       } catch (e) {
-        Logger.error('BookDetailPage', `showDialog failed: ${e}`);
+        Logger.error('BookDetailPage', `AlertDialog.show failed: ${e}`);
       }
     } catch (error) {
       Logger.error('BookDetailPage', `添加书籍失败: ${error}`);
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '添加失败',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          primaryButton: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('BookDetailPage', `showDialog failed: ${e}`);
+        Logger.error('BookDetailPage', `AlertDialog.show failed: ${e}`);
       }
     }
   }
@@ -170,25 +165,23 @@ struct BookDetailPage {
   async startRead() {
     if (this.chapters.length === 0) {
       try {
-        promptAction.showDialog({
+        AlertDialog.show({
           title: '提示',
           message: '暂无章节',
-          buttons: [
-            {
-              text: '确定',
-              color: '#007DFF'
+          primaryButton: {
+              value: "确定",
+              action: () => {}
             }
-          ]
         });
       } catch (e) {
-        Logger.error('BookDetailPage', `showDialog failed: ${e}`);
+        Logger.error('BookDetailPage', `AlertDialog.show failed: ${e}`);
       }
       return;
     }
 
     try {
       const chapterIndex = this.book?.lastReadChapterIndex ? this.book.lastReadChapterIndex : 0;
-      router.push({
+      router.pushUrl({
         url: 'pages/ReadPage',
         params: {
           bookId: this.bookId,
@@ -393,7 +386,7 @@ struct BookDetailPage {
                   .onClick(() => {
                     this.currentChapterIndex = index;
                     try {
-                      router.push({
+                      router.pushUrl({
                         url: 'pages/ReadPage',
                         params: {
                           bookId: this.bookId,
