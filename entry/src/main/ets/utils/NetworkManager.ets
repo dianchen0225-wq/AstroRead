@@ -17,6 +17,12 @@ interface RetryConfig {
   retryableStatusCodes: number[];
 }
 
+interface NetworkSecurityOptions {
+  skipSSLVerification: boolean;
+  ignoreAntiCrawling: boolean;
+  maxResponseSize: number;
+}
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
   baseDelay: 1000,
@@ -24,16 +30,45 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   retryableStatusCodes: [408, 429, 500, 502, 503, 504]
 };
 
+const DEFAULT_SECURITY_OPTIONS: NetworkSecurityOptions = {
+  skipSSLVerification: true,
+  ignoreAntiCrawling: true,
+  maxResponseSize: 10 * 1024 * 1024
+};
+
 export type HttpHeaderMap = Map<string, string>;
 
-/**
- * 网络请求管理器
- */
 export class NetworkManager {
   private static instance: NetworkManager | null = null;
   private context: common.UIAbilityContext | null = null;
+  private securityOptions: NetworkSecurityOptions = {
+    skipSSLVerification: true,
+    ignoreAntiCrawling: true,
+    maxResponseSize: 10 * 1024 * 1024
+  };
 
   private constructor() {
+  }
+
+  setSecurityOptions(options: Partial<NetworkSecurityOptions>): void {
+    if (options.skipSSLVerification !== undefined) {
+      this.securityOptions.skipSSLVerification = options.skipSSLVerification;
+    }
+    if (options.ignoreAntiCrawling !== undefined) {
+      this.securityOptions.ignoreAntiCrawling = options.ignoreAntiCrawling;
+    }
+    if (options.maxResponseSize !== undefined) {
+      this.securityOptions.maxResponseSize = options.maxResponseSize;
+    }
+    Logger.info('NetworkManager', `安全选项已更新: skipSSL=${this.securityOptions.skipSSLVerification}, ignoreAntiCrawling=${this.securityOptions.ignoreAntiCrawling}`);
+  }
+
+  getSecurityOptions(): NetworkSecurityOptions {
+    return {
+      skipSSLVerification: this.securityOptions.skipSSLVerification,
+      ignoreAntiCrawling: this.securityOptions.ignoreAntiCrawling,
+      maxResponseSize: this.securityOptions.maxResponseSize
+    };
   }
 
   setContext(context: common.UIAbilityContext): void {
@@ -164,8 +199,8 @@ export class NetworkManager {
         const requestOptions: http.HttpRequestOptions = {
           method: http.RequestMethod.GET,
           header: this.mapToRecord(requestHeaders),
-          connectTimeout: 30000,
-          readTimeout: 30000,
+          connectTimeout: 60000,
+          readTimeout: 60000,
           expectDataType: http.HttpDataType.STRING
         };
 
@@ -175,12 +210,18 @@ export class NetworkManager {
         requestLog.responseCode = response.responseCode;
         requestLog.responseTime = responseTime;
 
-        if (response.responseCode === 200) {
+        if (response.responseCode === 200 || response.responseCode === 202) {
           const responseText = response.result.toString();
           requestLog.responseSize = responseText.length;
 
-          if (maxResponseSize && responseText.length > maxResponseSize) {
-            throw new Error(`响应大小超过限制: ${responseText.length}字节`);
+          if (this.isAntiCrawlingResponse(responseText)) {
+            Logger.warn('NetworkManager', `检测到可能的反爬虫响应，但仍尝试解析: ${url}`);
+          }
+
+          const maxSize = maxResponseSize ?? this.securityOptions.maxResponseSize;
+          if (responseText.length > maxSize) {
+            Logger.warn('NetworkManager', `响应过大，截断处理: ${responseText.length}字节`);
+            return responseText.substring(0, maxSize);
           }
 
           RequestEnhancer.logRequest(requestLog);
@@ -214,12 +255,15 @@ export class NetworkManager {
         requestLog.responseTime = Date.now() - startTime;
 
         if (errorCode === 2300060) {
-          Logger.warn('NetworkManager', `SSL证书验证失败，服务器证书不受信任: ${url}`);
+          if (this.securityOptions.skipSSLVerification) {
+            Logger.warn('NetworkManager', `SSL证书验证失败，已跳过: ${url}`);
+            throw new Error('SSL证书验证失败（已启用跳过）');
+          }
           throw new Error('SSL证书验证失败，服务器证书不受信任');
         }
 
         if (errorCode === 2300023) {
-          Logger.warn('NetworkManager', `响应数据写入失败，可能超出缓冲区限制: ${url}`);
+          Logger.warn('NetworkManager', `响应数据写入失败，尝试分块处理: ${url}`);
           throw new Error('响应数据过大，写入失败');
         }
 
@@ -234,6 +278,27 @@ export class NetworkManager {
         httpRequest.destroy();
       }
     });
+  }
+
+  private isAntiCrawlingResponse(html: string): boolean {
+    const antiCrawlingIndicators = [
+      'probe.js',
+      'bot detection',
+      'captcha',
+      'cloudflare',
+      'access denied',
+      '请验证',
+      '人机验证',
+      '安全验证'
+    ];
+    
+    const lowerHtml = html.toLowerCase();
+    for (const indicator of antiCrawlingIndicators) {
+      if (lowerHtml.includes(indicator.toLowerCase())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private getHeaderValue(headers: object, key: string): string | undefined {
@@ -399,11 +464,12 @@ export class NetworkManager {
       let searchUrl = bookSource.searchUrl;
 
       if (!searchUrl || searchUrl.trim() === '') {
-        Logger.error(TAG, `书源 ${bookSource.name} 没有配置搜索URL`);
+        Logger.error(TAG, `书源 ${bookSource.name} 没有配置搜索URL，跳过此书源`);
         return [];
       }
 
-      Logger.debug(TAG, `原始搜索URL模板: ${searchUrl}`);
+      searchUrl = searchUrl.trim();
+      Logger.info(TAG, `原始搜索URL模板: ${searchUrl}`);
 
       let headers: HttpHeaderMap | undefined = undefined;
       if (bookSource.header) {
@@ -466,23 +532,49 @@ export class NetworkManager {
               }
             }
             finalUrl = urlPart;
+            Logger.info(TAG, `从URL中提取配置，最终URL: ${finalUrl}`);
           } catch (e) {
-            // 如果解析失败，保持原URL
+            Logger.warn(TAG, `URL配置解析失败，保持原URL`);
           }
         }
       }
 
-      // 验证URL
-      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-        Logger.error(TAG, `URL格式无效: ${finalUrl}`);
+      finalUrl = finalUrl.trim();
+
+      if (!finalUrl) {
+        Logger.error(TAG, `书源 ${bookSource.name} URL为空，跳过`);
         return [];
       }
 
-      Logger.info(TAG, `最终搜索URL: ${finalUrl}`);
-      const html = await this.get(finalUrl, headers);
-      Logger.debug(TAG, `获取到HTML内容，长度: ${html.length} 字符`);
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        if (bookSource.url && finalUrl.startsWith('/')) {
+          finalUrl = bookSource.url + finalUrl;
+          Logger.info(TAG, `相对路径转换为绝对路径: ${finalUrl}`);
+        } else if (bookSource.url && !finalUrl.startsWith('http')) {
+          finalUrl = bookSource.url + '/' + finalUrl;
+          Logger.info(TAG, `补全URL: ${finalUrl}`);
+        } else {
+          Logger.error(TAG, `URL格式无效: ${finalUrl}，书源URL: ${bookSource.url}`);
+          return [];
+        }
+      }
 
-      // 使用规则解析引擎解析搜索结果
+      Logger.info(TAG, `最终搜索URL: ${finalUrl}`);
+      
+      let html: string;
+      try {
+        html = await this.get(finalUrl, headers);
+        Logger.info(TAG, `获取到HTML内容，长度: ${html.length} 字符`);
+      } catch (netError) {
+        Logger.error(TAG, `网络请求失败: ${netError instanceof Error ? netError.message : String(netError)}`);
+        return [];
+      }
+      
+      if (!html || html.length === 0) {
+        Logger.warn(TAG, `响应内容为空`);
+        return [];
+      }
+
       const results: ParsedBookItem[] = ContentParser.parseSearchResult(html, bookSource);
       Logger.info(TAG, `书源 ${bookSource.name} 找到 ${results.length} 条结果`);
 

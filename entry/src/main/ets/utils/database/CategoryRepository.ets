@@ -15,10 +15,15 @@ export class CategoryRepository {
    */
   async getAllBookCategories(): Promise<BookCategory[]> {
     const predicates = new relationalStore.RdbPredicates('book_category');
-    predicates.orderByAsc('sort');
-
     try {
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      predicates.orderByAsc('sort');
+    } catch (error) {
+      Logger.error(CategoryRepository.TAG, `设置排序失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
       const categories: BookCategory[] = [];
 
       while (resultSet.goToNextRow()) {
@@ -26,11 +31,14 @@ export class CategoryRepository {
         categories.push(category);
       }
 
-      resultSet.close();
       return categories;
     } catch (error) {
       Logger.error(CategoryRepository.TAG, `查询书籍分类失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
+    } finally {
+      if (resultSet) {
+        resultSet.close();
+      }
     }
   }
 

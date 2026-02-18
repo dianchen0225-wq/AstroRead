@@ -6,6 +6,7 @@ import { NetworkManager } from '../utils/NetworkManager';
 import SourceImportManager from '../utils/SourceImportManager';
 import SourceValidator from '../utils/SourceValidator';
 import BookSourceParser from '../utils/BookSourceParser';
+import BookSourceManager, { SearchBooksResult, YCKSourceData } from '../utils/BookSourceManager';
 import { Logger } from '../utils/Logger';
 import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from '../utils/SourceSandbox';
 import fileio from '@ohos.fileio';
@@ -196,9 +197,9 @@ export class BookSourceViewModel {
   private readonly databaseManager = databaseManager;
   private readonly sourceImportManager = SourceImportManager;
   private readonly sourceValidator = SourceValidator;
+  private readonly bookSourceManager = BookSourceManager;
   private context: common.UIAbilityContext | null = null;
   
-  // 安全配置
   private readonly MAX_URL_LENGTH = 2048;
   private readonly MAX_FILE_NAME_LENGTH = 255;
   private readonly ALLOWED_FILE_EXTENSIONS = ['json', 'txt'];
@@ -261,6 +262,18 @@ export class BookSourceViewModel {
     }
   }
 
+
+  /**
+   * 根据ID获取书源
+   */
+  async getBookSourceById(id: string): Promise<BookSource | null> {
+    try {
+      return await this.databaseManager.getBookSourceById(id);
+    } catch (error) {
+      Logger.error('BookSourceViewModel', '获取书源失败');
+      return null;
+    }
+  }
   /**
    * 添加或更新书源
    */
@@ -832,6 +845,31 @@ export class BookSourceViewModel {
   }
 
   /**
+   * 验证书源数据
+   */
+  private validateBookSourceData(source: BookSource): void {
+    if (!source.name || source.name.trim().length === 0) {
+      throw new Error('书源名称不能为空');
+    }
+    
+    if (!source.url || source.url.trim().length === 0) {
+      throw new Error('书源URL不能为空');
+    }
+    
+    if (source.name.length > 100) {
+      throw new Error('书源名称长度不能超过100个字符');
+    }
+    
+    if (source.url.length > 2048) {
+      throw new Error('书源URL长度不能超过2048个字符');
+    }
+    
+    if (!this.isValidUrl(source.url)) {
+      throw new Error('书源URL格式无效');
+    }
+  }
+
+  /**
    * 验证UUID格式
    */
   private isValidUUID(id: string): boolean {
@@ -839,138 +877,42 @@ export class BookSourceViewModel {
     return uuidPattern.test(id);
   }
 
-
   /**
-   * 安全解析请求头
+   * 安全解析headers
    */
-  private parseHeadersSafely(headersString: string): Record<string, string> {
+  private parseHeadersSafely(headerStr: string): Record<string, string> | undefined {
     try {
-      const headers = JSON.parse(headersString) as Record<string, string>;
-      
-      // 验证headers对象
-      if (typeof headers !== 'object' || headers === null) {
-        return {};
+      if (!headerStr || headerStr.trim().length === 0) {
+        return undefined;
       }
       
-      const result: Record<string, string> = {};
-      
-      // 使用Object.keys替代for-in循环
-      const keys = Object.keys(headers);
-      for (let i = 0; i < keys.length; i++) {
-        const key = keys[i];
-        const value = headers[key] as string;
-        if (typeof key === 'string' && typeof value === 'string') {
-          // 限制header key和value长度
-          if (key.length <= 100 && value.length <= 1000) {
-            result[key] = value;
-          }
+      const parsed = JSON.parse(headerStr) as Record<string, string>;
+      if (typeof parsed === 'object' && parsed !== null) {
+        const result: Record<string, string> = {};
+        const keys = Object.keys(parsed);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          result[key] = String(parsed[key]);
         }
+        return result;
       }
-      
-      return result;
+      return undefined;
     } catch (error) {
-      Logger.warn('BookSourceViewModel', '解析请求头失败，使用空请求头');
-      return {};
+      Logger.warn('BookSourceViewModel', `解析headers失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      return undefined;
     }
   }
 
   /**
-   * 将 Record 转换为 Map
+   * 将Record转换为Map
    */
   private recordToMap(record: Record<string, string>): Map<string, string> {
-    const map: Map<string, string> = new Map<string, string>();
+    const map = new Map<string, string>();
     const keys = Object.keys(record);
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      const value = record[key];
-      if (typeof value === 'string') {
-        map.set(key, value);
-      }
+      map.set(key, record[key]);
     }
     return map;
-  }
-
-  /**
-   * 验证书源数据
-   */
-  private validateBookSourceData(source: BookSource): void {
-    if (!source) {
-      throw new Error('书源数据不能为空');
-    }
-    
-    if (!source.name || source.name.trim().length === 0) {
-      throw new Error('书源名称不能为空');
-    }
-    
-    if (source.name.length > 100) {
-      throw new Error('书源名称不能超过100个字符');
-    }
-    
-    // 放宽URL验证，只检查基本格式
-    if (!source.url || (!source.url.startsWith('http://') && !source.url.startsWith('https://'))) {
-      throw new Error('书源URL格式无效');
-    }
-    
-    // 放宽搜索URL验证，允许包含占位符
-    if (source.searchUrl) {
-      let testUrl = source.searchUrl;
-      // 替换占位符后再验证
-      if (testUrl.includes('{{key}}')) {
-        testUrl = testUrl.replace('{{key}}', 'test');
-      }
-      if (testUrl.includes('{key}')) {
-        testUrl = testUrl.replace('{key}', 'test');
-      }
-      if (!testUrl.startsWith('http://') && !testUrl.startsWith('https://')) {
-        throw new Error('搜索URL格式无效');
-      }
-    }
-    
-    if (source.sort && (source.sort < 0 || source.sort > 1000)) {
-      throw new Error('排序值必须在0-1000之间');
-    }
-    
-    // 验证规则类型
-    const validRuleTypes = ['xpath', 'jsonpath', 'regex'];
-    if (source.ruleType && !validRuleTypes.includes(source.ruleType)) {
-      throw new Error('无效的规则类型');
-    }
-  }
-
-
-  /**
-   * 获取书源列表
-   */
-  getBookSources(): BookSource[] {
-    return [...this.bookSources];
-  }
-
-  /**
-   * 根据ID获取书源
-   */
-  getBookSourceById(id: string): BookSource | undefined {
-    return this.bookSources.find(source => source.id === id);
-  }
-
-  /**
-   * 获取启用的书源数量
-   */
-  getEnabledBookSourcesCount(): number {
-    return this.bookSources.filter(source => source.enabled).length;
-  }
-
-  /**
-   * 获取书源总数
-   */
-  getTotalBookSourcesCount(): number {
-    return this.bookSources.length;
-  }
-
-  /**
-   * 清理资源
-   */
-  destroy(): void {
-    this.bookSources = [];
-    this.context = null;
   }
 }

@@ -665,3 +665,4 @@ class BookSourceParser {
   }
 
 export default new BookSourceParser();
+export { BookSourceParser };

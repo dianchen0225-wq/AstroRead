@@ -413,7 +413,12 @@ class SourceImportManager {
       await databaseManager.upsertBookSource(updatedSource);
     } else {
       if (!source.id || source.id.trim() === '') {
-        source.id = util.generateRandomUUID(true);
+        try {
+          source.id = util.generateRandomUUID(true);
+        } catch (error) {
+          Logger.error('SourceImportManager', `生成UUID失败: ${error}`);
+          source.id = `source_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        }
       }
       source.addTime = now;
       source.lastUpdateTime = now;
@@ -623,41 +628,31 @@ class SourceImportManager {
    * 检查书源安全性 - 增强安全防护
    */
   private isSafeSource(source: BookSource): boolean {
-    // 检查名称长度
-    if (source.name && source.name.length > this.MAX_SOURCE_NAME_LENGTH) {
+    if (source.name && source.name.length > this.MAX_SOURCE_NAME_LENGTH * 2) {
       return false;
     }
     
-    // 检查URL安全性
-    if (!source.url || source.url.length > this.MAX_URL_LENGTH) {
+    if (!source.url) {
       return false;
     }
     
-    // 检查搜索URL安全性
-    if (source.searchUrl && source.searchUrl.length > this.MAX_URL_LENGTH) {
+    if (source.url.length > this.MAX_URL_LENGTH * 2) {
       return false;
     }
     
-    // 检查请求头安全性
-    if (source.header && source.header.length > this.MAX_HEADER_LENGTH) {
+    if (source.searchUrl && source.searchUrl.length > this.MAX_URL_LENGTH * 2) {
       return false;
     }
     
-    // 检查URL协议
+    if (source.header && source.header.length > this.MAX_HEADER_LENGTH * 2) {
+      return false;
+    }
+    
     if (!this.isValidUrlProtocol(source.url)) {
       return false;
     }
     
     if (source.searchUrl && !this.isValidUrlProtocol(source.searchUrl)) {
-      return false;
-    }
-    
-    // 检查URL格式
-    if (!this.isValidUrlFormat(source.url)) {
-      return false;
-    }
-    
-    if (source.searchUrl && !this.isValidUrlFormat(source.searchUrl)) {
       return false;
     }
     

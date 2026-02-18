@@ -23,7 +23,7 @@ import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { router } from '@kit.ArkUI';
-import { AlertDialog } from '@kit.ArkUI';
+import { promptAction } from '@kit.ArkUI';
 import common from '@ohos.app.ability.common';
 
 interface RouterParams {
@@ -89,11 +89,8 @@ struct ReadPage {
 
   async loadBookDetail(): Promise<void> {
     if (!this.isComponentActive) return;
-    const params = router.getParams() as RouterParams;
-    this.bookId = params?.bookId || '';
-    this.chapterIndex = params?.chapterIndex || 0;
-    this.chapterUrl = params?.chapterUrl || '';
     
+    // 参数已在aboutToAppear中获取
     Logger.info('ReadPage', `bookId: ${this.bookId}, chapterIndex: ${this.chapterIndex}`);
     
     if (this.bookId) {
@@ -102,7 +99,7 @@ struct ReadPage {
       
       if (this.book && this.isComponentActive) {
         const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
-        this.bookSource = bookSourceViewModel.getBookSourceById(this.book.bookSourceId) || null;
+        this.bookSource = await bookSourceViewModel.getBookSourceById(this.book.bookSourceId);
       }
     }
     
@@ -147,16 +144,11 @@ struct ReadPage {
       Logger.error('ReadPage', `加载章节内容失败: ${error}`);
       if (this.isComponentActive) {
         try {
-          AlertDialog.show({
-            title: '提示',
-            message: '加载失败',
-            primaryButton: {
-              value: "确定",
-              action: () => {}
-            }
+          promptAction.showToast({
+            message: '加载失败'
           });
-        } catch (e) {
-          Logger.error('ReadPage', `AlertDialog.show failed: ${e}`);
+        } catch (showError) {
+          Logger.error('ReadPage', `显示提示失败: ${showError}`);
         }
       }
     } finally {
@@ -173,16 +165,11 @@ struct ReadPage {
       await this.loadChapterContent();
     } else {
       try {
-        AlertDialog.show({
-            title: '提示',
-            message: '已经是最后一章了',
-            primaryButton: {
-              value: "确定",
-              action: () => {}
-            }
-          });
-      } catch (e) {
-        Logger.error('ReadPage', `AlertDialog.show failed: ${e}`);
+        promptAction.showToast({
+          message: '已经是最后一章了'
+        });
+      } catch (showError) {
+        Logger.error('ReadPage', `显示提示失败: ${showError}`);
       }
     }
   }
@@ -194,16 +181,11 @@ struct ReadPage {
       await this.loadChapterContent();
     } else {
       try {
-        AlertDialog.show({
-            title: '提示',
-            message: '已经是第一章了',
-            primaryButton: {
-              value: "确定",
-              action: () => {}
-            }
-          });
-      } catch (e) {
-        Logger.error('ReadPage', `AlertDialog.show failed: ${e}`);
+        promptAction.showToast({
+          message: '已经是第一章了'
+        });
+      } catch (showError) {
+        Logger.error('ReadPage', `显示提示失败: ${showError}`);
       }
     }
   }
@@ -297,7 +279,11 @@ struct ReadPage {
             .margin({ right: 15 })
             .onClick(() => {
               this.updateReadProgress();
-              router.back();
+              try {
+                router.back();
+              } catch (error) {
+                Logger.error('ReadPage', `返回失败: ${error}`);
+              }
             })
 
             if (this.book) {
@@ -475,3 +461,5 @@ struct ReadPage {
     .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
   }
 }
+
+export default ReadPage;

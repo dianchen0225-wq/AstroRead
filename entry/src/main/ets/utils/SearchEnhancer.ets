@@ -498,18 +498,15 @@ class SearchEnhancer {
 
     for (let i = 0; i < books.length; i++) {
       const book = books[i];
-      const authorPart = book.author ? `_${book.author}` : '';
-      const key = `${book.name}${authorPart}_${book.bookSourceId || 'unknown'}`.toLowerCase().replace(/\s+/g, '');
+      const key = `${book.name}_${book.author || ''}`.toLowerCase().trim();
 
       if (!seen.has(key)) {
         seen.add(key);
         uniqueBooks.push(book);
-      } else {
-        Logger.debug(this.TAG, `去重跳过: ${book.name}`);
       }
     }
 
-    Logger.debug(this.TAG, `去重前: ${books.length}本, 去重后: ${uniqueBooks.length}本`);
+    Logger.info(this.TAG, `去重前: ${books.length}本, 去重后: ${uniqueBooks.length}本`);
     return uniqueBooks;
   }
 

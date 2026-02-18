@@ -55,9 +55,10 @@ export class ChapterViewModel {
    */
   async fetchAndSaveChapters(bookId: string, bookSource: BookSource, bookUrl: string): Promise<Chapter[]> {
     try {
+      Logger.info(ChapterViewModel.TAG, `开始获取章节，书源: ${bookSource.name}, URL: ${bookUrl}`);
       const chapterList: ParsedChapterItem[] = await this.getChapterList(bookSource, bookUrl);
+      Logger.info(ChapterViewModel.TAG, `解析到 ${chapterList.length} 个章节`);
       
-      // 转换为Chapter对象并保存
       const chapters: Chapter[] = chapterList.map((item: ParsedChapterItem, index: number) => {
         const chapter: Chapter = {
           id: IdGenerator.generateUUID(),
@@ -70,8 +71,8 @@ export class ChapterViewModel {
         return chapter;
       });
 
-      // 批量保存章节
       await this.batchUpsertChapters(chapters);
+      Logger.info(ChapterViewModel.TAG, `成功保存 ${chapters.length} 个章节`);
       
       return chapters;
     } catch (error) {
@@ -101,6 +102,13 @@ export class ChapterViewModel {
       Logger.error(ChapterViewModel.TAG, `批量保存章节失败: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to batch upsert chapters: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  async saveChapters(bookId: string, chapters: Chapter[]): Promise<void> {
+    for (const chapter of chapters) {
+      chapter.bookId = bookId;
+    }
+    await this.batchUpsertChapters(chapters);
   }
 
   /**

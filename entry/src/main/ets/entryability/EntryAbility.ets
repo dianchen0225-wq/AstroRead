@@ -30,7 +30,6 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
 
-    // 初始化数据库
     try {
       await databaseManager.initDatabase(this.context);
       hilog.info(DOMAIN, 'testTag', 'Database initialized successfully');

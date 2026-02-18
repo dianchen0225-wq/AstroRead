@@ -649,7 +649,7 @@ class SourceValidator {
   private getSafeErrorMessage(error: object): string {
     if (error && typeof error === 'object') {
       // 检查对象是否有message属性
-      const errorObj = error as Record<string, object>;
+      const errorObj = error;
       if (errorObj['message'] !== undefined) {
         const message = String(errorObj['message']);
         const safeMessage = this.sanitizeString(message);

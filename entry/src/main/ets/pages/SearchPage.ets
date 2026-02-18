@@ -19,12 +19,12 @@ import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { BookSource } from '../models/BookSource';
 import { Book } from '../models/Book';
 import { Logger } from '../utils/Logger';
-import { AlertDialog, DialogAlignment } from '@kit.ArkUI';
-import { router } from '@kit.ArkUI';
+import { NavigationManager } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/NetworkManager';
+import router from '@ohos.router';
 
-interface RankColor {
+export interface RankColor {
   light: string;
   dark: string;
 }
@@ -84,29 +84,22 @@ export struct SearchPage {
       this.bookSources = await bookSourceViewModel.loadEnabledBookSources();
       this.hasEnabledSources = this.bookSources.length > 0;
       Logger.info('SearchPage', `加载了${this.bookSources.length}个书源`);
+      
+      if (this.bookSources.length > 0) {
+        for (let i = 0; i < Math.min(3, this.bookSources.length); i++) {
+          const source = this.bookSources[i];
+          Logger.info('SearchPage', `书源[${i}]: ${source.name}, searchUrl=${source.searchUrl}, ruleType=${source.ruleType}`);
+        }
+      }
     } catch (error) {
       Logger.error('SearchPage', `加载书源失败: ${error}`);
       this.hasEnabledSources = false;
     }
   }
+
   private async performSearch(): Promise<void> {
     if (!this.searchText.trim()) {
-      try {
-        AlertDialog.show({
-          title: '提示',
-          message: '请输入搜索关键词',
-          autoCancel: true,
-          alignment: DialogAlignment.Center,
-          buttons: [
-            {
-              text: '确定',
-              action: () => {}
-            }
-          ]
-        });
-      } catch (e) {
-        Logger.error('SearchPage', `AlertDialog.show failed: ${e}`);
-      }
+      Logger.info('SearchPage', '请输入搜索关键词');
       return;
     }
 
@@ -129,7 +122,7 @@ export struct SearchPage {
         return;
       }
 
-      const sourcesToUse = this.bookSources.slice(0, 5);
+      const sourcesToUse = this.bookSources.slice(0, 10);
       Logger.info('SearchPage', `使用${sourcesToUse.length}个书源进行搜索`);
 
       const bookViewModel = viewModelManager.getBookViewModel();
@@ -167,41 +160,41 @@ export struct SearchPage {
   private async addToBookshelf(book: Book): Promise<void> {
     try {
       const bookViewModel = viewModelManager.getBookViewModel();
-      await bookViewModel.addBook(book);
-      try {
-        AlertDialog.show({
-          title: '提示',
-          message: '已添加到书架',
-          autoCancel: true,
-          alignment: DialogAlignment.Center,
-          buttons: [
-            {
-              text: '确定',
-              action: () => {}
-            }
-          ]
-        });
-      } catch (e) {
-        Logger.error('SearchPage', `AlertDialog.show failed: ${e}`);
+      
+      if (!book.id) {
+        book.id = `book_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       }
+      if (!book.addTime) {
+        book.addTime = Date.now();
+      }
+      if (!book.lastUpdateTime) {
+        book.lastUpdateTime = Date.now();
+      }
+      if (!book.readProgress) {
+        book.readProgress = 0;
+      }
+      
+      Logger.info('SearchPage', `准备添加书籍: id=${book.id}, name=${book.name}, bookSourceId=${book.bookSourceId}`);
+      
+      const bookId = await bookViewModel.addBook(book);
+      Logger.info('SearchPage', `已添加到书架，ID: ${bookId}`);
     } catch (error) {
       Logger.error('SearchPage', `添加到书架失败: ${error}`);
-      try {
-        AlertDialog.show({
-          title: '提示',
-          message: '添加失败',
-          autoCancel: true,
-          alignment: DialogAlignment.Center,
-          buttons: [
-            {
-              text: '确定',
-              action: () => {}
-            }
-          ]
-        });
-      } catch (e) {
-        Logger.error('SearchPage', `AlertDialog.show failed: ${e}`);
-      }
+    }
+  }
+
+  private async openBook(book: Book): Promise<void> {
+    try {
+      await this.addToBookshelf(book);
+      
+      router.pushUrl({
+        url: 'pages/BookDetailPage',
+        params: {
+          bookId: book.id
+        }
+      }, router.RouterMode.Standard);
+    } catch (error) {
+      Logger.error('SearchPage', `打开书籍失败: ${error}`);
     }
   }
 
@@ -210,7 +203,7 @@ export struct SearchPage {
       router.pushUrl({
         url: 'pages/MainPage',
         params: { tabIndex: 3 }
-      });
+      }, router.RouterMode.Standard);
     } catch (err) {
       Logger.error('SearchPage', `跳转失败: ${err}`);
     }
@@ -448,6 +441,9 @@ export struct SearchPage {
                       .padding(12)
                       .borderRadius(8)
                       .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                      .onClick(() => {
+                        this.openBook(book);
+                      })
                     }
                     .margin({ bottom: 8 })
                   }, (book: Book) => `${book.id}-${book.bookSourceId}`)

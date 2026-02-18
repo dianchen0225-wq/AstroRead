@@ -1,5 +1,5 @@
 import relationalStore from '@ohos.data.relationalStore';
-import { ReadConfig, MarginsConfig } from '../../models/ReadConfig';
+import { ReadConfig, MarginsConfig, DEFAULT_READ_CONFIG } from '../../models/ReadConfig';
 import { Logger } from '../Logger';
 
 export class ReadConfigRepository {
@@ -10,9 +10,6 @@ export class ReadConfigRepository {
     this.rdbStore = rdbStore;
   }
 
-  /**
-   * 获取或创建阅读配置
-   */
   async getOrCreateReadConfig(): Promise<ReadConfig> {
     const predicates = new relationalStore.RdbPredicates('read_config');
 
@@ -23,28 +20,31 @@ export class ReadConfigRepository {
       
       if (hasData) {
         try {
-          const marginsString = resultSet.getString(resultSet.getColumnIndex('margins'));
           let margins: MarginsConfig = { top: 20, bottom: 20, left: 20, right: 20 };
           try {
-            if (marginsString) {
-              margins = JSON.parse(marginsString) as MarginsConfig;
+            const marginsIndex = resultSet.getColumnIndex('margins');
+            if (marginsIndex >= 0) {
+              const marginsString = resultSet.getString(marginsIndex);
+              if (marginsString) {
+                margins = JSON.parse(marginsString) as MarginsConfig;
+              }
             }
           } catch (error) {
-            Logger.warn(ReadConfigRepository.TAG, `解析边距配置失败，使用默认值: ${error instanceof Error ? error.message : String(error)}`);
+            Logger.warn(ReadConfigRepository.TAG, `解析边距配置失败，使用默认值`);
           }
 
           const config: ReadConfig = {
-            fontSize: resultSet.getLong(resultSet.getColumnIndex('font_size')) || 16,
-            lineSpacing: resultSet.getDouble(resultSet.getColumnIndex('line_spacing')) || 1.5,
-            letterSpacing: resultSet.getDouble(resultSet.getColumnIndex('letter_spacing')) || 0,
-            pageTurnMode: (resultSet.getString(resultSet.getColumnIndex('page_turn_mode')) as 'cover' | 'slide' | 'scroll' | 'simulation') || 'cover',
-            backgroundColor: resultSet.getString(resultSet.getColumnIndex('background_color')) || '#FFFFFF',
-            textColor: resultSet.getString(resultSet.getColumnIndex('text_color')) || '#333333',
-            isNightMode: resultSet.getLong(resultSet.getColumnIndex('is_night_mode')) === 1,
-            brightness: resultSet.getDouble(resultSet.getColumnIndex('brightness')) || 0.5,
-            autoScroll: resultSet.getLong(resultSet.getColumnIndex('auto_scroll')) === 1,
-            scrollSpeed: resultSet.getLong(resultSet.getColumnIndex('scroll_speed')) || 50,
-            fontFamily: resultSet.getString(resultSet.getColumnIndex('font_family')) || 'HarmonyOS Sans',
+            fontSize: this.safeGetLong(resultSet, 'font_size', DEFAULT_READ_CONFIG.fontSize),
+            lineSpacing: this.safeGetDouble(resultSet, 'line_spacing', DEFAULT_READ_CONFIG.lineSpacing),
+            letterSpacing: DEFAULT_READ_CONFIG.letterSpacing,
+            pageTurnMode: this.safeGetString(resultSet, 'page_turn_mode', DEFAULT_READ_CONFIG.pageTurnMode) as 'cover' | 'slide' | 'scroll' | 'simulation',
+            backgroundColor: this.safeGetString(resultSet, 'background_color', DEFAULT_READ_CONFIG.backgroundColor),
+            textColor: this.safeGetString(resultSet, 'text_color', DEFAULT_READ_CONFIG.textColor),
+            isNightMode: this.safeGetLong(resultSet, 'is_night_mode', 0) === 1,
+            brightness: this.safeGetDouble(resultSet, 'brightness', DEFAULT_READ_CONFIG.brightness),
+            autoScroll: this.safeGetLong(resultSet, 'auto_scroll', 0) === 1,
+            scrollSpeed: this.safeGetLong(resultSet, 'scroll_speed', DEFAULT_READ_CONFIG.scrollSpeed),
+            fontFamily: this.safeGetString(resultSet, 'font_family', DEFAULT_READ_CONFIG.fontFamily),
             margins: margins
           };
           resultSet.close();
@@ -57,21 +57,20 @@ export class ReadConfigRepository {
         resultSet.close();
       }
 
-      // 创建默认配置
       Logger.info(ReadConfigRepository.TAG, '创建默认阅读配置');
       const defaultConfig: ReadConfig = {
-        fontSize: 16,
-        lineSpacing: 1.5,
-        letterSpacing: 0,
-        pageTurnMode: 'cover',
-        backgroundColor: '#FFFFFF',
-        textColor: '#333333',
-        isNightMode: false,
-        brightness: 0.5,
-        autoScroll: false,
-        scrollSpeed: 50,
-        fontFamily: 'HarmonyOS Sans',
-        margins: { top: 20, bottom: 20, left: 20, right: 20 }
+        fontSize: DEFAULT_READ_CONFIG.fontSize,
+        lineSpacing: DEFAULT_READ_CONFIG.lineSpacing,
+        letterSpacing: DEFAULT_READ_CONFIG.letterSpacing,
+        pageTurnMode: DEFAULT_READ_CONFIG.pageTurnMode,
+        backgroundColor: DEFAULT_READ_CONFIG.backgroundColor,
+        textColor: DEFAULT_READ_CONFIG.textColor,
+        isNightMode: DEFAULT_READ_CONFIG.isNightMode,
+        brightness: DEFAULT_READ_CONFIG.brightness,
+        autoScroll: DEFAULT_READ_CONFIG.autoScroll,
+        scrollSpeed: DEFAULT_READ_CONFIG.scrollSpeed,
+        fontFamily: DEFAULT_READ_CONFIG.fontFamily,
+        margins: { top: DEFAULT_READ_CONFIG.margins.top, bottom: DEFAULT_READ_CONFIG.margins.bottom, left: DEFAULT_READ_CONFIG.margins.left, right: DEFAULT_READ_CONFIG.margins.right }
       };
 
       const valueBucket: relationalStore.ValuesBucket = {
@@ -90,31 +89,64 @@ export class ReadConfigRepository {
         'update_time': Date.now()
       };
 
-      await this.rdbStore.insert('read_config', valueBucket);
+      try {
+        await this.rdbStore.insert('read_config', valueBucket);
+      } catch (insertError) {
+        Logger.warn(ReadConfigRepository.TAG, `插入配置失败，可能已存在: ${insertError instanceof Error ? insertError.message : String(insertError)}`);
+      }
       return defaultConfig;
     } catch (error) {
       Logger.error(ReadConfigRepository.TAG, `获取或创建阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
-      // 返回默认配置，不抛出异常
       return {
-        fontSize: 16,
-        lineSpacing: 1.5,
-        letterSpacing: 0,
-        pageTurnMode: 'cover',
-        backgroundColor: '#FFFFFF',
-        textColor: '#333333',
-        isNightMode: false,
-        brightness: 0.5,
-        autoScroll: false,
-        scrollSpeed: 50,
-        fontFamily: 'HarmonyOS Sans',
-        margins: { top: 20, bottom: 20, left: 20, right: 20 }
+        fontSize: DEFAULT_READ_CONFIG.fontSize,
+        lineSpacing: DEFAULT_READ_CONFIG.lineSpacing,
+        letterSpacing: DEFAULT_READ_CONFIG.letterSpacing,
+        pageTurnMode: DEFAULT_READ_CONFIG.pageTurnMode,
+        backgroundColor: DEFAULT_READ_CONFIG.backgroundColor,
+        textColor: DEFAULT_READ_CONFIG.textColor,
+        isNightMode: DEFAULT_READ_CONFIG.isNightMode,
+        brightness: DEFAULT_READ_CONFIG.brightness,
+        autoScroll: DEFAULT_READ_CONFIG.autoScroll,
+        scrollSpeed: DEFAULT_READ_CONFIG.scrollSpeed,
+        fontFamily: DEFAULT_READ_CONFIG.fontFamily,
+        margins: { top: DEFAULT_READ_CONFIG.margins.top, bottom: DEFAULT_READ_CONFIG.margins.bottom, left: DEFAULT_READ_CONFIG.margins.left, right: DEFAULT_READ_CONFIG.margins.right }
       };
     }
   }
 
-  /**
-   * 更新阅读配置
-   */
+  private safeGetLong(resultSet: relationalStore.ResultSet, columnName: string, defaultValue: number): number {
+    try {
+      const index = resultSet.getColumnIndex(columnName);
+      if (index >= 0 && !resultSet.isColumnNull(index)) {
+        return resultSet.getLong(index);
+      }
+    } catch (error) {
+    }
+    return defaultValue;
+  }
+
+  private safeGetDouble(resultSet: relationalStore.ResultSet, columnName: string, defaultValue: number): number {
+    try {
+      const index = resultSet.getColumnIndex(columnName);
+      if (index >= 0 && !resultSet.isColumnNull(index)) {
+        return resultSet.getDouble(index);
+      }
+    } catch (error) {
+    }
+    return defaultValue;
+  }
+
+  private safeGetString(resultSet: relationalStore.ResultSet, columnName: string, defaultValue: string): string {
+    try {
+      const index = resultSet.getColumnIndex(columnName);
+      if (index >= 0 && !resultSet.isColumnNull(index)) {
+        return resultSet.getString(index);
+      }
+    } catch (error) {
+    }
+    return defaultValue;
+  }
+
   async updateReadConfig(config: ReadConfig): Promise<void> {
     const valueBucket: relationalStore.ValuesBucket = {
       'font_size': config.fontSize,

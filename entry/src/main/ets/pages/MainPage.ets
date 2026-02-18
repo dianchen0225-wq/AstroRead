@@ -24,6 +24,12 @@ import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Logger } from '../utils/Logger';
 import window from '@ohos.window';
 import common from '@ohos.app.ability.common';
+import { NavigationManager } from '../common/NavigationManager';
+import BookDetailPage from './BookDetailPage';
+import ReadPage from './ReadPage';
+import ImportPage from './ImportPage';
+import router from '@ohos.router';
+import hilog from '@ohos.hilog';
 
 enum PageIndex {
   Home = 0,
@@ -41,6 +47,9 @@ struct MainPage {
   @Local isLightMode: boolean = true;
   @Local safeAreaTop: number = 0;
   @Local safeAreaBottom: number = 0;
+    @Local currentDetailPage: string = '';
+    @Local currentReadPage: string = '';
+    @Local currentImportPage: string = '';
   
   private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
@@ -56,8 +65,20 @@ struct MainPage {
     
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-    
     this.setWindowImmersive();
+    NavigationManager.getInstance().setPageChangeListener((pageName: string, params?: ESObject) => {
+        if (pageName === 'BookDetailPage') {
+          this.currentDetailPage = params?.bookId || '';
+        } else if (pageName === 'ReadPage') {
+          this.currentReadPage = params?.bookId || '';
+        } else if (pageName === 'ImportPage') {
+          this.currentImportPage = params?.path || '';
+        } else if (pageName === 'MainPage') {
+          this.currentDetailPage = '';
+          this.currentReadPage = '';
+          this.currentImportPage = '';
+        }
+      });
   }
 
   aboutToDisappear(): void {
@@ -89,49 +110,66 @@ struct MainPage {
   }
 
   build() {
-    Column() {
-      Tabs({ barPosition: BarPosition.End, index: this.currentPageIndex }) {
-        TabContent() {
-          HomePage({ safeAreaTop: this.safeAreaTop })
-        }
-        .tabBar(this.buildTabBar(PageIndex.Home))
+    Stack() {
+      Column() {
+        Tabs({ barPosition: BarPosition.End, index: this.currentPageIndex }) {
+          TabContent() {
+            HomePage({ safeAreaTop: this.safeAreaTop })
+          }
+          .tabBar(this.buildTabBar(PageIndex.Home))
 
-        TabContent() {
-          SearchPage()
-        }
-        .tabBar(this.buildTabBar(PageIndex.Search))
+          TabContent() {
+            SearchPage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Search))
 
-        TabContent() {
-          BookshelfPage()
-        }
-        .tabBar(this.buildTabBar(PageIndex.Bookshelf))
+          TabContent() {
+            BookshelfPage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Bookshelf))
 
-        TabContent() {
-          SourcePage()
-        }
-        .tabBar(this.buildTabBar(PageIndex.Source))
+          TabContent() {
+            SourcePage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Source))
 
-        TabContent() {
-          SettingsPage()
-        }
-        .tabBar(this.buildTabBar(PageIndex.Settings))
+          TabContent() {
+            SettingsPage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.Settings))
 
-        TabContent() {
-          this.buildMorePage()
+          TabContent() {
+            this.buildMorePage()
+          }
+          .tabBar(this.buildTabBar(PageIndex.More))
         }
-        .tabBar(this.buildTabBar(PageIndex.More))
+        .barMode(BarMode.Fixed)
+        .barHeight(56 + this.safeAreaBottom)
+        .barBackgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+        .onChange((index: number) => {
+          this.currentPageIndex = index;
+        })
       }
-      .barMode(BarMode.Fixed)
-      .barHeight(56 + this.safeAreaBottom)
-      .barBackgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-      .onChange((index: number) => {
-        this.currentPageIndex = index;
-      })
+      .width('100%')
+      .height('100%')
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+
+      if (this.currentDetailPage) {
+        BookDetailPage()
+      }
+
+      if (this.currentReadPage) {
+        ReadPage()
+      }
+
+      if (this.currentImportPage) {
+        ImportPage()
+      }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .alignContent(Alignment.TopStart)
   }
 
   @Builder

@@ -1,0 +1,14 @@
+{
+  "cache": {
+    "enable": true,
+    "strategy": "content",
+    "compressionLevel": 1
+  },
+  "incremental": {
+    "enable": true
+  },
+  "project": {
+    "name": "AstroRead",
+    "version": "1.0.0"
+  }
+}

@@ -40,29 +40,37 @@ export function throttle(func: SimpleCallback, limit: number): SimpleCallback {
   };
 }
 
-interface ImageLoadConfig {
+export interface ImageLoadConfig {
   imageUrl: string;
   placeholderUrl: string;
   maxRetries?: number;
   retryDelay?: number;
 }
 
-interface AnimationConfig {
+export interface AnimationConfig {
   duration: number;
   curve: string;
   onFinish?: () => void;
 }
 
-interface RenderStrategy {
+export interface RenderStrategy {
   virtualScrollThreshold: number;
   imageCacheSize: number;
   animationFrameRate: number;
 }
 
-interface ComponentUpdateParams {
-  prevProps: Record<string, object>;
-  nextProps: Record<string, object>;
+type PropsObject = Record<string, string | number | boolean | object | null | undefined>;
+
+export interface ComponentUpdateParams {
+  prevProps: PropsObject;
+  nextProps: PropsObject;
   keysToCheck: string[];
+}
+
+export interface CacheStats {
+  loaded: number;
+  cached: number;
+  loading: number;
 }
 
 export class ImageLazyLoader {
@@ -87,13 +95,13 @@ export class ImageLazyLoader {
     this.loadedImages.add(url);
   }
 
-  getCachedImage(url: string): string | undefined {
-    return this.imageCache.get(url);
+  getCachedImage(url: string): string {
+    return this.imageCache.get(url) || '';
   }
 
   cacheImage(url: string, data: string): void {
     if (this.imageCache.size >= this.maxCacheSize) {
-      const firstKey = this.imageCache.keys().next().value;
+        const firstKey = this.imageCache.keys().next().value as string;
       if (firstKey) {
         this.imageCache.delete(firstKey);
       }
@@ -120,7 +128,7 @@ export class ImageLazyLoader {
         Logger.warn('ImageLoader', `图片加载失败 (尝试 ${i + 1}/${maxRetries}): ${error instanceof Error ? error.message : String(error)}`);
       }
 
-      await new Promise<void>(resolve => setTimeout(resolve, retryDelay));
+      await new Promise<void>((resolve: Function) => setTimeout(resolve, retryDelay));
     }
 
     return config.placeholderUrl;
@@ -159,7 +167,7 @@ export class ImageLazyLoader {
     this.loadingImages.clear();
   }
 
-  getCacheStats(): { loaded: number; cached: number; loading: number } {
+  getCacheStats(): CacheStats {
     return {
       loaded: this.loadedImages.size,
       cached: this.imageCache.size,
@@ -183,9 +191,12 @@ export class MemoryManager {
     for (let i = 0; i < items.length; i += batchSize) {
       const batch: T[] = items.slice(i, i + batchSize);
       const batchResults: R[] = await processor(batch);
-      results.push(...batchResults);
+      
+      for (const result of batchResults) {
+        results.push(result);
+      }
 
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve: Function) => {
         setTimeout(() => {
           resolve();
         }, 0);
@@ -210,7 +221,7 @@ export class TaskQueue {
   }
 
   async add<T>(task: () => Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
+    return new Promise<T>((resolve: Function, reject: Function) => {
       this.queue.push(async () => {
         try {
           const result: T = await task();
@@ -235,7 +246,7 @@ export class TaskQueue {
 
     while (this.queue.length > 0) {
       const batch = this.queue.splice(0, this.concurrency);
-      await Promise.all(batch.map(task => task()));
+      await Promise.all(batch.map((task: () => Promise<void>) => task()));
     }
 
     this.running = false;

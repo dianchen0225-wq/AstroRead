@@ -1,4 +1,5 @@
 import { Logger } from './Logger';
+import { EntityDecoder } from '../core/utils/EntityDecoder';
 
 export class CssSelectorParser {
   private static readonly TAG = 'CssSelectorParser';
@@ -390,18 +391,7 @@ export class CssSelectorParser {
     if (!html) {
       return '';
     }
-    return html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\s+/g, ' ')
-      .trim();
+    return EntityDecoder.cleanHtml(html);
   }
 
   static escapeRegex(str: string): string {

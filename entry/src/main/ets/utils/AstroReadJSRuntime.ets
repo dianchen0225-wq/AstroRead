@@ -1,40 +1,36 @@
-/**
- * 阅读APP书源JavaScript运行环境
- * 模拟阅读APP的完整JavaScript API
- */
-
 import { Logger } from './Logger';
-import { JSEngine } from './JSEngine';
+import { RuleEngine } from './RuleEngine';
 
-/**
- * 搜索上下文
- */
 export interface SearchContext {
-  key: string;           // 搜索关键词
-  page: number;          // 当前页码
-  baseUrl: string;       // 基础URL
-  result?: string;       // 当前结果（用于链式处理）
+  key: string;
+  page: number;
+  baseUrl: string;
+  result?: string;
 }
 
-/**
- * 书源JavaScript运行环境
- * 提供阅读APP书源所需的完整JavaScript环境
- */
+type JSVariable = string | number | boolean | object | null | undefined;
+type JSVariables = Record<string, JSVariable>;
+
+export interface ScriptParam extends JSVariables {
+  key: string;
+  page: number;
+  baseUrl: string;
+}
+
+export interface RuleParam extends JSVariables {
+  result: string;
+  baseUrl: string;
+}
+
 export class AstroReadJSRuntime {
   private static instance: AstroReadJSRuntime | null = null;
-  private jsEngine: JSEngine;
   private readonly TAG = 'AstroReadJSRuntime';
-  
-  // 缓存数据
   private cache: Map<string, string | number | boolean> = new Map();
+  private jsRuntime: JSVariables | null = null;
 
   private constructor() {
-    this.jsEngine = JSEngine.getInstance();
   }
 
-  /**
-   * 获取单例实例
-   */
   static getInstance(): AstroReadJSRuntime {
     if (AstroReadJSRuntime.instance === null) {
       AstroReadJSRuntime.instance = new AstroReadJSRuntime();
@@ -42,182 +38,46 @@ export class AstroReadJSRuntime {
     return AstroReadJSRuntime.instance;
   }
 
-  /**
-   * 执行搜索URL生成脚本
-   * @param script @js脚本内容
-   * @param context 搜索上下文
-   * @returns 生成的搜索URL
-   */
   async executeSearchUrl(script: string, context: SearchContext): Promise<string> {
     try {
-      // 移除@js前缀
       let jsCode = script.replace(/^@js:\s*/i, '').trim();
-      
-      // 构建完整的执行环境
-      const wrappedCode = this.buildSearchUrlEnvironment(jsCode, context);
-      
-      Logger.debug(this.TAG, `执行搜索URL脚本: ${jsCode.substring(0, 100)}...`);
-      
-      const result = await this.jsEngine.execute(wrappedCode, 5000);
-      
-      if (result.success && result.result) {
-        // 处理结果
-        let url = result.result;
-        // 移除可能的引号
-        if ((url.startsWith('"') && url.endsWith('"')) || 
+
+      if (jsCode.startsWith('<js>')) {
+        jsCode = jsCode.replace(/<js>/, '').replace(/<\/js>/, '').trim();
+      }
+
+      Logger.debug(this.TAG, `执行搜索URL脚本`);
+
+      const param: ScriptParam = {
+        key: context.key,
+        page: context.page,
+        baseUrl: context.baseUrl
+      };
+      const result = await this.executeScript(jsCode, param);
+
+      if (result) {
+        let url = result;
+        if ((url.startsWith('"') && url.endsWith('"')) ||
             (url.startsWith("'") && url.endsWith("'"))) {
           url = url.slice(1, -1);
         }
         Logger.info(this.TAG, `生成搜索URL: ${url}`);
         return url;
-      } else {
-        Logger.error(this.TAG, `执行搜索URL脚本失败: ${result.error}`);
-        return '';
       }
+
+      return '';
     } catch (error) {
       Logger.error(this.TAG, `执行搜索URL脚本异常: ${error}`);
       return '';
     }
   }
 
-  /**
-   * 构建搜索URL执行环境
-   */
-  private buildSearchUrlEnvironment(jsCode: string, context: SearchContext): string {
-    return `
-// ========== 阅读APP书源环境模拟 ==========
-(function() {
-  // 缓存对象
-  const _cache = {};
-  
-  // java对象模拟
-  const java = {
-    // 缓存操作
-    put: function(key, value) {
-      _cache[key] = value;
-      return value;
-    },
-    get: function(key) {
-      return _cache[key];
-    },
-    
-    // 日志
-    log: function(msg) {
-      console.log('[AstroRead] ' + msg);
-    },
-    longToast: function(msg) {
-      console.log('[AstroRead Toast] ' + msg);
-    },
-    
-    // 编码函数
-    encodeURI: function(str) {
-      return encodeURI(String(str));
-    },
-    decodeURI: function(str) {
-      return decodeURI(String(str));
-    },
-    encodeURIComponent: function(str) {
-      return encodeURIComponent(String(str));
-    },
-    decodeURIComponent: function(str) {
-      return decodeURIComponent(String(str));
-    },
-    
-    // 繁简转换（简化实现）
-    t2s: function(str) {
-      return String(str);
-    },
-    s2t: function(str) {
-      return String(str);
-    },
-    
-    // 网络请求（返回URL，实际请求在外部处理）
-    ajax: function(url) {
-      return url;
-    },
-    
-    // 浏览器操作
-    startBrowser: function(url, title) {
-      return url;
-    },
-    startBrowserAwait: function(url, title) {
-      return url;
-    },
-    openUrl: function(url) {
-      return url;
-    },
-    
-    // WebView UA
-    getWebViewUA: function() {
-      return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-    },
-    
-    // JSON操作
-    JSON: {
-      parse: function(str) {
-        return JSON.parse(str);
-      },
-      stringify: function(obj) {
-        return JSON.stringify(obj);
-      }
-    },
-    
-    // 字符串操作
-    String: function(obj) {
-      return String(obj);
-    },
-    Number: function(obj) {
-      return Number(obj);
-    },
-    
-    // 数学函数
-    Math: Math,
-    
-    // 正则表达式
-    RegExp: RegExp,
-    
-    // 数组操作
-    Array: {
-      isArray: function(obj) {
-        return Array.isArray(obj);
-      }
-    }
-  };
-  
-  // 全局变量
-  const key = "${this.escapeString(context.key)}";
-  const page = ${context.page};
-  const baseUrl = "${this.escapeString(context.baseUrl || '')}";
-  let result = "${this.escapeString(context.result || '')}";
-  
-  // 常用函数
-  const tzs = function(str) { return String(str); };
-  const String = function(obj) { return String(obj); };
-  const Number = function(obj) { return Number(obj); };
-  
-  // ========== 用户脚本 ==========
-  ${jsCode}
-  
-  // ========== 返回结果 ==========
-  // 如果脚本没有显式返回，尝试返回最后一个表达式
-})();
-`;
-  }
-
-  /**
-   * 执行规则脚本
-   * @param html HTML内容
-   * @param rule 规则脚本
-   * @returns 解析结果
-   */
   async executeRule(html: string, rule: string): Promise<string> {
     try {
-      // 检查是否是JS规则
       if (!this.isJSRule(rule)) {
-        return rule; // 不是JS规则，直接返回
+        return rule;
       }
 
-      // 提取JS代码
       let jsCode = rule;
       if (jsCode.includes('<js>')) {
         const match = jsCode.match(/<js>([\s\S]*?)<\/js>/);
@@ -228,59 +88,271 @@ export class AstroReadJSRuntime {
         jsCode = jsCode.replace(/^@js:\s*/i, '').trim();
       }
 
-      // 构建执行环境
-      const wrappedCode = this.buildRuleEnvironment(jsCode, html);
-      
-      const result = await this.jsEngine.execute(wrappedCode, 5000);
-      
-      if (result.success) {
-        return result.result;
-      } else {
-        Logger.error(this.TAG, `执行规则脚本失败: ${result.error}`);
-        return '';
-      }
+      const param: RuleParam = {
+        result: html,
+        baseUrl: RuleEngine.getContext().baseUrl
+      };
+      const result = await this.executeScript(jsCode, param);
+
+      return result || '';
     } catch (error) {
       Logger.error(this.TAG, `执行规则脚本异常: ${error}`);
       return '';
     }
   }
 
-  /**
-   * 构建规则执行环境
-   */
-  private buildRuleEnvironment(jsCode: string, html: string): string {
-    const escapedHtml = this.escapeString(html);
-    
-    return `
-// ========== 规则执行环境 ==========
-(function() {
-  const result = "${escapedHtml}";
-  
-  // java对象（简化版）
-  const java = {
-    log: function(msg) { console.log(msg); },
-    getElements: function(html, rule) { return []; },
-    t2s: function(str) { return str; },
-    s2t: function(str) { return str; }
-  };
-  
-  // ========== 用户规则 ==========
-  ${jsCode}
-})();
-`;
+  private async executeScript(jsCode: string, variables: JSVariables): Promise<string> {
+    const wrappedCode = this.buildScriptEnvironment(jsCode, variables);
+
+    try {
+      if (this.jsRuntime && typeof this.jsRuntime.runJavaScript === 'function') {
+        const result = await this.jsRuntime.runJavaScript(wrappedCode) as JSVariable;
+        return String(result || '');
+      }
+
+      Logger.warn(this.TAG, 'JS运行时未初始化，使用简化执行');
+      return this.executeSimple(jsCode, variables);
+    } catch (error) {
+      Logger.error(this.TAG, `脚本执行失败: ${error}`);
+      return '';
+    }
   }
 
-  /**
-   * 检查是否是JavaScript规则
-   */
+  private executeSimple(jsCode: string, variables: JSVariables): string {
+    try {
+      const key = (variables.key as string) || '';
+      const page = (variables.page as number) || 1;
+      const baseUrl = (variables.baseUrl as string) || '';
+
+      let result = jsCode;
+
+      result = result.replace(/\bkey\b/g, `"${key}"`);
+      result = result.replace(/\bpage\b/g, String(page));
+      result = result.replace(/\bbaseUrl\b/g, `"${baseUrl}"`);
+
+      if (result.includes('encodeURIComponent')) {
+        const match = result.match(/encodeURIComponent\s*\(\s*["']?([^"')]+)["']?\s*\)/);
+        if (match) {
+          return encodeURIComponent(match[1]);
+        }
+      }
+
+      return result;
+    } catch (error) {
+      Logger.error(this.TAG, `简化执行失败: ${error}`);
+      return '';
+    }
+  }
+
+  private buildScriptEnvironment(jsCode: string, variables: JSVariables): string {
+    const key = this.escapeString((variables.key as string) || '');
+    const page = (variables.page as number) || 1;
+    const baseUrl = this.escapeString((variables.baseUrl as string) || '');
+    const result = this.escapeString((variables.result as string) || '');
+
+    return `
+  (function() {
+    'use strict';
+
+    const _cache = {};
+    const _variables = {};
+
+    const java = {
+      put: function(key, value) {
+        _cache[key] = value;
+        return value;
+      },
+      get: function(key) {
+        return _cache[key] !== undefined ? _cache[key] : '';
+      },
+
+      log: function(msg) {
+        console.log('[AstroRead] ' + msg);
+      },
+      longToast: function(msg) {
+        console.log('[Toast] ' + msg);
+      },
+
+      encodeURI: function(str) {
+        return encodeURI(String(str));
+      },
+      decodeURI: function(str) {
+        return decodeURI(String(str));
+      },
+      encodeURIComponent: function(str) {
+        return encodeURIComponent(String(str));
+      },
+      decodeURIComponent: function(str) {
+        return decodeURIComponent(String(str));
+      },
+
+      base64Encode: function(str) {
+        try {
+          return btoa(unescape(encodeURIComponent(String(str))));
+        } catch (e) {
+          return btoa(String(str));
+        }
+      },
+      base64Decode: function(str) {
+        try {
+          return decodeURIComponent(escape(atob(String(str))));
+        } catch (e) {
+          return atob(String(str));
+        }
+      },
+      base64DecodeToByteArray: function(str) {
+        const binary = atob(String(str));
+        const arr = new Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          arr[i] = binary.charCodeAt(i);
+        }
+        return arr;
+      },
+
+      md5Encode: function(str) {
+        return String(str);
+      },
+
+      t2s: function(str) {
+        return String(str);
+      },
+      s2t: function(str) {
+        return String(str);
+      },
+
+      ajax: function(url) {
+        return String(url);
+      },
+      get: function(url) {
+        return String(url);
+      },
+      post: function(url, body) {
+        return String(url);
+      },
+
+      connect: function(url) {
+        return {
+          url: url,
+          method: 'GET',
+          header: {},
+          body: '',
+          get: function() { return this; },
+          post: function() { return this; },
+          header: function(h) { Object.assign(this.header, h); return this; },
+          body: function(b) { this.body = b; return this; },
+          toString: function() { return this.url; }
+        };
+      },
+
+      getString: function(rule) {
+        return '';
+      },
+      getStringList: function(rule) {
+        return [];
+      },
+
+      startBrowser: function(url, title) {
+        return String(url);
+      },
+      startBrowserAwait: function(url, title) {
+        return String(url);
+      },
+      openUrl: function(url) {
+        return String(url);
+      },
+
+      getWebViewUA: function() {
+        return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      },
+
+      timeFormat: function(format, timestamp) {
+        const date = timestamp ? new Date(timestamp) : new Date();
+        return date.toLocaleString();
+      },
+      time: function() {
+        return Date.now();
+      },
+
+      random: function(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+      },
+
+      uuid: function() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      },
+
+      JSON: {
+        parse: function(str) {
+          return JSON.parse(str);
+        },
+        stringify: function(obj) {
+          return JSON.stringify(obj);
+        }
+      },
+
+      String: function(obj) {
+        return String(obj);
+      },
+      Number: function(obj) {
+        return Number(obj);
+      },
+
+      Math: Math,
+      RegExp: RegExp,
+      Date: Date,
+      Array: {
+        isArray: function(obj) {
+          return Array.isArray(obj);
+        }
+      },
+
+      importClass: function(className) {
+        return {};
+      },
+      importPackage: function(pkg) {
+        return {};
+      }
+    };
+
+    const key = "${key}";
+    const page = ${page};
+    const baseUrl = "${baseUrl}";
+    let result = "${result}";
+
+    const tzs = function(str) { return String(str); };
+    const String2 = function(obj) { return String(obj); };
+    const Number2 = function(obj) { return Number(obj); };
+
+    const JavaImporter = function() {
+      return {
+        importPackage: function() {},
+        importClass: function() {}
+      };
+    };
+
+    const Packages = {};
+    const Packages2 = {};
+
+    with (java) {
+      try {
+        ${jsCode}
+      } catch (e) {
+        console.log('[AstroRead Error] ' + e.message);
+      }
+    }
+  })();
+  `;
+  }
+
   isJSRule(rule: string): boolean {
     if (!rule) return false;
     return rule.startsWith('@js:') || rule.includes('<js>');
   }
 
-  /**
-   * 转义字符串
-   */
   private escapeString(str: string): string {
     if (!str) return '';
     return str
@@ -291,21 +363,26 @@ export class AstroReadJSRuntime {
       .replace(/\t/g, '\\t');
   }
 
-  /**
-   * 清理缓存
-   */
+  setJSRuntime(runtime: JSVariables): void {
+    this.jsRuntime = runtime;
+  }
+
+  putCache(key: string, value: string | number | boolean): void {
+    this.cache.set(key, value);
+  }
+
+  getCache(key: string): string | number | boolean | undefined {
+    return this.cache.get(key);
+  }
+
   clearCache(): void {
     this.cache.clear();
   }
 
-  /**
-   * 销毁资源
-   */
   destroy(): void {
     this.clearCache();
-    this.jsEngine.destroy();
+    this.jsRuntime = null;
   }
 }
 
-// 导出单例
 export default AstroReadJSRuntime.getInstance();

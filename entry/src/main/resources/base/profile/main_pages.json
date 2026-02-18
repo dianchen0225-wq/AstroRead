@@ -2,6 +2,8 @@
     "src": [
       "pages/MainPage",
       "pages/ReadPage",
-      "pages/BookDetailPage"
+      "pages/BookDetailPage",
+      "pages/ImportPage",
+      "pages/HttpClientTestPage"
     ]
   }

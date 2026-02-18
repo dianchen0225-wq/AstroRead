@@ -15,10 +15,15 @@ export class BookRepository {
    */
   async getAllBooks(): Promise<Book[]> {
     const predicates = new relationalStore.RdbPredicates('book');
-    predicates.orderByDesc('last_update_time');
-
     try {
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      predicates.orderByDesc('last_update_time');
+    } catch (error) {
+      Logger.error(BookRepository.TAG, `设置排序失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
       const books: Book[] = [];
 
       while (resultSet.goToNextRow()) {
@@ -26,11 +31,14 @@ export class BookRepository {
         books.push(book);
       }
 
-      resultSet.close();
       return books;
     } catch (error) {
       Logger.error(BookRepository.TAG, `查询书籍失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
+    } finally {
+      if (resultSet) {
+        resultSet.close();
+      }
     }
   }
 
@@ -38,14 +46,15 @@ export class BookRepository {
    * 根据分类获取书籍
    */
   async getBooksByCategory(categoryId: string): Promise<Book[]> {
+    let relationResultSet: relationalStore.ResultSet | null = null;
+    let bookResultSet: relationalStore.ResultSet | null = null;
     try {
-      // 先获取该分类下的所有书籍ID
       const relationPredicates = new relationalStore.RdbPredicates('book_category_relation');
       relationPredicates.equalTo('category_id', categoryId);
-      
-      const relationResultSet = await this.rdbStore.query(relationPredicates, ['book_id']);
+
+      relationResultSet = await this.rdbStore.query(relationPredicates, ['book_id']);
       const bookIds: string[] = [];
-      
+
       while (relationResultSet.goToNextRow()) {
         const bookId = relationResultSet.getString(relationResultSet.getColumnIndex('book_id'));
         if (bookId) {
@@ -53,17 +62,17 @@ export class BookRepository {
         }
       }
       relationResultSet.close();
+      relationResultSet = null;
 
       if (bookIds.length === 0) {
         return [];
       }
 
-      // 根据书籍ID查询书籍信息
       const bookPredicates = new relationalStore.RdbPredicates('book');
       bookPredicates.in('id', bookIds);
       bookPredicates.orderByDesc('last_update_time');
 
-      const bookResultSet = await this.rdbStore.query(bookPredicates, ['*']);
+      bookResultSet = await this.rdbStore.query(bookPredicates, ['*']);
       const books: Book[] = [];
 
       while (bookResultSet.goToNextRow()) {
@@ -71,11 +80,17 @@ export class BookRepository {
         books.push(book);
       }
 
-      bookResultSet.close();
       return books;
     } catch (error) {
       Logger.error(BookRepository.TAG, `根据分类查询书籍失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
+    } finally {
+      if (relationResultSet) {
+        relationResultSet.close();
+      }
+      if (bookResultSet) {
+        bookResultSet.close();
+      }
     }
   }
 
@@ -159,6 +174,8 @@ export class BookRepository {
    * 插入或更新书籍
    */
   async upsertBook(book: Book): Promise<void> {
+    Logger.info(BookRepository.TAG, `开始保存书籍: id=${book.id}, name=${book.name}`);
+    
     const valueBucket: relationalStore.ValuesBucket = {
       'id': book.id,
       'name': book.name,
@@ -178,14 +195,16 @@ export class BookRepository {
     };
 
     try {
-      // 先尝试更新
+      Logger.info(BookRepository.TAG, '尝试更新书籍...');
       const predicates = new relationalStore.RdbPredicates('book');
       predicates.equalTo('id', book.id);
       const updatedRows = await this.rdbStore.update(valueBucket, predicates);
+      Logger.info(BookRepository.TAG, `更新行数: ${updatedRows}`);
       
-      // 如果更新失败则插入
       if (updatedRows === 0) {
-        await this.rdbStore.insert('book', valueBucket);
+        Logger.info(BookRepository.TAG, '插入新书籍...');
+        const insertId = await this.rdbStore.insert('book', valueBucket);
+        Logger.info(BookRepository.TAG, `插入成功: insertId=${insertId}`);
       }
     } catch (error) {
       Logger.error(BookRepository.TAG, `保存书籍失败: ${error instanceof Error ? error.message : String(error)}`);

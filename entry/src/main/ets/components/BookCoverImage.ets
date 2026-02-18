@@ -1,0 +1,65 @@
+/**
+ * BookCoverImage - 书籍封面图片组件
+ * 使用鸿蒙原生 Image 组件实现
+ */
+
+@Component
+export struct BookCoverImage {
+  @Prop @Watch('onSrcChange') src: string | Resource = '';
+  @Prop bookWidth: number = 80;
+  @Prop bookHeight: number = 120;
+  @Prop radius: number = 4;
+  @Prop imageBlur: number = 0;
+  @Prop circleCrop: boolean = false;
+  @Prop imageGrayscale: boolean = false;
+  @Prop placeholder: Resource = $r('app.media.startIcon');
+  @Prop errorHolder: Resource = $r('app.media.startIcon');
+  @Prop objectFit: ImageFit = ImageFit.Cover;
+
+  @State private hasError: boolean = false;
+
+  onSrcChange() {
+    this.hasError = false;
+  }
+
+  build() {
+    Image(this.hasError ? this.errorHolder : this.src)
+      .width(this.bookWidth)
+      .height(this.bookHeight)
+      .borderRadius(this.radius)
+      .objectFit(this.objectFit)
+      .alt(this.placeholder)
+      .onError(() => {
+        this.hasError = true;
+      })
+  }
+}
+
+@Component
+export struct SimpleBookCover {
+  @Prop @Watch('onSrcChange') src: string | Resource = '';
+  @Prop bookWidth: number = 80;
+  @Prop bookHeight: number = 120;
+  @Prop radius: number = 4;
+  @Prop placeholder: Resource = $r('app.media.startIcon');
+  @Prop errorHolder: Resource = $r('app.media.startIcon');
+  @Prop objectFit: ImageFit = ImageFit.Cover;
+
+  @State private hasError: boolean = false;
+
+  onSrcChange() {
+    this.hasError = false;
+  }
+
+  build() {
+    Image(this.hasError ? this.errorHolder : this.src)
+      .width(this.bookWidth)
+      .height(this.bookHeight)
+      .borderRadius(this.radius)
+      .objectFit(this.objectFit)
+      .alt(this.placeholder)
+      .onError(() => {
+        this.hasError = true;
+      })
+  }
+}

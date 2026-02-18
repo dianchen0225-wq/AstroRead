@@ -2,22 +2,27 @@
  * 书籍数据模型
  */
 export interface Book {
-  id: string;                    // 书籍ID
-  name: string;                  // 书名
-  author: string;                // 作者
-  cover: string | undefined;     // 封面URL
-  intro: string | undefined;     // 简介
-  kind: string | undefined;      // 分类
-  wordCount: number | undefined; // 字数
-  latestChapter: string | undefined; // 最新章节
-  bookSourceId: string;          // 书源ID
-  bookSourceName: string;        // 书源名称
-  bookUrl: string;               // 书籍URL
-  lastUpdateTime: number;        // 最后更新时间
-  addTime: number;               // 添加时间
-  readProgress: number;          // 阅读进度（百分比 0-100）
-  lastReadChapter: string | undefined; // 最后阅读章节名称
-  lastReadChapterIndex: number | undefined; // 最后阅读章节索引
+  id: string;
+  name: string;
+  author: string;
+  cover: string | undefined;
+  intro: string | undefined;
+  kind: string | undefined;
+  wordCount: number | undefined;
+  latestChapter: string | undefined;
+  bookSourceId: string;
+  bookSourceName: string;
+  bookUrl: string;
+  lastUpdateTime: number;
+  addTime: number;
+  readProgress: number;
+  lastReadChapter: string | undefined;
+  lastReadChapterIndex: number | undefined;
+  lastReadTime?: number;
+  totalChapters?: number;
+  currentChapterIndex?: number;
+  currentChapterTitle?: string;
+  isInShelf?: boolean;
 }
 
 /**

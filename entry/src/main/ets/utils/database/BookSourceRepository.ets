@@ -27,11 +27,16 @@ export class BookSourceRepository {
    */
   async getAllEnabledBookSources(): Promise<BookSource[]> {
     const predicates = new relationalStore.RdbPredicates('book_source');
-    predicates.equalTo('enabled', DB_ENABLED_TRUE);
-    predicates.orderByAsc('sort');
-
     try {
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      predicates.equalTo('enabled', DB_ENABLED_TRUE);
+      predicates.orderByAsc('sort');
+    } catch (error) {
+      Logger.error(BookSourceRepository.TAG, `设置查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
       const bookSources: BookSource[] = [];
 
       while (resultSet.goToNextRow()) {
@@ -39,21 +44,30 @@ export class BookSourceRepository {
         bookSources.push(bookSource);
       }
 
-      resultSet.close();
       return bookSources;
     }
     catch (error) {
       Logger.error(BookSourceRepository.TAG, `查询启用的书源失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
+    finally {
+      if (resultSet) {
+        resultSet.close();
+      }
+    }
   }
 
   async getAllBookSources(): Promise<BookSource[]> {
     const predicates = new relationalStore.RdbPredicates('book_source');
-    predicates.orderByAsc('sort');
-
     try {
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      predicates.orderByAsc('sort');
+    } catch (error) {
+      Logger.error(BookSourceRepository.TAG, `设置排序失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
       const bookSources: BookSource[] = [];
 
       while (resultSet.goToNextRow()) {
@@ -61,14 +75,48 @@ export class BookSourceRepository {
         bookSources.push(bookSource);
       }
 
-      resultSet.close();
       return bookSources;
     }
     catch (error) {
       Logger.error(BookSourceRepository.TAG, `查询所有书源失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
+    finally {
+      if (resultSet) {
+        resultSet.close();
+      }
+    }
   }
+
+    async getBookSourceById(id: string): Promise<BookSource | null> {
+      const predicates = new relationalStore.RdbPredicates('book_source');
+      try {
+        predicates.equalTo('id', id);
+      } catch (error) {
+        Logger.error(BookSourceRepository.TAG, `设置查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      let resultSet: relationalStore.ResultSet | null = null;
+      try {
+        resultSet = await this.rdbStore.query(predicates, ['*']);
+        let bookSource: BookSource | null = null;
+
+        if (resultSet.goToNextRow()) {
+          bookSource = this.parseBookSource(resultSet);
+        }
+
+        return bookSource;
+      }
+      catch (error) {
+        Logger.error(BookSourceRepository.TAG, `查询书源失败: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      }
+      finally {
+        if (resultSet) {
+          resultSet.close();
+        }
+      }
+    }
 
   async getBookSourcesPaged(page: number, pageSize: number): Promise<PagedBookSourcesResult> {
     const offset = (page - 1) * pageSize;
@@ -77,8 +125,10 @@ export class BookSourceRepository {
     predicates.limitAs(pageSize);
     predicates.offsetAs(offset);
 
+    let resultSet: relationalStore.ResultSet | null = null;
+    let totalResultSet: relationalStore.ResultSet | null = null;
     try {
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      resultSet = await this.rdbStore.query(predicates, ['*']);
       const bookSources: BookSource[] = [];
 
       while (resultSet.goToNextRow()) {
@@ -87,14 +137,14 @@ export class BookSourceRepository {
       }
 
       resultSet.close();
-      
+      resultSet = null;
+
       const totalPredicates = new relationalStore.RdbPredicates('book_source');
-      const totalResultSet = await this.rdbStore.query(totalPredicates, ['COUNT(*) as count']);
+      totalResultSet = await this.rdbStore.query(totalPredicates, ['COUNT(*) as count']);
       let total = 0;
       if (totalResultSet.goToNextRow()) {
         total = totalResultSet.getLong(totalResultSet.getColumnIndex('count'));
       }
-      totalResultSet.close();
 
       const result: PagedBookSourcesResult = { sources: bookSources, total: total };
       return result;
@@ -104,22 +154,35 @@ export class BookSourceRepository {
       const emptyResult: PagedBookSourcesResult = { sources: [], total: 0 };
       return emptyResult;
     }
+    finally {
+      if (resultSet) {
+        resultSet.close();
+      }
+      if (totalResultSet) {
+        totalResultSet.close();
+      }
+    }
   }
 
   async getBookSourcesCount(): Promise<number> {
+    let resultSet: relationalStore.ResultSet | null = null;
     try {
       const predicates = new relationalStore.RdbPredicates('book_source');
-      const resultSet = await this.rdbStore.query(predicates, ['COUNT(*) as count']);
+      resultSet = await this.rdbStore.query(predicates, ['COUNT(*) as count']);
       let count = 0;
       if (resultSet.goToNextRow()) {
         count = resultSet.getLong(resultSet.getColumnIndex('count'));
       }
-      resultSet.close();
       return count;
     }
     catch (error) {
       Logger.error(BookSourceRepository.TAG, `查询书源数量失败: ${error instanceof Error ? error.message : String(error)}`);
       return 0;
+    }
+    finally {
+      if (resultSet) {
+        resultSet.close();
+      }
     }
   }
 

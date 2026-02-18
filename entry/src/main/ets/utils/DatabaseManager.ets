@@ -198,6 +198,10 @@ export class DatabaseManager {
     return this.getBookSourceRepo().getBookSourcesCount();
   }
 
+  async getBookSourceById(id: string): Promise<BookSource | null> {
+    return this.getBookSourceRepo().getBookSourceById(id);
+  }
+
   async upsertBookSource(bookSource: BookSource): Promise<void> {
     return this.getBookSourceRepo().upsertBookSource(bookSource);
   }

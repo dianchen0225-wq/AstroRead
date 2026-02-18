@@ -4,6 +4,7 @@ import { databaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import SearchEnhancer from '../utils/SearchEnhancer';
 import { Logger } from '../utils/Logger';
+import { IdGenerator } from '../utils/IdGenerator';
 import common from '@ohos.app.ability.common';
 import { preferences } from '@kit.ArkData';
 
@@ -69,21 +70,32 @@ export class BookViewModel {
     }
   }
 
+  async getAllBooks(): Promise<Book[]> {
+    return this.loadAllBooks();
+  }
+
   /**
    * 根据ID获取书籍
    */
   async getBookById(bookId: string): Promise<Book | null> {
+    Logger.info('BookViewModel', `查询书籍: ${bookId}`);
     const books = await this.loadAllBooks();
-    return books.find((book: Book) => book.id === bookId) || null;
+    Logger.info('BookViewModel', `加载了 ${books.length} 本书籍`);
+    const found = books.find((book: Book) => book.id === bookId) || null;
+    Logger.info('BookViewModel', `查找结果: ${found ? '找到' : '未找到'}`);
+    return found;
   }
 
   /**
    * 添加书籍
    */
-  async addBook(book: Book): Promise<void> {
+  async addBook(book: Book): Promise<string> {
     try {
+      const bookId = book.id || IdGenerator.generateUUID();
+      book.id = bookId;
       await this.databaseManager.upsertBook(book);
       await this.loadAllBooks();
+      return bookId;
     } catch (error) {
       Logger.error('BookViewModel', `添加书籍失败：${error}`);
       throw (error instanceof Error ? error : new Error(String(error)));

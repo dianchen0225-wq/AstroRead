@@ -21,11 +21,16 @@ export class ChapterRepository {
    */
   async getChaptersByBookId(bookId: string): Promise<Chapter[]> {
     const predicates = new relationalStore.RdbPredicates(TABLE_CHAPTER);
-    predicates.equalTo('book_id', bookId);
-    predicates.orderByAsc('order');
-
     try {
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      predicates.equalTo('book_id', bookId);
+      predicates.orderByAsc('order');
+    } catch (error) {
+      Logger.error(ChapterRepository.TAG, `设置查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
       const chapters: Chapter[] = [];
 
       while (resultSet.goToNextRow()) {
@@ -33,12 +38,16 @@ export class ChapterRepository {
         chapters.push(chapter);
       }
 
-      resultSet.close();
       return chapters;
     }
     catch (error) {
       Logger.error(ChapterRepository.TAG, `查询章节列表失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
+    }
+    finally {
+      if (resultSet) {
+        resultSet.close();
+      }
     }
   }
 

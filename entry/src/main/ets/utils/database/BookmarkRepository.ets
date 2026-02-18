@@ -15,11 +15,16 @@ export class BookmarkRepository {
    */
   async getBookmarksByBookId(bookId: string): Promise<Bookmark[]> {
     const predicates = new relationalStore.RdbPredicates('bookmark');
-    predicates.equalTo('book_id', bookId);
-    predicates.orderByDesc('create_time');
-
     try {
-      const resultSet = await this.rdbStore.query(predicates, ['*']);
+      predicates.equalTo('book_id', bookId);
+      predicates.orderByDesc('create_time');
+    } catch (error) {
+      Logger.error(BookmarkRepository.TAG, `设置查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
       const bookmarks: Bookmark[] = [];
 
       while (resultSet.goToNextRow()) {
@@ -27,11 +32,14 @@ export class BookmarkRepository {
         bookmarks.push(bookmark);
       }
 
-      resultSet.close();
       return bookmarks;
     } catch (error) {
       Logger.error(BookmarkRepository.TAG, `查询书签列表失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
+    } finally {
+      if (resultSet) {
+        resultSet.close();
+      }
     }
   }
 

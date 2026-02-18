@@ -6,6 +6,7 @@
 
 import webview from '@ohos.web.webview';
 import { Logger } from './Logger';
+import { HTMLParser } from './HTMLParser';
 
 export interface JSExecutionResult {
   success: boolean;
@@ -251,25 +252,42 @@ export class JSEngine {
     });
   }
 
-  async executeSearchUrlScript(script: string, keyword: string, page: number = 1): Promise<string> {
+  async executeSearchUrlScript(script: string, keyword: string, page: number = 1, baseUrl: string = ''): Promise<string> {
     const sanitizedKeyword = this.sanitizeInput(keyword);
-    
+    const parser = HTMLParser.getInstance();
+
     const envScript = `
       (function() {
         'use strict';
         const java = {
-          ajax: function(url) { return String(url); },
-          get: function(url) { return String(url); },
-          post: function(url, body) { return String(url); },
-          log: function(msg) { },
-          longToast: function(msg) { },
-          encodeURI: function(str) { return encodeURI(str); },
-          decodeURI: function(str) { return decodeURI(str); },
-          encodeURIComponent: function(str) { return encodeURIComponent(str); },
-          decodeURIComponent: function(str) { return decodeURIComponent(str); },
+          ajax: function(url) {
+            return String(url);
+          },
+          get: function(url) {
+            return String(url);
+          },
+          post: function(url, body) {
+            return String(url);
+          },
+          log: function(msg) {
+            console.log('[JS Log] ' + msg);
+          },
+          longToast: function(msg) {
+            console.log('[Toast] ' + msg);
+          },
+          encodeURI: function(str) { return encodeURI(String(str)); },
+          decodeURI: function(str) { return decodeURI(String(str)); },
+          encodeURIComponent: function(str) { return encodeURIComponent(String(str)); },
+          decodeURIComponent: function(str) { return decodeURIComponent(String(str)); },
+          base64Encode: function(str) { return btoa(String(str)); },
+          base64Decode: function(str) { return atob(String(str)); },
+          md5Encode: function(str) {
+            // 简化版 MD5，实际使用需要完整实现
+            return String(str);
+          },
           t2s: function(str) { return String(str); },
           s2t: function(str) { return String(str); },
-          put: function(key, value) { 
+          put: function(key, value) {
             java._cache = java._cache || {};
             java._cache[key] = value;
             return value;
@@ -277,18 +295,33 @@ export class JSEngine {
           getCache: function(key) {
             return java._cache ? java._cache[key] : null;
           },
+          // HTML 解析功能
+          getElements: function(html, rule) {
+            return ${JSON.stringify(parser.parse(html, rule))};
+          },
+          parseHtml: function(html) {
+            // 简化版 HTML 解析
+            const div = { innerHTML: html, textContent: html.replace(/<[^>]+>/g, '') };
+            return div;
+          },
           _cache: {}
+        };
+
+        // 字符串方法扩展
+        String.prototype.replaceAll = function(search, replacement) {
+          return this.split(search).join(replacement);
         };
 
         const key = "${sanitizedKeyword}";
         const page = ${page};
+        const baseUrl = "${baseUrl}";
 
         ${script.replace('@js:', '')}
       })();
     `;
 
     const result = await this.execute(envScript, 3000);
-    
+
     if (result.success) {
       return result.result;
     } else {
@@ -299,28 +332,49 @@ export class JSEngine {
 
   async executeRuleScript(html: string, rule: string): Promise<string> {
     const sanitizedHtml = this.sanitizeInput(html);
-    const sanitizedRule = this.sanitizeInput(rule);
+    const parser = HTMLParser.getInstance();
 
     const envScript = `
       (function() {
         'use strict';
         const java = {
-          ajax: function(url) { return ''; },
-          getElements: function(html, rule) { return []; },
-          parseHtml: function(html) { return {}; },
-          log: function(msg) { },
+          ajax: function(url) { return url; },
+          get: function(url) { return url; },
+          post: function(url, body) { return url; },
+          getElements: function(htmlStr, selector) {
+            // 调用外部解析器
+            return ${JSON.stringify(parser.parse(html, selector))};
+          },
+          parseHtml: function(htmlStr) {
+            return {
+              text: ${JSON.stringify(parser.extractText(html))},
+              html: htmlStr
+            };
+          },
+          log: function(msg) { console.log('[JS Log] ' + msg); },
+          longToast: function(msg) { console.log('[Toast] ' + msg); },
           t2s: function(str) { return String(str); },
-          s2t: function(str) { return String(str); }
+          s2t: function(str) { return String(str); },
+          base64Encode: function(str) { return btoa(String(str)); },
+          base64Decode: function(str) { return atob(String(str)); },
+          encodeURI: function(str) { return encodeURI(String(str)); },
+          decodeURI: function(str) { return decodeURI(String(str)); },
+          encodeURIComponent: function(str) { return encodeURIComponent(String(str)); },
+          decodeURIComponent: function(str) { return decodeURIComponent(String(str)); },
+          // 结果变量
+          result: "${sanitizedHtml}"
         };
 
+        // 原始 HTML
         const result = "${sanitizedHtml}";
 
-        ${sanitizedRule.replace('@js:', '').replace('<js>', '').replace('</js>', '')}
+        // 用户规则
+        ${rule.replace('@js:', '').replace('<js>', '').replace('</js>', '')}
       })();
     `;
 
     const execResult = await this.execute(envScript, 3000);
-    
+
     if (execResult.success) {
       return execResult.result;
     } else {

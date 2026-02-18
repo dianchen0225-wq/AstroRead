@@ -12,7 +12,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
@@ -20,10 +19,10 @@ import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
-import { AlertDialog } from '@kit.ArkUI';
-import { router } from '@kit.ArkUI';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { NavigationManager } from '../common/NavigationManager';
 import common from '@ohos.app.ability.common';
+import router from '@ohos.router';
+
 
 interface RouterParams {
   bookId?: string;
@@ -40,21 +39,75 @@ struct BookDetailPage {
   @Local showChapterList: boolean = false;
   @Local currentChapterIndex: number = 0;
   @Local isAdded: boolean = false;
-
+  @Local dialogController: CustomDialogController = new CustomDialogController({
+    builder: this.dialogBuilder,
+    cancel: this.handleCancel,
+    autoCancel: true
+  })
   private bookId: string = '';
   private isComponentActive: boolean = false;
+  private params: RouterParams = {};
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
+
+  @Builder
+  dialogBuilder() {
+    Column() {
+      Text('添加成功')
+        .fontSize(24)
+        .fontColor(("app.color.text_primary"))
+        .margin({ bottom: 20 })
+      
+      Row() {
+        Button('确定')
+          .fontSize(16)
+            .backgroundColor(("app.color.primary"))
+            .fontColor(("app.color.text_white"))
+          .borderRadius(8)
+          .layoutWeight(1)
+          .margin({ right: 10 })
+          .onClick(() => {
+            this.dialogController.close();
+          })
+          
+        Button('取消')
+          .fontSize(16)
+            .backgroundColor(("app.color.background_secondary"))
+            .fontColor(("app.color.text_primary"))
+          .borderRadius(8)
+          .layoutWeight(1)
+          .onClick(() => {
+            this.dialogController.close();
+          })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.SpaceBetween)
+    }
+    .padding(20)
+    .width('300vp')
+  }
+
+  handleCancel(): void {
+    // 处理对话框取消逻辑
+  }
 
   aboutToAppear(): void {
     this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-    
+
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
-    
+
+    // 在aboutToAppear中获取路由参数
+    try {
+      this.params = router.getState()?.params as RouterParams;
+      this.bookId = this.params?.bookId || '';
+    } catch (error) {
+      Logger.error('BookDetailPage', `获取路由参数失败: ${error}`);
+    }
+
     this.loadBookDetail();
   }
 
@@ -65,29 +118,32 @@ struct BookDetailPage {
     this.book = null;
     this.bookSource = null;
   }
-
-  async loadBookDetail() {
+  async loadBookDetail(): Promise<void> {
     if (!this.isComponentActive) return;
-    const params = router.getParams() as RouterParams;
-    this.bookId = params?.bookId || '';
-    Logger.info('BookDetailPage', `bookId: ${this.bookId}`);
     
+    Logger.info('BookDetailPage', `bookId: ${this.bookId}`);
+
     if (this.bookId) {
       try {
         const bookViewModel = viewModelManager.getBookViewModel();
+        Logger.info('BookDetailPage', '开始查询书籍...');
         this.book = await bookViewModel.getBookById(this.bookId);
-        
+        Logger.info('BookDetailPage', `查询结果: ${this.book ? '找到书籍' : '未找到书籍'}`);
+        if (this.book) {
+          Logger.info('BookDetailPage', `书籍详情: name=${this.book.name}, bookSourceId=${this.book.bookSourceId}`);
+        }
+
         if (this.book && this.isComponentActive) {
           const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
-          this.bookSource = bookSourceViewModel.getBookSourceById(this.book.bookSourceId) || null;
+          this.bookSource = await bookSourceViewModel.getBookSourceById(this.book.bookSourceId);
         }
       } catch (error) {
         Logger.error('BookDetailPage', `加载书籍详情失败: ${error}`);
       }
     }
-    
+
     await this.loadChapters();
-    
+
     if (this.isComponentActive && this.bookId) {
       try {
         const bookViewModel = viewModelManager.getBookViewModel();
@@ -98,22 +154,29 @@ struct BookDetailPage {
     }
   }
 
-  async loadChapters() {
+  async loadChapters(): Promise<void> {
     if (!this.book || !this.isComponentActive) {
+      Logger.warn('BookDetailPage', '无法加载章节：书籍为空或组件未激活');
       return;
     }
-    
+
+    Logger.info('BookDetailPage', '开始加载章节...');
     this.isLoadingChapters = true;
     try {
       const chapterViewModel = viewModelManager.getChapterViewModel();
+      Logger.info('BookDetailPage', '先从本地获取章节...');
       this.chapters = await chapterViewModel.getChapters(this.bookId);
-      
+      Logger.info('BookDetailPage', `本地章节数: ${this.chapters.length}`);
+
       if (this.chapters.length === 0 && this.bookSource && this.isComponentActive) {
+        Logger.info('BookDetailPage', '从网络获取章节...');
+        Logger.info('BookDetailPage', `书源: ${this.bookSource.name}, URL: ${this.book.bookUrl}`);
         this.chapters = await chapterViewModel.fetchAndSaveChapters(
-          this.bookId, 
-          this.bookSource, 
+          this.bookId,
+          this.bookSource,
           this.book.bookUrl
         );
+        Logger.info('BookDetailPage', `网络获取章节数: ${this.chapters.length}`);
       }
     } catch (error) {
       Logger.error('BookDetailPage', `加载章节失败: ${error}`);
@@ -124,74 +187,41 @@ struct BookDetailPage {
     }
   }
 
-  async addBook() {
+  async addBook(): Promise<void> {
     if (!this.book || !this.isComponentActive) {
       return;
     }
-    
+
     try {
       const bookViewModel = viewModelManager.getBookViewModel();
       await bookViewModel.addBook(this.book);
       this.isAdded = true;
-      try {
-        AlertDialog.show({
-        title: '提示',
-        message: '添加成功',
-        primaryButton: {
-              value: "确定",
-              action: () => {}
-            }
-      });
-      } catch (e) {
-        Logger.error('BookDetailPage', `AlertDialog.show failed: ${e}`);
-      }
+      this.dialogController.open();
     } catch (error) {
       Logger.error('BookDetailPage', `添加书籍失败: ${error}`);
-      try {
-        AlertDialog.show({
-          title: '提示',
-          message: '添加失败',
-          primaryButton: {
-              value: "确定",
-              action: () => {}
-            }
-        });
-      } catch (e) {
-        Logger.error('BookDetailPage', `AlertDialog.show failed: ${e}`);
-      }
     }
   }
 
-  async startRead() {
+  async startRead(): Promise<void> {
     if (this.chapters.length === 0) {
-      try {
-        AlertDialog.show({
-          title: '提示',
-          message: '暂无章节',
-          primaryButton: {
-              value: "确定",
-              action: () => {}
-            }
-        });
-      } catch (e) {
-        Logger.error('BookDetailPage', `AlertDialog.show failed: ${e}`);
+      Logger.info('BookDetailPage', '开始加载章节...');
+      await this.loadChapters();
+      if (this.chapters.length === 0) {
+        Logger.error('BookDetailPage', '章节加载失败');
+        return;
       }
-      return;
     }
 
     try {
       const chapterIndex = this.book?.lastReadChapterIndex ? this.book.lastReadChapterIndex : 0;
-      router.pushUrl({
-        url: 'pages/ReadPage',
-        params: {
-          bookId: this.bookId,
-          chapterIndex: chapterIndex,
-          chapterUrl: this.chapters[chapterIndex].url
-        }
+      NavigationManager.getInstance().navigateTo('ReadPage', {
+        bookId: this.bookId,
+        chapterIndex: chapterIndex,
+        chapterUrl: this.chapters[chapterIndex].url
       });
-      hilog.info(0, 'BookDetailPage', 'push page success');
+      Logger.info('BookDetailPage', 'push page success');
     } catch (err) {
-      hilog.error(0, 'BookDetailPage', `pushPage failed: ${err}`);
+      Logger.error('BookDetailPage', `pushPage failed: ${err}`);
     }
   }
 
@@ -209,6 +239,13 @@ struct BookDetailPage {
         .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
         .justifyContent(FlexAlign.Center)
         .margin({ right: 15 })
+        .onClick(() => {
+          try {
+            router.back();
+          } catch (error) {
+            Logger.error('BookDetailPage', `返回失败: ${error}`);
+          }
+        })
 
         Text('书籍详情')
           .fontSize(18)
@@ -218,11 +255,11 @@ struct BookDetailPage {
 
         Button(this.isAdded ? '已添加' : '添加书架')
           .fontSize(14)
-          .fontColor(this.isAdded ? 
-            DesignSystem.getSecondaryTextColor(this.isLightMode) : 
+          .fontColor(this.isAdded ?
+            DesignSystem.getSecondaryTextColor(this.isLightMode) :
             DesignSystem.Colors.text.primary.light)
-          .backgroundColor(this.isAdded ? 
-            DesignSystem.getSecondaryBackgroundColor(this.isLightMode) : 
+          .backgroundColor(this.isAdded ?
+            DesignSystem.getSecondaryBackgroundColor(this.isLightMode) :
             DesignSystem.getPrimaryColor(this.isLightMode))
           .borderRadius(8)
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
@@ -386,17 +423,14 @@ struct BookDetailPage {
                   .onClick(() => {
                     this.currentChapterIndex = index;
                     try {
-                      router.pushUrl({
-                        url: 'pages/ReadPage',
-                        params: {
-                          bookId: this.bookId,
-                          chapterIndex: index,
-                          chapterUrl: chapter.url
-                        }
+                      NavigationManager.getInstance().navigateTo('ReadPage', {
+                        bookId: this.bookId,
+                        chapterIndex: index,
+                        chapterUrl: chapter.url
                       });
-                      hilog.info(0, 'BookDetailPage', 'push page success');
+                      Logger.info('BookDetailPage', 'push page success');
                     } catch (err) {
-                      hilog.error(0, 'BookDetailPage', `pushPage failed: ${err}`);
+                      Logger.error('BookDetailPage', `pushPage failed: ${err}`);
                     }
                   })
                 }, (chapter: Chapter) => chapter.id || chapter.url)
