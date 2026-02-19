@@ -17,6 +17,7 @@ import common from '@ohos.app.ability.common';
 @Entry
 @ComponentV2
 struct ImportPage {
+  @Param path: string = '';
   @Local isLightMode: boolean = true;
   @Local importedFiles: FileInfo[] = [];
   @Local isImporting: boolean = false;

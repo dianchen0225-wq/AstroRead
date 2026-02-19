@@ -21,16 +21,11 @@ import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
 import common from '@ohos.app.ability.common';
-import { router } from '@kit.ArkUI';
-
-
-interface RouterParams {
-  bookId?: string;
-}
 
 @Entry
 @ComponentV2
 struct BookDetailPage {
+  @Param bookId: string = '';
   @Local isLightMode: boolean = true;
   @Local book: Book | null = null;
   @Local chapters: Chapter[] = [];
@@ -44,9 +39,7 @@ struct BookDetailPage {
     cancel: this.handleCancel,
     autoCancel: true
   })
-  private bookId: string = '';
   private isComponentActive: boolean = false;
-  private params: RouterParams = {};
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -100,13 +93,7 @@ struct BookDetailPage {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
 
-    // 在aboutToAppear中获取路由参数
-    try {
-      this.params = router.getParams() as RouterParams;
-      this.bookId = this.params?.bookId || '';
-    } catch (error) {
-      Logger.error('BookDetailPage', `获取路由参数失败: ${error}`);
-    }
+    Logger.info('BookDetailPage', `接收到的 bookId: ${this.bookId}`);
 
     this.loadBookDetail();
   }
@@ -216,8 +203,8 @@ struct BookDetailPage {
       const chapterIndex = this.book?.lastReadChapterIndex ? this.book.lastReadChapterIndex : 0;
       NavigationManager.getInstance().navigateTo('ReadPage', {
         bookId: this.bookId,
-        chapterIndex: chapterIndex,
-        chapterUrl: this.chapters[chapterIndex].url
+        initialChapterIndex: chapterIndex,
+        initialChapterUrl: this.chapters[chapterIndex].url
       });
       Logger.info('BookDetailPage', 'push page success');
     } catch (err) {
@@ -421,8 +408,8 @@ struct BookDetailPage {
                     try {
                       NavigationManager.getInstance().navigateTo('ReadPage', {
                         bookId: this.bookId,
-                        chapterIndex: index,
-                        chapterUrl: chapter.url
+                        initialChapterIndex: index,
+                        initialChapterUrl: chapter.url
                       });
                       Logger.info('BookDetailPage', 'push page success');
                     } catch (err) {

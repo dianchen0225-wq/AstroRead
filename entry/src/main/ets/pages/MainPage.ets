@@ -49,6 +49,8 @@ struct MainPage {
   @Local safeAreaBottom: number = 0;
     @Local currentDetailPage: string = '';
     @Local currentReadPage: string = '';
+    @Local currentReadChapterIndex: number = 0;
+    @Local currentReadChapterUrl: string = '';
     @Local currentImportPage: string = '';
   
   private isComponentActive: boolean = false;
@@ -71,11 +73,15 @@ struct MainPage {
           this.currentDetailPage = params?.bookId || '';
         } else if (pageName === 'ReadPage') {
           this.currentReadPage = params?.bookId || '';
+          this.currentReadChapterIndex = params?.initialChapterIndex || 0;
+          this.currentReadChapterUrl = params?.initialChapterUrl || '';
         } else if (pageName === 'ImportPage') {
           this.currentImportPage = params?.path || '';
         } else if (pageName === 'MainPage') {
           this.currentDetailPage = '';
           this.currentReadPage = '';
+          this.currentReadChapterIndex = 0;
+          this.currentReadChapterUrl = '';
           this.currentImportPage = '';
         }
       });
@@ -156,15 +162,15 @@ struct MainPage {
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       if (this.currentDetailPage) {
-        BookDetailPage()
+        BookDetailPage({ bookId: this.currentDetailPage })
       }
 
       if (this.currentReadPage) {
-        ReadPage()
+        ReadPage({ bookId: this.currentReadPage, initialChapterIndex: this.currentReadChapterIndex, initialChapterUrl: this.currentReadChapterUrl })
       }
 
       if (this.currentImportPage) {
-        ImportPage()
+        ImportPage({ path: this.currentImportPage })
       }
     }
     .width('100%')

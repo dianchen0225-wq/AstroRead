@@ -1,23 +1,23 @@
 export class EntityDecoder {
-  private static readonly entities: Record<string, string> = {
-    '&lt;': '<',
-    '&gt;': '>',
-    '&amp;': '&',
-    '&quot;': '"',
-    '&apos;': "'",
-    '&nbsp;': ' ',
-    '&copy;': '©',
-    '&reg;': '®',
-    '&trade;': '™',
-    '&mdash;': '—',
-    '&ndash;': '–',
-    '&hellip;': '\u2026',
-    '&lsquo;': '\u2018',
-    '&rsquo;': '\u2019',
-    '&ldquo;': '\u201C',
-    '&rdquo;': '\u201D',
-    '&#39;': "'"
-  };
+  private static readonly entities: Map<string, string> = new Map([
+    ['&lt;', '<'],
+    ['&gt;', '>'],
+    ['&amp;', '&'],
+    ['&quot;', '"'],
+    ['&apos;', "'"],
+    ['&nbsp;', ' '],
+    ['&copy;', '©'],
+    ['&reg;', '®'],
+    ['&trade;', '™'],
+    ['&mdash;', '—'],
+    ['&ndash;', '–'],
+    ['&hellip;', '\u2026'],
+    ['&lsquo;', '\u2018'],
+    ['&rsquo;', '\u2019'],
+    ['&ldquo;', '\u201C'],
+    ['&rdquo;', '\u201D'],
+    ['&#39;', "'"]
+  ]);
 
   static decode(text: string): string {
     if (!text) {
@@ -26,12 +26,9 @@ export class EntityDecoder {
 
     let result = text;
 
-    const entityEntries = Object.entries(EntityDecoder.entities);
-    for (let i = 0; i < entityEntries.length; i++) {
-      const entity = entityEntries[i][0];
-      const char = entityEntries[i][1];
+    EntityDecoder.entities.forEach((char: string, entity: string) => {
       result = result.replace(new RegExp(entity, 'gi'), char);
-    }
+    });
 
     result = result.replace(/&#(\d+);/g, (_match: string, code: string): string => {
       return String.fromCharCode(parseInt(code, 10));

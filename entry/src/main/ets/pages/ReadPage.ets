@@ -23,19 +23,17 @@ import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
-import { router } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import common from '@ohos.app.ability.common';
-
-interface RouterParams {
-  bookId?: string;
-  chapterIndex?: number;
-  chapterUrl?: string;
-}
 
 @Entry
 @ComponentV2
 struct ReadPage {
+  @Param bookId: string = '';
+  @Param initialChapterIndex: number = 0;
+  @Param initialChapterUrl: string = '';
+  @Local chapterIndex: number = 0;
+  @Local chapterUrl: string = '';
   @Local isLightMode: boolean = true;
   @Local book: Book | null = null;
   @Local chapters: Chapter[] = [];
@@ -46,9 +44,6 @@ struct ReadPage {
   @Local showMenu: boolean = false;
   @Local readConfig: ReadConfig = ReadConfigViewModel.DEFAULT_READ_CONFIG;
 
-  private bookId: string = '';
-  private chapterIndex: number = 0;
-  private chapterUrl: string = '';
   private bookSource: BookSource | null = null;
   private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
@@ -62,6 +57,9 @@ struct ReadPage {
     
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
+    
+    this.chapterIndex = this.initialChapterIndex;
+    this.chapterUrl = this.initialChapterUrl;
     
     this.loadReadConfig();
     this.loadBookDetail();
@@ -91,7 +89,6 @@ struct ReadPage {
   async loadBookDetail(): Promise<void> {
     if (!this.isComponentActive) return;
     
-    // 参数已在aboutToAppear中获取
     Logger.info('ReadPage', `bookId: ${this.bookId}, chapterIndex: ${this.chapterIndex}`);
     
     if (this.bookId) {

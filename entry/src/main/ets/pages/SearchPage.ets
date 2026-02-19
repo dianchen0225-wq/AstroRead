@@ -166,6 +166,7 @@ export struct SearchPage {
         Logger.info('SearchPage', 
           `搜索完成，共${result.totalCount}本书，当前第${result.currentPage}/${result.totalPages}页`
         );
+        Logger.info('SearchPage', `searchResults.length = ${this.searchResults.length}`);
 
         if (result.totalCount === 0) {
           this.errorMessage = '当前启用的书源无匹配结果';
@@ -416,7 +417,7 @@ export struct SearchPage {
             } else if (this.searchResults.length > 0) {
               Column() {
                 Row() {
-                  Text(`共 ${this.totalCount} 本书籍`)
+                  Text(`共 ${this.totalCount} 本书籍 (显示 ${this.searchResults.length} 本)`)
                     .fontSize(14)
                     .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
                   
@@ -430,7 +431,7 @@ export struct SearchPage {
                 .margin({ bottom: 12 })
 
                 List() {
-                  ForEach(this.searchResults, (book: Book) => {
+                  ForEach(this.searchResults, (book: Book, index: number) => {
                     ListItem() {
                       Row() {
                         if (book.cover) {
@@ -506,11 +507,15 @@ export struct SearchPage {
                       })
                     }
                     .margin({ bottom: 8 })
-                  }, (book: Book) => `${book.id}-${book.bookSourceId}`)
+                  }, (book: Book, index: number) => `book_${index}_${book.name}_${book.bookSourceId}`)
                 }
                 .width('100%')
-                .height('100%')
+                .height(this.searchResults.length * 120 + 20)
                 .cachedCount(5)
+                .nestedScroll({
+                  scrollForward: NestedScrollMode.PARENT_FIRST,
+                  scrollBackward: NestedScrollMode.SELF_FIRST
+                })
 
                 if (this.totalPages > 1) {
                   Row() {
