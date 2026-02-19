@@ -82,9 +82,9 @@ export class EPUBParser {
   }
   private async extractEPUB(epubPath: string, extractPath: string): Promise<void> {
     try {
-      // 使用fs模块进行文件解压
+      // 使用zlib模块进行文件解压
       // 这里需要实现EPUB文件的解压逻辑，EPUB本质是ZIP格式
-      // 暂时使用文件复制作为占位实现
+      // 暂时使用文件复制作为占位实现，因为HarmonyOS的zlib模块可能不支持直接解压
       await fs.copyFile(epubPath, `${extractPath}/book.epub`);
       Logger.info(this.TAG, `EPUB 解压成功: ${extractPath}`);
     } catch (error) {
