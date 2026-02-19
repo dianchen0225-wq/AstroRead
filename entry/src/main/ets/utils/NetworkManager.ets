@@ -42,6 +42,8 @@ const DEFAULT_SECURITY_OPTIONS: NetworkSecurityOptions = {
   maxResponseSize: 10 * 1024 * 1024
 };
 
+const MAX_REDIRECTS = 5;
+
 export type HttpHeaderMap = Map<string, string>;
 
 export class NetworkManager {
@@ -170,7 +172,11 @@ export class NetworkManager {
   /**
    * 发送GET请求 - 增强版
    */
-  async get(url: string, headers?: HttpHeaderMap, maxResponseSize?: number): Promise<string> {
+  async get(url: string, headers?: HttpHeaderMap, maxResponseSize?: number, redirectCount: number = 0): Promise<string> {
+    if (redirectCount > MAX_REDIRECTS) {
+      throw new Error(`重定向次数超过限制 (${MAX_REDIRECTS}次)`);
+    }
+
     const startTime = Date.now();
     let retryCount = 0;
     const requestLog: RequestLog = {
@@ -245,8 +251,8 @@ export class NetworkManager {
 
           if (location) {
             const redirectUrl = this.resolveUrl(url, location);
-            Logger.info('NetworkManager', `Redirecting to: ${redirectUrl}`);
-            return this.get(redirectUrl, headers, maxResponseSize);
+            Logger.info('NetworkManager', `Redirecting to: ${redirectUrl} (重定向次数: ${redirectCount + 1}/${MAX_REDIRECTS})`);
+            return this.get(redirectUrl, headers, maxResponseSize, redirectCount + 1);
           } else {
             throw new Error(`HTTP ${response.responseCode}: No redirect location`);
           }

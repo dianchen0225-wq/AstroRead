@@ -33,8 +33,7 @@ export type JsonData = Record<string, string | number | boolean | object | null 
 
 export type JsonArray = JsonData[];
 
-// JSON路径解析结果的联合类型
-export type JsonValue = object | string | number | boolean | null | undefined;
+export type JsonValue = JsonData | JsonArray | string | number | boolean | null | undefined;
 
 export class ContentParser {
   private static readonly TAG = 'ContentParser';
@@ -188,20 +187,26 @@ export class ContentParser {
         return [];
       }
 
-        const listData = ContentParser.resolveJsonPath(jsonData, listRule);
+      const listData = ContentParser.resolveJsonPath(jsonData, listRule);
 
       if (listData === null || listData === undefined) {
         Logger.error(ContentParser.TAG, `JSONPath路径解析失败: ${listRule}`);
         return [];
       }
-        let dataArray: JsonData[] = [];
+
+      let dataArray: JsonData[] = [];
+      
       if (Array.isArray(listData)) {
-          dataArray = (listData as JsonArray).filter((item: JsonData) => item !== null && typeof item === 'object' && !Array.isArray(item));
+        for (const item of listData) {
+          if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+            dataArray.push(item as JsonData);
+          }
+        }
       } else if (typeof listData === 'object' && listData !== null && !Array.isArray(listData)) {
-          dataArray = [listData as JsonData];
+        dataArray = [listData as JsonData];
         Logger.debug(ContentParser.TAG, '将单个对象包装为数组');
       } else {
-        Logger.error(ContentParser.TAG, `JSONPath解析结果不是数组类型: ${typeof listData}`);
+        Logger.error(ContentParser.TAG, `JSONPath解析结果不是有效的对象或数组类型: ${typeof listData}, 值: ${String(listData).substring(0, 100)}`);
         return [];
       }
 
@@ -280,12 +285,12 @@ export class ContentParser {
       const index = parseInt(part, 10);
       if (!isNaN(index)) {
         if (Array.isArray(current)) {
-          current = current[index];
+          current = current[index] as JsonValue;
         } else {
           return undefined;
         }
       } else if (typeof current === 'object' && !Array.isArray(current)) {
-        current = (current as JsonData)[part];
+        current = (current as JsonData)[part] as JsonValue;
       } else {
         return undefined;
       }

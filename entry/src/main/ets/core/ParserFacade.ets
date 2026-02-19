@@ -337,14 +337,36 @@ export class ParserFacade implements ParserRegistry {
     }
 
     const str = typeof content === 'string' ? content : new util.TextDecoder('utf-8').decodeToString(new Uint8Array(content));
-    let hash = 0;
+    
+    let contentHash = 0;
     for (let i = 0; i < Math.min(str.length, 1000); i++) {
       const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
+      contentHash = ((contentHash << 5) - contentHash) + char;
+      contentHash = contentHash & contentHash;
     }
 
-    return `${type}_${hash}_${str.length}_${JSON.stringify(options?.customRules ?? {})}`;
+    let optionsHash = 0;
+    if (options?.customRules) {
+      try {
+        const customRules = options.customRules;
+        customRules.forEach((value: string, key: string) => {
+          for (let i = 0; i < Math.min(key.length, 50); i++) {
+            const char = key.charCodeAt(i);
+            optionsHash = ((optionsHash << 5) - optionsHash) + char;
+            optionsHash = optionsHash & optionsHash;
+          }
+          for (let i = 0; i < Math.min(value.length, 100); i++) {
+            const char = value.charCodeAt(i);
+            optionsHash = ((optionsHash << 5) - optionsHash) + char;
+            optionsHash = optionsHash & optionsHash;
+          }
+        });
+      } catch (e) {
+        Logger.warn(this.TAG, `Failed to hash customRules: ${e}`);
+      }
+    }
+
+    return `${type}_${contentHash}_${str.length}_${optionsHash}`;
   }
 
   private getFromCache(key: string): ParseResult<object> | null {

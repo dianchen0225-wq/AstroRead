@@ -19,12 +19,36 @@ type JsonArray = Array<JsonValue>;
 export class HTMLParser {
   private static instance: HTMLParser | null = null;
   private readonly TAG = 'HTMLParser';
+  
+  private readonly regexCache: Map<string, RegExp> = new Map();
+  private static readonly MAX_CACHE_SIZE = 100;
 
   static getInstance(): HTMLParser {
     if (!HTMLParser.instance) {
       HTMLParser.instance = new HTMLParser();
     }
     return HTMLParser.instance;
+  }
+
+  private getCachedRegex(pattern: string, flags: string = 'gi'): RegExp {
+    const cacheKey = `${pattern}_${flags}`;
+    
+    let regex = this.regexCache.get(cacheKey);
+    if (regex) {
+      regex.lastIndex = 0;
+      return regex;
+    }
+    
+    if (this.regexCache.size >= HTMLParser.MAX_CACHE_SIZE) {
+      const firstKey = this.regexCache.keys().next().value;
+      if (firstKey) {
+        this.regexCache.delete(firstKey);
+      }
+    }
+    
+    regex = new RegExp(pattern, flags);
+    this.regexCache.set(cacheKey, regex);
+    return regex;
   }
 
   /**
@@ -93,14 +117,13 @@ export class HTMLParser {
     const id = match[2] ? match[2].substring(1) : '';
     const className = match[3] ? match[3].substring(1) : '';
 
-    // 构建正则表达式
     let pattern: RegExp;
     if (id) {
-      pattern = new RegExp(`<([^\\s>]+)[^>]*\\bid=["']?${id}["']?[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
+      pattern = this.getCachedRegex(`<([^\\s>]+)[^>]*\\bid=["']?${id}["']?[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
     } else if (className) {
-      pattern = new RegExp(`<([^\\s>]+)[^>]*\\bclass=["']?[^"'>]*${className}[^"'>]*["']?[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
+      pattern = this.getCachedRegex(`<([^\\s>]+)[^>]*\\bclass=["']?[^"'>]*${className}[^"'>]*["']?[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
     } else if (tagName) {
-      pattern = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'gi');
+      pattern = this.getCachedRegex(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'gi');
     } else {
       return [];
     }
@@ -138,8 +161,7 @@ export class HTMLParser {
       const value = conditionMatch[3];
       const remaining = path.substring(conditionMatch[0].length);
 
-      // 构建匹配模式
-      const pattern = new RegExp(`<${tag}[^>]*\\b${attr}=["']?${value}["']?[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+      const pattern = this.getCachedRegex(`<${tag}[^>]*\\b${attr}=["']?${value}["']?[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
       const matches: string[] = [];
       let m: RegExpExecArray | null;
 
@@ -252,7 +274,7 @@ export class HTMLParser {
   private parseRegex(html: string, pattern: string): string[] {
     try {
       const results: string[] = [];
-      const regex = new RegExp(pattern, 'gi');
+      const regex = this.getCachedRegex(pattern, 'gi');
       let match: RegExpExecArray | null;
 
       while ((match = regex.exec(html)) !== null) {
@@ -273,11 +295,10 @@ export class HTMLParser {
    * 通用解析 - 用于复杂规则
    */
   private parseGeneric(html: string, rule: string): string[] {
-    // 尝试按标签名匹配
     const tagMatch = rule.match(/^([a-zA-Z0-9_-]+)$/);
     if (tagMatch) {
       const tag = tagMatch[1];
-      const pattern = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+      const pattern = this.getCachedRegex(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
       const results: string[] = [];
       let m: RegExpExecArray | null;
 
@@ -305,7 +326,7 @@ export class HTMLParser {
    * 提取 HTML 属性
    */
   private extractAttribute(html: string, attrName: string): string {
-    const pattern = new RegExp(`${attrName}=["']([^"']+)["']`, 'i');
+    const pattern = this.getCachedRegex(`${attrName}=["']([^"']+)["']`, 'i');
     const match = html.match(pattern);
     return match ? match[1] : '';
   }

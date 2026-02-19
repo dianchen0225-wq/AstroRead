@@ -101,25 +101,25 @@ export class AnalyzeRule {
     return this.ruleContext.variables.get(key) || '';
   }
 
-  getString(rule: string, isUrl: boolean = false): string {
-    if (!rule || !this.content) return '';
+  getString(rule: string, isUrl: boolean = false): Promise<string> {
+    if (!rule || !this.content) return Promise.resolve('');
     
     const ruleList = this.splitSourceRule(rule);
     return this.getStringFromRules(ruleList, isUrl);
   }
 
-  getStringList(rule: string, isUrl: boolean = false): string[] {
-    if (!rule || !this.content) return [];
+  getStringList(rule: string, isUrl: boolean = false): Promise<string[]> {
+    if (!rule || !this.content) return Promise.resolve([]);
     
     const ruleList = this.splitSourceRule(rule);
     return this.getStringListFromRules(ruleList, isUrl);
   }
 
-  getElements(rule: string): string[] {
+  async getElements(rule: string): Promise<string[]> {
     if (!rule || !this.content) return [];
     
     const ruleList = this.splitSourceRule(rule, true);
-    return this.getElementsFromRules(ruleList);
+    return await this.getElementsFromRules(ruleList);
   }
 
   private splitSourceRule(ruleStr: string, allInOne: boolean = false): SourceRule[] {
@@ -270,11 +270,11 @@ export class AnalyzeRule {
     return result;
   }
 
-  private getStringFromRules(rules: SourceRule[], isUrl: boolean): string {
+  private async getStringFromRules(rules: SourceRule[], isUrl: boolean): Promise<string> {
     let result: string | null = null;
     
     for (const rule of rules) {
-      this.applyPutMap(rule.putMap);
+      await this.applyPutMap(rule.putMap);
       
       if (!rule.rule && rule.replaceRegex) {
         if (result) {
@@ -283,7 +283,7 @@ export class AnalyzeRule {
         continue;
       }
       
-      result = this.executeRule(rule, result || this.content);
+      result = await this.executeRule(rule, result || this.content);
       
       if (rule.replaceRegex && result) {
         result = this.applyReplaceRegex(result, rule);
@@ -303,21 +303,21 @@ export class AnalyzeRule {
     return result;
   }
 
-  private getStringListFromRules(rules: SourceRule[], isUrl: boolean): string[] {
+  private async getStringListFromRules(rules: SourceRule[], isUrl: boolean): Promise<string[]> {
     let result: string[] | null = null;
     
     for (const rule of rules) {
-      this.applyPutMap(rule.putMap);
+      await this.applyPutMap(rule.putMap);
       
       if (rule.mode === 'Js') {
-        const jsResult = this.evalJS(rule.rule);
+        const jsResult = await this.evalJS(rule.rule);
         if (Array.isArray(jsResult)) {
           result = this.convertArrayToStringArray(jsResult);
         } else if (typeof jsResult === 'string') {
           result = jsResult.split('\n');
         }
       } else {
-        const list = this.executeRuleList(rule, result ? result.join('\n') : this.content);
+        const list: string[] = await this.executeRuleList(rule, result ? result.join('\n') : this.content);
         result = list;
       }
       
@@ -343,18 +343,18 @@ export class AnalyzeRule {
     return result;
   }
 
-  private getElementsFromRules(rules: SourceRule[]): string[] {
+  private async getElementsFromRules(rules: SourceRule[]): Promise<string[]> {
     let result: string[] = [];
     
     for (const rule of rules) {
-      this.applyPutMap(rule.putMap);
+      await this.applyPutMap(rule.putMap);
       
       switch (rule.mode) {
         case 'Regex':
           result = this.executeRegexElements(rule.rule, result.length > 0 ? result.join('\n') : this.content);
           break;
         case 'Js':
-          const jsResult = this.evalJS(rule.rule);
+          const jsResult = await this.evalJS(rule.rule);
           if (Array.isArray(jsResult)) {
             result = this.convertArrayToStringArray(jsResult);
           }
@@ -373,10 +373,10 @@ export class AnalyzeRule {
     return result;
   }
 
-  private executeRule(rule: SourceRule, content: string): string {
+  private async executeRule(rule: SourceRule, content: string): Promise<string> {
     switch (rule.mode) {
       case 'Js':
-        return String(this.evalJS(rule.rule) || '');
+        return String(await this.evalJS(rule.rule) || '');
       case 'Json':
         return this.executeJsonRule(rule.rule, content);
       case 'XPath':
@@ -389,10 +389,10 @@ export class AnalyzeRule {
     }
   }
 
-  private executeRuleList(rule: SourceRule, content: string): string[] {
+  private async executeRuleList(rule: SourceRule, content: string): Promise<string[]> {
     switch (rule.mode) {
       case 'Js':
-        const jsResult = this.evalJS(rule.rule);
+        const jsResult = await this.evalJS(rule.rule);
         if (Array.isArray(jsResult)) {
           return this.convertArrayToStringArray(jsResult);
         }
@@ -565,13 +565,13 @@ export class AnalyzeRule {
     return current;
   }
 
-  private evalJS(jsCode: string): JsonValue {
+  private async evalJS(jsCode: string): Promise<JsonValue> {
     try {
       if (!this.jsEngine) {
         this.jsEngine = EnhancedJSEngine.getInstance();
       }
       
-      const jsResult = this.jsEngine.executeRule(this.content, `@js:${jsCode}`, this.baseUrl);
+      const jsResult = await this.jsEngine.executeRule(this.content, `@js:${jsCode}`, this.baseUrl);
       if (typeof jsResult === 'string') {
         return jsResult;
       }
@@ -582,11 +582,14 @@ export class AnalyzeRule {
     }
   }
 
-  private applyPutMap(putMap: Map<string, string>): void {
-    putMap.forEach((rule: string, key: string) => {
-      const value = this.getString(rule);
+  private async applyPutMap(putMap: Map<string, string>): Promise<void> {
+    const entries = Array.from(putMap.entries());
+    for (const entry of entries) {
+      const key = entry[0];
+      const rule = entry[1];
+      const value = await this.getString(rule);
       this.ruleContext.variables.set(key, value);
-    });
+    }
   }
 
   private applyReplaceRegex(content: string, rule: SourceRule): string {

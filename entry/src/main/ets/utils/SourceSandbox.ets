@@ -70,7 +70,7 @@ export class SourceSandbox {
 
     SourceSandbox.MEDIUM_PATTERNS = [
       new PatternItem(/javascript:/gi, 'JS协议', '包含javascript:协议'),
-      new PatternItem(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '脚本标签', '包含script标签'),
+      new PatternItem(/<script[^>]*>[\s\S]{0,10000}?<\/script>/gi, '脚本标签', '包含script标签'),
       new PatternItem(/on(load|error|click|mouse|key|focus|blur)\s*=/gi, '事件处理', '包含内联事件处理'),
       new PatternItem(/\bsetTimeout\s*\(/gi, '定时器', '使用setTimeout'),
       new PatternItem(/\bsetInterval\s*\(/gi, '定时器', '使用setInterval'),
@@ -103,11 +103,39 @@ export class SourceSandbox {
     ];
   }
 
+  private static readonly MAX_SCAN_CONTENT_LENGTH = 1024 * 1024;
+  private static readonly MAX_REGEX_EXECUTION_TIME_MS = 100;
+
   static scanSourceContent(content: string): SecurityScanResult {
     const risks: SecurityRisk[] = [];
 
+    if (content.length > SourceSandbox.MAX_SCAN_CONTENT_LENGTH) {
+      Logger.warn(SourceSandbox.TAG, `内容过长，截断扫描: ${content.length} > ${SourceSandbox.MAX_SCAN_CONTENT_LENGTH}`);
+      content = content.substring(0, SourceSandbox.MAX_SCAN_CONTENT_LENGTH);
+      risks.push({
+        level: 'medium',
+        type: '内容过长',
+        description: '内容超过扫描限制，已截断',
+        location: '内容扫描'
+      });
+    }
+
+    const startTime = Date.now();
+
     for (let i = 0; i < SourceSandbox.CRITICAL_PATTERNS.length; i++) {
+      if (Date.now() - startTime > SourceSandbox.MAX_REGEX_EXECUTION_TIME_MS) {
+        Logger.warn(SourceSandbox.TAG, '正则扫描超时，终止扫描');
+        risks.push({
+          level: 'medium',
+          type: '扫描超时',
+          description: '安全扫描超时，可能存在复杂内容',
+          location: '内容扫描'
+        });
+        break;
+      }
+
       const item = SourceSandbox.CRITICAL_PATTERNS[i];
+      item.pattern.lastIndex = 0;
       const matches = content.match(item.pattern);
       if (matches) {
         risks.push({
@@ -120,7 +148,13 @@ export class SourceSandbox {
     }
 
     for (let i = 0; i < SourceSandbox.HIGH_PATTERNS.length; i++) {
+      if (Date.now() - startTime > SourceSandbox.MAX_REGEX_EXECUTION_TIME_MS) {
+        Logger.warn(SourceSandbox.TAG, '正则扫描超时，终止扫描');
+        break;
+      }
+
       const item = SourceSandbox.HIGH_PATTERNS[i];
+      item.pattern.lastIndex = 0;
       const matches = content.match(item.pattern);
       if (matches) {
         risks.push({
@@ -133,7 +167,13 @@ export class SourceSandbox {
     }
 
     for (let i = 0; i < SourceSandbox.MEDIUM_PATTERNS.length; i++) {
+      if (Date.now() - startTime > SourceSandbox.MAX_REGEX_EXECUTION_TIME_MS) {
+        Logger.warn(SourceSandbox.TAG, '正则扫描超时，终止扫描');
+        break;
+      }
+
       const item = SourceSandbox.MEDIUM_PATTERNS[i];
+      item.pattern.lastIndex = 0;
       const matches = content.match(item.pattern);
       if (matches) {
         risks.push({

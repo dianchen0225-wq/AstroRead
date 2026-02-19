@@ -78,7 +78,22 @@ const FORBIDDEN_PATTERNS: RegExp[] = [
   /\.outerHTML\s*=/gi,
   /alert\s*\(/gi,
   /confirm\s*\(/gi,
-  /prompt\s*\(/gi
+  /prompt\s*\(/gi,
+  /this\s*\[\s*['"]/gi,
+  /\.constructor\b/gi,
+  /\.prototype\b/gi,
+  /Object\.getPrototypeOf/gi,
+  /Object\.create\s*\(/gi,
+  /delete\s+\w+\s*\.\s*\w+/gi,
+  /with\s*\(/gi,
+  /debugger\b/gi
+];
+
+const DANGEROUS_KEYWORDS: string[] = [
+  'eval', 'Function', 'constructor', 'prototype', '__proto__',
+  'defineProperty', 'getOwnPropertyDescriptor', 'setPrototypeOf',
+  'getPrototypeOf', 'create', 'Proxy', 'Reflect', 'require',
+  'import', 'process', 'global', 'globalThis', 'module', 'exports'
 ];
 
 export class JSEngine {
@@ -132,6 +147,7 @@ export class JSEngine {
     }
 
     for (const pattern of FORBIDDEN_PATTERNS) {
+      pattern.lastIndex = 0;
       if (pattern.test(script)) {
         Logger.warn(this.TAG, `脚本包含禁止的模式: ${pattern.source}`);
         const result: ValidationResult = { valid: false, error: `脚本包含不安全的代码模式` };
@@ -146,8 +162,42 @@ export class JSEngine {
       return result;
     }
 
+    const braceCount = (script.match(/\{/g) || []).length;
+    const closeBraceCount = (script.match(/\}/g) || []).length;
+    if (Math.abs(braceCount - closeBraceCount) > this.securityConfig.maxNestedDepth) {
+      const result: ValidationResult = { valid: false, error: '脚本括号不匹配' };
+      return result;
+    }
+
+    const keywordCheck = this.checkDangerousKeywords(script);
+    if (!keywordCheck.valid) {
+      const result: ValidationResult = { valid: false, error: keywordCheck.error || '脚本包含危险关键字' };
+      return result;
+    }
+
     const result: ValidationResult = { valid: true };
     return result;
+  }
+
+  private checkDangerousKeywords(script: string): ValidationResult {
+    const normalizedScript = script.replace(/\s+/g, ' ').toLowerCase();
+    
+    for (const keyword of DANGEROUS_KEYWORDS) {
+      const patterns = [
+        new RegExp(`\\b${keyword}\\s*\\(`, 'i'),
+        new RegExp(`\\.${keyword}\\b`, 'i'),
+        new RegExp(`\\b${keyword}\\s*:`, 'i'),
+      ];
+      
+      for (const pattern of patterns) {
+        pattern.lastIndex = 0;
+        if (pattern.test(normalizedScript)) {
+          return { valid: false, error: `检测到危险关键字: ${keyword}` };
+        }
+      }
+    }
+    
+    return { valid: true };
   }
 
   sanitizeInput(input: string): string {
@@ -185,6 +235,38 @@ export class JSEngine {
         const wrappedScript = `
           (function() {
             'use strict';
+            const forbiddenGlobals = ['eval', 'Function', 'constructor', 'prototype', '__proto__', 
+              'Proxy', 'Reflect', 'require', 'import', 'process', 'global', 'globalThis', 'module'];
+            
+            const safeConsole = {
+              log: function() {},
+              warn: function() {},
+              error: function() {},
+              info: function() {}
+            };
+            
+            const sandboxGlobals = {
+              console: safeConsole,
+              JSON: JSON,
+              Math: Math,
+              Date: Date,
+              String: String,
+              Number: Number,
+              Boolean: Boolean,
+              Array: Array,
+              Object: Object,
+              parseInt: parseInt,
+              parseFloat: parseFloat,
+              isNaN: isNaN,
+              isFinite: isFinite,
+              encodeURIComponent: encodeURIComponent,
+              decodeURIComponent: decodeURIComponent,
+              encodeURI: encodeURI,
+              decodeURI: decodeURI,
+              btoa: btoa,
+              atob: atob
+            };
+            
             try {
               const result = (function() {
                 ${script}
@@ -295,13 +377,14 @@ export class JSEngine {
           getCache: function(key) {
             return java._cache ? java._cache[key] : null;
           },
-          // HTML 解析功能
-          getElements: function(html, rule) {
-            return ${JSON.stringify(parser.parse(html, rule))};
+          // HTML 解析功能（简化版，仅支持基本选择器）
+          getElements: function(htmlContent, selector) {
+            // 简化实现：返回空数组，实际解析应在 TypeScript 层完成
+            return [];
           },
-          parseHtml: function(html) {
+          parseHtml: function(htmlContent) {
             // 简化版 HTML 解析
-            const div = { innerHTML: html, textContent: html.replace(/<[^>]+>/g, '') };
+            const div = { innerHTML: htmlContent, textContent: htmlContent.replace(/<[^>]+>/g, '') };
             return div;
           },
           _cache: {}
@@ -332,7 +415,6 @@ export class JSEngine {
 
   async executeRuleScript(html: string, rule: string): Promise<string> {
     const sanitizedHtml = this.sanitizeInput(html);
-    const parser = HTMLParser.getInstance();
 
     const envScript = `
       (function() {
@@ -341,14 +423,14 @@ export class JSEngine {
           ajax: function(url) { return url; },
           get: function(url) { return url; },
           post: function(url, body) { return url; },
-          getElements: function(htmlStr, selector) {
-            // 调用外部解析器
-            return ${JSON.stringify(parser.parse(html, selector))};
+          getElements: function(htmlContent, selector) {
+            // 简化实现：返回空数组
+            return [];
           },
-          parseHtml: function(htmlStr) {
+          parseHtml: function(htmlContent) {
             return {
-              text: ${JSON.stringify(parser.extractText(html))},
-              html: htmlStr
+              text: htmlContent.replace(/<[^>]+>/g, ''),
+              html: htmlContent
             };
           },
           log: function(msg) { console.log('[JS Log] ' + msg); },

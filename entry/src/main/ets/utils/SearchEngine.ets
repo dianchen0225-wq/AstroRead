@@ -126,16 +126,16 @@ export class WebBook {
     
     if (source.findRule) {
       if (source.findRule.name) {
-        book.name = analyzeRule.getString(source.findRule.name);
+        book.name = await analyzeRule.getString(source.findRule.name);
       }
       if (source.findRule.author) {
-        book.author = analyzeRule.getString(source.findRule.author);
+        book.author = await analyzeRule.getString(source.findRule.author);
       }
       if (source.findRule.cover) {
-        book.cover = analyzeRule.getString(source.findRule.cover, true);
+        book.cover = await analyzeRule.getString(source.findRule.cover, true);
       }
       if (source.findRule.intro) {
-        book.intro = analyzeRule.getString(source.findRule.intro);
+        book.intro = await analyzeRule.getString(source.findRule.intro);
       }
     }
     
@@ -159,15 +159,15 @@ export class WebBook {
     
     analyzeRule.setContent(body, tocUrl);
     
-    const chapterElements = analyzeRule.getElements(source.chapterRule.chapterList);
+    const chapterElements = await analyzeRule.getElements(source.chapterRule.chapterList);
     const chapters: ChapterInfo[] = [];
     
     for (let i = 0; i < chapterElements.length; i++) {
       const elementHtml = chapterElements[i];
       analyzeRule.setContent(elementHtml, tocUrl);
       
-      const title = analyzeRule.getString(source.chapterRule.chapterName);
-      let url = analyzeRule.getString(source.chapterRule.chapterUrl, true);
+      const title = await analyzeRule.getString(source.chapterRule.chapterName);
+      let url = await analyzeRule.getString(source.chapterRule.chapterUrl, true);
       
       if (title && url) {
         if (!url.startsWith('http')) {
@@ -202,7 +202,7 @@ export class WebBook {
     
     analyzeRule.setContent(body, chapterUrl);
     
-    let content = analyzeRule.getString(source.contentRule.content);
+    let content = await analyzeRule.getString(source.contentRule.content);
     
     content = EntityDecoder.decode(content);
     content = content.replace(/<br\s*\/?>/gi, '\n');
@@ -274,25 +274,25 @@ export class WebBook {
     const rule = analyzeRule || new AnalyzeRule({ baseUrl: source.url });
     rule.setContent(body, source.url);
     
-    const bookElements = rule.getElements(searchRule.bookList);
+    const bookElements = await rule.getElements(searchRule.bookList);
     
     for (let i = 0; i < bookElements.length; i++) {
       const elementHtml = bookElements[i];
       rule.setContent(elementHtml, source.url);
       
-      const name = rule.getString(searchRule.name);
-      const author = rule.getString(searchRule.author || '');
+      const name = await rule.getString(searchRule.name);
+      const author = await rule.getString(searchRule.author || '');
       
       if (!name) continue;
       
       if (filter && !filter(name, author)) continue;
       
-      let cover = rule.getString(searchRule.cover || '', true);
+      let cover = await rule.getString(searchRule.cover || '', true);
       if (cover && !cover.startsWith('http')) {
         cover = WebBook.resolveUrl(source.url, cover);
       }
       
-      let bookUrl = rule.getString(searchRule.bookUrl, true);
+      let bookUrl = await rule.getString(searchRule.bookUrl, true);
       if (bookUrl && !bookUrl.startsWith('http')) {
         bookUrl = WebBook.resolveUrl(source.url, bookUrl);
       }
@@ -302,7 +302,7 @@ export class WebBook {
         name: WebBook.cleanText(name),
         author: WebBook.cleanText(author) || '未知作者',
         cover: cover || undefined,
-        intro: rule.getString(searchRule.intro || ''),
+        intro: await rule.getString(searchRule.intro || ''),
         kind: undefined,
         wordCount: undefined,
         latestChapter: undefined,

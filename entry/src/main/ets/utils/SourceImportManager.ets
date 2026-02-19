@@ -901,27 +901,86 @@ class SourceImportManager {
   }
 
   /**
-   * 验证文件路径安全性
+   * 验证文件路径安全性 - 增强版
    */
   private isSafeFilePath(filePath: string): boolean {
     if (!filePath || filePath.length > 4096) {
       return false;
     }
 
-    // 防止路径遍历攻击
-    if (filePath.includes('..') || filePath.includes('//') || filePath.includes('\\\\')) {
+    if (filePath.includes('\0')) {
       return false;
     }
 
-    // 只允许特定扩展名
+    const normalizedPath = this.normalizePath(filePath);
+    
+    if (normalizedPath.includes('..')) {
+      return false;
+    }
+
+    if (normalizedPath.includes('//') || normalizedPath.includes('\\\\')) {
+      return false;
+    }
+
+    const dangerousPatterns = [
+      /\.\./,
+      /~\//,
+      /\$\(/,
+      /\$\{/,
+      /`/,
+      /\|/,
+      /;/,
+      /&/,
+      /\$\(/,
+      />/,
+      /</
+    ];
+
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(normalizedPath)) {
+        Logger.warn(this.TAG, `文件路径包含危险模式: ${pattern.source}`);
+        return false;
+      }
+    }
+
     const allowedExtensions = ['.json', '.txt', '.xml'];
-    const hasValidExtension = allowedExtensions.some(ext => filePath.toLowerCase().endsWith(ext));
+    const hasValidExtension = allowedExtensions.some((ext: string) => normalizedPath.toLowerCase().endsWith(ext));
 
     if (!hasValidExtension) {
       return false;
     }
 
+    const safePathPattern = /^[a-zA-Z0-9_\-./\\:]+$/;
+    if (!safePathPattern.test(normalizedPath)) {
+      return false;
+    }
+
     return true;
+  }
+
+  /**
+   * 规范化路径 - 统一处理不同操作系统的路径分隔符
+   */
+  private normalizePath(filePath: string): string {
+    let normalized = filePath.replace(/\\/g, '/');
+    
+    while (normalized.includes('//')) {
+      normalized = normalized.replace(/\/\//g, '/');
+    }
+    
+    while (normalized.includes('/./')) {
+      normalized = normalized.replace(/\/\.\//g, '/');
+    }
+    
+    if (normalized.startsWith('./')) {
+      normalized = normalized.substring(2);
+    }
+    
+    if (normalized.endsWith('/')) {
+      normalized = normalized.slice(0, -1);
+    }
+    
+    return normalized;
   }
 
   /**

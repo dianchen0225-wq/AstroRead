@@ -872,27 +872,34 @@ export class BookSourceViewModel {
   }
 
   /**
-   * 验证UUID格式
+   * 验证UUID格式 - 增强版
+   * 支持标准UUID格式和自定义安全ID格式
    */
   private isValidUUID(id: string): boolean {
     if (!id || typeof id !== 'string') {
       return false;
     }
-    if (id.trim().length === 0) {
+    
+    const trimmedId = id.trim();
+    if (trimmedId.length === 0) {
       return false;
     }
-    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (uuidPattern.test(id)) {
+
+    const standardUUIDPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (standardUUIDPattern.test(trimmedId)) {
       return true;
     }
-    const customIdPattern = /^[a-zA-Z0-9_-]{8,64}$/;
-    if (customIdPattern.test(id)) {
+
+    const customIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{7,63}$/;
+    if (customIdPattern.test(trimmedId)) {
       return true;
     }
-    if (id.length >= 4 && id.length <= 128) {
-      const safePattern = /^[a-zA-Z0-9_\-:.@]+$/;
-      return safePattern.test(id);
+
+    const legacyPattern = /^[a-zA-Z0-9_\-:.@]{8,64}$/;
+    if (legacyPattern.test(trimmedId)) {
+      return true;
     }
+
     return false;
   }
 

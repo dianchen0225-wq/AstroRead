@@ -147,6 +147,46 @@ let maxLogs: number = 100;
 let lastUAIndex: number = -1;
 const TAG: string = 'RequestEnhancer';
 
+const UA_CACHE_TTL = 30 * 60 * 1000;
+const domainUACache: Map<string, { profile: UserAgentProfile; timestamp: number }> = new Map();
+
+function extractDomain(url: string): string {
+  try {
+    const match = url.match(/^https?:\/\/([^/:]+)/);
+    return match ? match[1].toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+function getCachedUAForDomain(domain: string): UserAgentProfile | null {
+  if (!domain) return null;
+  
+  const cached = domainUACache.get(domain);
+  if (cached && Date.now() - cached.timestamp < UA_CACHE_TTL) {
+    return cached.profile;
+  }
+  
+  return null;
+}
+
+function cacheUAForDomain(domain: string, profile: UserAgentProfile): void {
+  if (!domain) return;
+  
+  if (domainUACache.size > 100) {
+    const now = Date.now();
+    const keysToDelete: string[] = [];
+    domainUACache.forEach((value, key) => {
+      if (now - value.timestamp > UA_CACHE_TTL) {
+        keysToDelete.push(key);
+      }
+    });
+    keysToDelete.forEach(key => domainUACache.delete(key));
+  }
+  
+  domainUACache.set(domain, { profile, timestamp: Date.now() });
+}
+
 export class RequestEnhancer {
   static getRandomUserAgent(): UserAgentProfile {
     let index: number = Math.floor(Math.random() * USER_AGENT_POOL.length);
@@ -158,6 +198,23 @@ export class RequestEnhancer {
     
     lastUAIndex = index;
     return USER_AGENT_POOL[index];
+  }
+
+  static getUserAgentForUrl(url: string): UserAgentProfile {
+    const domain = extractDomain(url);
+    
+    if (domain) {
+      const cached = getCachedUAForDomain(domain);
+      if (cached) {
+        return cached;
+      }
+      
+      const profile = RequestEnhancer.getRandomUserAgent();
+      cacheUAForDomain(domain, profile);
+      return profile;
+    }
+    
+    return RequestEnhancer.getRandomUserAgent();
   }
 
   static getRandomReferer(): string {
@@ -176,7 +233,9 @@ export class RequestEnhancer {
     const baseUrl: string = options !== null ? options.baseUrl : '';
 
     if (useRandomUA) {
-      const uaProfile: UserAgentProfile = RequestEnhancer.getRandomUserAgent();
+      const uaProfile: UserAgentProfile = baseUrl 
+        ? RequestEnhancer.getUserAgentForUrl(baseUrl) 
+        : RequestEnhancer.getRandomUserAgent();
       headers.set('User-Agent', uaProfile.userAgent);
       headers.set('Accept', uaProfile.accept);
       headers.set('Accept-Language', uaProfile.acceptLanguage);

@@ -62,6 +62,8 @@ export class BookSourceSearchEngine {
   private htmlParser: HTMLParser;
   private jsEngine: EnhancedJSEngine;
   private requestTimestamps: Map<string, number[]> = new Map();
+  private pendingTimers: Set<number> = new Set();
+  private isCancelled: boolean = false;
   private readonly TAG = 'BookSourceSearchEngine';
 
   private config: SearchConfig = {
@@ -83,6 +85,19 @@ export class BookSourceSearchEngine {
       BookSourceSearchEngine.instance = new BookSourceSearchEngine();
     }
     return BookSourceSearchEngine.instance;
+  }
+
+  cancelSearch(): void {
+    this.isCancelled = true;
+    this.clearAllTimers();
+  }
+
+  private clearAllTimers(): void {
+    this.pendingTimers.forEach((timerId: number) => {
+      clearTimeout(timerId);
+    });
+    this.pendingTimers.clear();
+    Logger.debug(this.TAG, '已清理所有挂起的定时器');
   }
 
   /**
@@ -709,10 +724,26 @@ export class BookSourceSearchEngine {
   }
 
   /**
-   * 延迟
+   * 延迟 - 支持取消和清理
    */
   private sleep(ms: number): Promise<void> {
-    return new Promise<void>((resolve: () => void) => setTimeout(resolve, ms));
+    return new Promise<void>((resolve: () => void, reject: (reason: Error) => void) => {
+      if (this.isCancelled) {
+        reject(new Error('搜索已取消'));
+        return;
+      }
+      
+      const timerId: number = Number(setTimeout(() => {
+        this.pendingTimers.delete(timerId);
+        if (this.isCancelled) {
+          reject(new Error('搜索已取消'));
+        } else {
+          resolve();
+        }
+      }, ms));
+      
+      this.pendingTimers.add(timerId);
+    });
   }
 
   /**

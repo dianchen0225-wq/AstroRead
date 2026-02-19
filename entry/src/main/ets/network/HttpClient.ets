@@ -258,12 +258,10 @@ export class HttpClient implements IHttpClient {
 
         const response = await httpRequest.request(url, requestOptions);
 
-        // 检查是否已取消
         if (abortController.aborted) {
           throw HttpErrorImpl.aborted('Request was aborted', config);
         }
 
-        // 解析响应
         const responseHeaders = ResponseParser.parseResponseHeaders(response.header as Record<string, string>);
         const data = ResponseParser.parseResponseData<T>(response.result as string | ArrayBuffer, config);
 
@@ -277,10 +275,8 @@ export class HttpClient implements IHttpClient {
           metrics.retries
         );
 
-        // 验证状态码
         this.validateStatus(response.responseCode, httpResponse, config);
 
-        // 缓存响应
         this.cacheResponse(config, httpResponse, response.responseCode);
 
         return httpResponse;
@@ -291,17 +287,19 @@ export class HttpClient implements IHttpClient {
         throw new Error(String(error));
       } finally {
         httpRequest.destroy();
-        AbortManager.getInstance().removeController(metrics.requestId);
       }
     };
 
-    // 执行重试逻辑
-    const retryConfig = config.retry ?? this.configManager.getConfig().retry;
-    if (retryConfig) {
-      return RetryHandler.executeWithRetry(requestFn, config, retryConfig);
-    }
+    try {
+      const retryConfig = config.retry ?? this.configManager.getConfig().retry;
+      if (retryConfig) {
+        return await RetryHandler.executeWithRetry(requestFn, config, retryConfig);
+      }
 
-    return requestFn();
+      return await requestFn();
+    } finally {
+      AbortManager.getInstance().removeController(metrics.requestId);
+    }
   }
 
   /**
