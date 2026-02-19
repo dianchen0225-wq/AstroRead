@@ -86,49 +86,85 @@ export class ChapterRepository {
     }
   }
 
-  /**
-   * 批量插入或更新章节
-   */
   async batchUpsertChapters(chapters: Chapter[]): Promise<void> {
-    if (chapters.length === DEFAULT_ORDER) {
+    if (chapters.length === 0) {
       return;
     }
 
+    const BATCH_SIZE = 200;
+    let insertedCount = 0;
+    let failedCount = 0;
+
+    Logger.info(ChapterRepository.TAG, `开始批量插入 ${chapters.length} 个章节，每批 ${BATCH_SIZE} 个`);
+
     try {
-      // 使用事务确保批量操作的原子性
-      this.rdbStore.beginTransaction();
+      await this.deleteChaptersByBookId(chapters[0].bookId);
+      Logger.info(ChapterRepository.TAG, `已删除书籍 ${chapters[0].bookId} 的旧章节数据`);
 
-      for (const chapter of chapters) {
-        const valueBucket: relationalStore.ValuesBucket = {
-          'id': chapter.id,
-          'book_id': chapter.bookId,
-          'title': chapter.title,
-          'url': chapter.url,
-          'order': chapter.order,
-          'is_vip': chapter.isVip ? VIP_FLAG_TRUE : VIP_FLAG_FALSE
-        };
+      for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
+        const batch = chapters.slice(i, i + BATCH_SIZE);
+        const valueBuckets: relationalStore.ValuesBucket[] = [];
 
-        // 先尝试更新
-        const predicates = new relationalStore.RdbPredicates(TABLE_CHAPTER);
-        predicates.equalTo('id', chapter.id);
-        const updatedRows = await this.rdbStore.update(valueBucket, predicates);
+        for (const chapter of batch) {
+          valueBuckets.push({
+            'id': chapter.id,
+            'book_id': chapter.bookId,
+            'title': chapter.title,
+            'url': chapter.url,
+            'order': chapter.order,
+            'is_vip': chapter.isVip ? VIP_FLAG_TRUE : VIP_FLAG_FALSE
+          });
+        }
 
-        // 如果更新失败则插入
-        if (updatedRows === DEFAULT_ORDER) {
-          await this.rdbStore.insert(TABLE_CHAPTER, valueBucket);
+        try {
+          const insertCount = await this.rdbStore.batchInsert(TABLE_CHAPTER, valueBuckets);
+          insertedCount += insertCount;
+          Logger.debug(ChapterRepository.TAG, `批次 ${Math.floor(i / BATCH_SIZE) + 1} 插入成功: ${insertCount} 条`);
+        } catch (batchError) {
+          failedCount += batch.length;
+          Logger.error(ChapterRepository.TAG, `批次 ${Math.floor(i / BATCH_SIZE) + 1} 插入失败: ${batchError instanceof Error ? batchError.message : String(batchError)}`);
+          
+          for (const chapter of batch) {
+            try {
+              const valueBucket: relationalStore.ValuesBucket = {
+                'id': chapter.id,
+                'book_id': chapter.bookId,
+                'title': chapter.title,
+                'url': chapter.url,
+                'order': chapter.order,
+                'is_vip': chapter.isVip ? VIP_FLAG_TRUE : VIP_FLAG_FALSE
+              };
+              await this.rdbStore.insert(TABLE_CHAPTER, valueBucket);
+              insertedCount++;
+            } catch (singleError) {
+              Logger.warn(ChapterRepository.TAG, `单条插入失败 - 章节ID: ${chapter.id}, 标题: ${chapter.title}`);
+            }
+          }
         }
       }
 
-      this.rdbStore.commit();
+      Logger.info(ChapterRepository.TAG, `批量插入完成 - 成功: ${insertedCount}, 失败: ${failedCount}`);
+      
+      if (insertedCount === 0) {
+        throw new Error('所有章节插入失败');
+      }
     }
     catch (error) {
-      try {
-        await this.rdbStore.rollback(relationalStore.TransactionType.IMMEDIATE);
-      } catch (rollbackError) {
-        Logger.error(ChapterRepository.TAG, `回滚失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
-      }
-      Logger.error(ChapterRepository.TAG, `批量插入或更新章节失败: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(ChapterRepository.TAG, `批量插入章节失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  async deleteChaptersByBookId(bookId: string): Promise<number> {
+    try {
+      const predicates = new relationalStore.RdbPredicates(TABLE_CHAPTER);
+      predicates.equalTo('book_id', bookId);
+      const deletedRows = await this.rdbStore.delete(predicates);
+      Logger.debug(ChapterRepository.TAG, `删除书籍 ${bookId} 的 ${deletedRows} 个章节`);
+      return deletedRows;
+    } catch (error) {
+      Logger.error(ChapterRepository.TAG, `删除章节失败: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
     }
   }
 }

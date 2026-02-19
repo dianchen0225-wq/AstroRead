@@ -145,32 +145,58 @@ export class ContentParser {
     }
 
     try {
+      Logger.info(ContentParser.TAG, `========== 开始解析章节内容 ==========`);
+      Logger.info(ContentParser.TAG, `书源: ${bookSource.name}, 规则类型: ${bookSource.ruleType}`);
+      Logger.info(ContentParser.TAG, `HTML长度: ${html.length} 字符`);
+
       const rule = bookSource.contentRule;
+      Logger.info(ContentParser.TAG, `内容规则: ${rule.content}`);
+      if (rule.replaceRule) {
+        Logger.debug(ContentParser.TAG, `替换规则: ${rule.replaceRule}`);
+      }
+
       let content = '';
 
       RuleEngine.setContext({ baseUrl: bookSource.url, html: html });
 
+      Logger.info(ContentParser.TAG, `开始执行规则解析...`);
       switch (bookSource.ruleType) {
         case 'jsonpath':
+          Logger.debug(ContentParser.TAG, `使用JSONPath解析`);
           content = RuleEngine.parseRule(rule.content, html);
           break;
         case 'xpath':
+          Logger.debug(ContentParser.TAG, `使用XPath/CSS选择器解析`);
           content = RuleEngine.parseRule(rule.content, html);
           break;
         case 'regex':
+          Logger.debug(ContentParser.TAG, `使用正则表达式解析`);
           content = RuleEngine.parseRule(rule.content, html);
           break;
         default:
+          Logger.debug(ContentParser.TAG, `使用默认(XPath)解析`);
           content = RuleEngine.parseRule(rule.content, html);
+      }
+
+      Logger.info(ContentParser.TAG, `规则解析完成，原始内容长度: ${content.length} 字符`);
+      if (content.length > 0) {
+        Logger.debug(ContentParser.TAG, `解析内容前300字符: ${content.substring(0, 300)}`);
+      } else {
+        Logger.warn(ContentParser.TAG, `规则解析结果为空！`);
+        Logger.debug(ContentParser.TAG, `HTML内容片段(用于调试): ${html.substring(0, 1000)}`);
       }
 
       const replaceRuleConfig: ReplaceRuleConfig | undefined = rule.replaceRule ? JSON.parse(rule.replaceRule) : undefined;
       content = ContentParser.purifyContent(content, replaceRuleConfig);
 
+      Logger.info(ContentParser.TAG, `净化后内容长度: ${content.length} 字符`);
+      Logger.info(ContentParser.TAG, `========== 章节内容解析完成 ==========`);
+
       return content;
     } catch (error) {
       Logger.error(ContentParser.TAG, `内容解析异常: ${error instanceof Error ? error.message : String(error)}`);
-      return html;
+      Logger.error(ContentParser.TAG, `错误堆栈: ${error instanceof Error ? error.stack : '无堆栈信息'}`);
+      return '';
     }
   }
   private static parseByJsonPath(html: string, listRule: string, rule: SearchRule): ParsedBookItem[] {

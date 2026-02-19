@@ -120,9 +120,23 @@ export class ChapterViewModel {
     bookSource: BookSource
   ): Promise<ChapterContent> {
     try {
-      const content = await this.getChapterContentFromNetwork(bookSource, chapterUrl);
+      Logger.info(ChapterViewModel.TAG, `========== 开始获取章节内容 ==========`);
+      Logger.info(ChapterViewModel.TAG, `chapterId: ${chapterId}`);
+      Logger.info(ChapterViewModel.TAG, `传入的chapterUrl: ${chapterUrl}`);
+      Logger.info(ChapterViewModel.TAG, `书源baseUrl: ${bookSource.url}`);
+
+      let finalChapterUrl = chapterUrl;
+      if (chapterUrl && !chapterUrl.startsWith('http')) {
+        finalChapterUrl = this.resolveChapterUrl(bookSource.url, chapterUrl);
+        Logger.info(ChapterViewModel.TAG, `相对路径转换: ${chapterUrl} -> ${finalChapterUrl}`);
+      }
+
+      Logger.info(ChapterViewModel.TAG, `最终请求URL: ${finalChapterUrl}`);
+
+      const content = await this.getChapterContentFromNetwork(bookSource, finalChapterUrl);
       
-      // TODO: 可以添加缓存逻辑
+      Logger.info(ChapterViewModel.TAG, `获取内容成功，长度: ${content.length}`);
+      Logger.info(ChapterViewModel.TAG, `========== 章节内容获取完成 ==========`);
       
       return {
         chapterId: chapterId,
@@ -131,9 +145,32 @@ export class ChapterViewModel {
         prevUrl: undefined
       };
     } catch (error) {
-      Logger.error(ChapterViewModel.TAG, `获取章节内容失败: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(ChapterViewModel.TAG, `========== 获取章节内容失败 ==========`);
+      Logger.error(ChapterViewModel.TAG, `错误: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to get chapter content: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private resolveChapterUrl(baseUrl: string, relativeUrl: string): string {
+    if (relativeUrl.startsWith('http')) {
+      return relativeUrl;
+    }
+
+    if (relativeUrl.startsWith('//')) {
+      const protocol = baseUrl.startsWith('https') ? 'https:' : 'http:';
+      return protocol + relativeUrl;
+    }
+
+    const baseMatch = baseUrl.match(/^(https?:\/\/[^/]+)(\/.*)?$/);
+    const origin = baseMatch ? baseMatch[1] : '';
+
+    if (relativeUrl.startsWith('/')) {
+      return origin + relativeUrl;
+    }
+
+    const lastSlashIndex = baseUrl.lastIndexOf('/');
+    const basePath = lastSlashIndex >= 0 ? baseUrl.substring(0, lastSlashIndex + 1) : baseUrl;
+    return basePath + relativeUrl;
   }
 
   /**

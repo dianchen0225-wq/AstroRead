@@ -762,29 +762,46 @@ export class NetworkManager {
    * 获取章节内容
    */
   async getChapterContent(bookSource: BookSource, chapterUrl: string): Promise<string> {
+    const TAG = 'NetworkManager';
     try {
-      Logger.info('NetworkManager', `Getting chapter content from: ${chapterUrl}`);
+      Logger.info(TAG, `========== 开始获取章节内容 ==========`);
+      Logger.info(TAG, `章节URL: ${chapterUrl}`);
+      Logger.info(TAG, `书源: ${bookSource.name}, 规则类型: ${bookSource.ruleType}`);
+      Logger.debug(TAG, `内容规则: ${bookSource.contentRule?.content || '未配置'}`);
 
       const headers: HttpHeaderMap | undefined = bookSource.header
         ? this.parseHeaderString(bookSource.header)
         : undefined;
 
+      if (headers) {
+        Logger.debug(TAG, `请求头: ${JSON.stringify(Array.from(headers.entries()))}`);
+      }
+
       const html = await this.get(chapterUrl, headers);
+      Logger.info(TAG, `获取到HTML内容，长度: ${html.length} 字符`);
+      Logger.debug(TAG, `HTML前500字符: ${html.substring(0, 500)}`);
 
       const content = ContentParser.parseChapterContent(html, bookSource);
+      Logger.info(TAG, `解析后内容长度: ${content.length} 字符`);
+      Logger.debug(TAG, `内容前200字符: ${content.substring(0, 200)}`);
 
       if (!content || content.trim().length === 0) {
+        Logger.warn(TAG, `解析结果为空，返回默认提示`);
         return '本章内容为空';
       }
 
       const maxContentLength = 50000;
       if (content.length > maxContentLength) {
+        Logger.info(TAG, `内容过长，截断至 ${maxContentLength} 字符`);
         return content.substring(0, maxContentLength) + '...';
       }
 
+      Logger.info(TAG, `========== 章节内容获取成功 ==========`);
       return content;
     } catch (error) {
-      Logger.error('NetworkManager', `Failed to get chapter content: ${error}`);
+      Logger.error(TAG, `========== 章节内容获取失败 ==========`);
+      Logger.error(TAG, `错误详情: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(TAG, `错误堆栈: ${error instanceof Error ? error.stack : '无堆栈信息'}`);
       return `获取章节内容失败: ${error instanceof Error ? error.message : '未知错误'}`;
     }
   }

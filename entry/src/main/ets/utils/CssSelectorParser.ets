@@ -37,6 +37,13 @@ export class CssSelectorParser {
       // 处理@tag.前缀（Legado格式简写）
       if (processedSelector.startsWith('tag.')) {
         processedSelector = processedSelector.substring(4);
+        Logger.debug(CssSelectorParser.TAG, `Legado tag.前缀转换: ${selector} -> ${processedSelector}`);
+      }
+
+      // 处理id.前缀（Legado格式简写）
+      if (processedSelector.startsWith('id.')) {
+        processedSelector = '#' + processedSelector.substring(3);
+        Logger.debug(CssSelectorParser.TAG, `Legado id.前缀转换: ${selector} -> ${processedSelector}`);
       }
 
       // 处理XPath格式（简化处理，转换为正则）
@@ -57,12 +64,18 @@ export class CssSelectorParser {
         const atIndex = processedSelector.indexOf('@');
         const parentSelector = processedSelector.substring(0, atIndex).trim();
         const childSelector = processedSelector.substring(atIndex + 1).trim();
+        
+        Logger.debug(CssSelectorParser.TAG, `子选择器解析 - 父: ${parentSelector}, 子: ${childSelector}`);
 
         const parentElements = CssSelectorParser.selectElements(html, parentSelector);
+        Logger.debug(CssSelectorParser.TAG, `父选择器找到 ${parentElements.length} 个元素`);
+        
         for (const parentHtml of parentElements) {
           const childElements = CssSelectorParser.selectElements(parentHtml, childSelector);
           elements.push(...childElements);
         }
+        
+        Logger.debug(CssSelectorParser.TAG, `子选择器共找到 ${elements.length} 个元素`);
         
         if (skipFirst > 0 && elements.length > skipFirst) {
           return elements.slice(skipFirst);
@@ -175,19 +188,23 @@ export class CssSelectorParser {
       // 处理ID选择器 #id
       else if (processedSelector.startsWith('#')) {
         const id = processedSelector.substring(1).split(/[.\s#\[]/)[0];
+        Logger.debug(CssSelectorParser.TAG, `ID选择器解析 - id: ${id}`);
+        
         const regex = new RegExp(
-          `<([a-zA-Z][a-zA-Z0-9]*)[^>]*id=["']${CssSelectorParser.escapeRegex(id)}["'][^>]*>([\\s\\S]*?)<\\/\\1>`,
+          `<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${CssSelectorParser.escapeRegex(id)}["'][^>]*>([\\s\\S]*?)<\\/\\1>`,
           'gi'
         );
         const matches = html.matchAll(regex);
         for (const match of matches) {
           elements.push(match[0]);
         }
+        Logger.debug(CssSelectorParser.TAG, `ID选择器找到 ${elements.length} 个元素`);
       }
       // 处理标签选择器
       else {
         const tagName = processedSelector.split(/[.\s#\[@]/)[0];
         if (tagName && tagName.length > 0) {
+          Logger.debug(CssSelectorParser.TAG, `标签选择器解析 - tagName: ${tagName}`);
           const regex = new RegExp(
             `<${CssSelectorParser.escapeRegex(tagName)}[^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`,
             'gi'
@@ -196,6 +213,7 @@ export class CssSelectorParser {
           for (const match of matches) {
             elements.push(match[0]);
           }
+          Logger.debug(CssSelectorParser.TAG, `标签选择器找到 ${elements.length} 个元素`);
         }
       }
 
@@ -400,6 +418,11 @@ export class CssSelectorParser {
       // 移除@tag.前缀
       if (processedRule.startsWith('tag.')) {
         processedRule = processedRule.substring(4);
+      }
+
+      // 移除id.前缀
+      if (processedRule.startsWith('id.')) {
+        processedRule = '#' + processedRule.substring(3);
       }
 
       // 处理XPath格式
