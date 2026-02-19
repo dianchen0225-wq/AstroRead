@@ -76,11 +76,23 @@ export class NetworkAdapter {
         connectTimeout: options.timeout || 30000,
       };
 
+      Logger.debug(this.TAG, `发起请求: ${url}, 方法: ${method}`);
+
       httpRequest.request(url, requestOptions, (err: Error | null, data: http.HttpResponse) => {
         if (!err && data) {
-          resolve(data.result.toString());
+          const responseCode = data.responseCode;
+          const result = data.result.toString();
+          Logger.debug(this.TAG, `请求完成: ${url}, 状态码: ${responseCode}, 响应长度: ${result.length}`);
+          
+          if (responseCode >= 200 && responseCode < 300) {
+            resolve(result);
+          } else {
+            reject(new Error(`HTTP ${responseCode}: ${result.substring(0, 200)}`));
+          }
         } else {
-          reject(new Error(`HTTP Error: ${err?.message || 'Unknown error'}`));
+          const errorMsg = err?.message || 'Unknown error';
+          Logger.error(this.TAG, `请求失败: ${url}, 错误: ${errorMsg}`);
+          reject(new Error(`HTTP Error: ${errorMsg}`));
         }
         httpRequest.destroy();
       });

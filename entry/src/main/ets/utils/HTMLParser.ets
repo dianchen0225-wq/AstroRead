@@ -163,8 +163,22 @@ export class HTMLParser {
           for (const item of current as Array<string | number | boolean | object | null>) {
             if (typeof item === 'string') {
               results.push(item);
-            } else if (typeof item === 'object') {
-              results.push(JSON.stringify(item));
+            } else if (typeof item === 'object' && item !== null) {
+              // 尝试提取对象中的文本字段
+              const itemObj = item as Record<string, string | number | boolean | object | null>;
+              const textFields = ['intro', 'description', 'summary', 'content', 'text', 'value', 'name', 'title'];
+              let found = false;
+              for (const field of textFields) {
+                const value = itemObj[field];
+                if (value !== undefined && typeof value === 'string') {
+                  results.push(value);
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                results.push('');
+              }
             }
           }
           return results;
@@ -181,8 +195,29 @@ export class HTMLParser {
 
       if (typeof current === 'string') {
         results.push(current);
+      } else if (Array.isArray(current)) {
+        // 如果是数组，提取其中的字符串值
+        const arr = current as Array<string | number | boolean | object | null>;
+        for (const item of arr) {
+          if (typeof item === 'string') {
+            results.push(item);
+          }
+        }
       } else if (typeof current === 'object' && current !== null) {
-        results.push(JSON.stringify(current));
+        // 如果是对象，尝试提取常见的文本字段
+        const obj = current as Record<string, string | number | boolean | object | null>;
+        const textFields = ['intro', 'description', 'summary', 'content', 'text', 'value', 'name', 'title'];
+        for (const field of textFields) {
+          const value = obj[field];
+          if (value !== undefined && typeof value === 'string') {
+            results.push(value);
+            break;
+          }
+        }
+        // 如果没有找到文本字段，返回空字符串
+        if (results.length === 0) {
+          results.push('');
+        }
       }
 
       return results;

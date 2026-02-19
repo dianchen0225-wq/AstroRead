@@ -18,10 +18,12 @@ import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { BookSource } from '../models/BookSource';
 import { Book } from '../models/Book';
+import { PagedSearchResult, SearchProgress, SourceSearchStats } from '../models/SearchResult';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/NetworkManager';
+import { ContentPurifier, purifyIntro } from '../utils/ContentPurifier';
 import router from '@ohos.router';
 
 export interface RankColor {
@@ -40,9 +42,16 @@ export struct SearchPage {
   @Local hasSearched: boolean = false;
   @Local errorMessage: string = '';
   @Local hasEnabledSources: boolean = true;
+  @Local currentPage: number = 1;
+  @Local totalPages: number = 1;
+  @Local totalCount: number = 0;
+  @Local hasMore: boolean = false;
+  @Local searchProgress: string = '';
+  @Local sourceStats: SourceSearchStats[] = [];
 
   private bookSources: BookSource[] = [];
   private isComponentActive: boolean = false;
+  private lastSearchKeyword: string = '';
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -97,7 +106,7 @@ export struct SearchPage {
     }
   }
 
-  private async performSearch(): Promise<void> {
+  private async performSearch(page: number = 1): Promise<void> {
     if (!this.searchText.trim()) {
       Logger.info('SearchPage', '请输入搜索关键词');
       return;
@@ -106,10 +115,15 @@ export struct SearchPage {
     this.isSearching = true;
     this.hasSearched = true;
     this.errorMessage = '';
-    this.searchResults = [];
+    this.searchProgress = '正在初始化搜索...';
+
+    if (page === 1) {
+      this.searchResults = [];
+      this.currentPage = 1;
+    }
 
     try {
-      Logger.info('SearchPage', `开始搜索: ${this.searchText}`);
+      Logger.info('SearchPage', `开始搜索: ${this.searchText}, 第${page}页`);
 
       if (this.bookSources.length === 0) {
         await this.loadBookSources();
@@ -122,17 +136,38 @@ export struct SearchPage {
         return;
       }
 
-      const sourcesToUse = this.bookSources.slice(0, 10);
+      const sourcesToUse = this.bookSources;
       Logger.info('SearchPage', `使用${sourcesToUse.length}个书源进行搜索`);
 
       const bookViewModel = viewModelManager.getBookViewModel();
-      const results = await bookViewModel.searchBooks(this.searchText.trim(), sourcesToUse);
+      
+      const progressCallback = (progress: SearchProgress): void => {
+        if (this.isComponentActive) {
+          this.searchProgress = `正在搜索 ${progress.currentSource}... (${progress.completedSources}/${progress.totalSources})`;
+        }
+      };
+
+      const result: PagedSearchResult = await bookViewModel.searchBooksWithPaging(
+        this.searchText.trim(),
+        sourcesToUse,
+        page,
+        progressCallback
+      );
 
       if (this.isComponentActive) {
-        this.searchResults = results;
-        Logger.info('SearchPage', `搜索完成，找到${results.length}本书`);
+        this.searchResults = result.books;
+        this.currentPage = result.currentPage;
+        this.totalPages = result.totalPages;
+        this.totalCount = result.totalCount;
+        this.hasMore = result.hasMore;
+        this.sourceStats = result.sourceStats;
+        this.lastSearchKeyword = this.searchText.trim();
 
-        if (results.length === 0) {
+        Logger.info('SearchPage', 
+          `搜索完成，共${result.totalCount}本书，当前第${result.currentPage}/${result.totalPages}页`
+        );
+
+        if (result.totalCount === 0) {
           this.errorMessage = '当前启用的书源无匹配结果';
         }
       }
@@ -153,8 +188,30 @@ export struct SearchPage {
     } finally {
       if (this.isComponentActive) {
         this.isSearching = false;
+        this.searchProgress = '';
       }
     }
+  }
+
+  private async loadNextPage(): Promise<void> {
+    if (!this.hasMore || this.isSearching) {
+      return;
+    }
+    await this.performSearch(this.currentPage + 1);
+  }
+
+  private async loadPreviousPage(): Promise<void> {
+    if (this.currentPage <= 1 || this.isSearching) {
+      return;
+    }
+    await this.performSearch(this.currentPage - 1);
+  }
+
+  private async goToPage(page: number): Promise<void> {
+    if (page < 1 || page > this.totalPages || page === this.currentPage || this.isSearching) {
+      return;
+    }
+    await this.performSearch(page);
   }
 
   private async addToBookshelf(book: Book): Promise<void> {
@@ -233,6 +290,9 @@ export struct SearchPage {
         .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
         .justifyContent(FlexAlign.Center)
         .margin({ right: 15 })
+        .onClick(() => {
+          NavigationManager.getInstance().navigateBack();
+        })
 
         Text($r('app.string.search_books'))
           .fontSize(18)
@@ -277,7 +337,7 @@ export struct SearchPage {
               .margin({ left: 10 })
               .enabled(!this.isSearching)
               .onClick(() => {
-                this.performSearch();
+                this.performSearch(1);
               })
           }
           .width('100%')
@@ -296,7 +356,7 @@ export struct SearchPage {
                 .width(40)
                 .height(40)
                 .color(DesignSystem.getPrimaryColor(this.isLightMode))
-              Text('正在搜索...')
+              Text(this.searchProgress || '正在搜索...')
                 .fontSize(14)
                 .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
                 .margin({ top: 10 })
@@ -363,11 +423,19 @@ export struct SearchPage {
               .justifyContent(FlexAlign.Center)
             } else if (this.searchResults.length > 0) {
               Column() {
-                Text(`找到 ${this.searchResults.length} 本书籍`)
-                  .fontSize(14)
-                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                  .width('100%')
-                  .margin({ bottom: 12 })
+                Row() {
+                  Text(`共 ${this.totalCount} 本书籍`)
+                    .fontSize(14)
+                    .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                  
+                  Blank()
+                  
+                  Text(`第 ${this.currentPage}/${this.totalPages} 页`)
+                    .fontSize(12)
+                    .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                }
+                .width('100%')
+                .margin({ bottom: 12 })
 
                 List() {
                   ForEach(this.searchResults, (book: Book) => {
@@ -407,7 +475,7 @@ export struct SearchPage {
                           }
 
                           if (book.intro) {
-                            Text(book.intro)
+                            Text(purifyIntro(book.intro))
                               .fontSize(12)
                               .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
                               .margin({ top: 4 })
@@ -451,6 +519,44 @@ export struct SearchPage {
                 .width('100%')
                 .height('100%')
                 .cachedCount(5)
+
+                if (this.totalPages > 1) {
+                  Row() {
+                    Button('上一页')
+                      .fontSize(13)
+                      .backgroundColor(this.currentPage > 1 ? 
+                        DesignSystem.getPrimaryColor(this.isLightMode) : 
+                        DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                      .fontColor(this.currentPage > 1 ? '#fff' : DesignSystem.getSecondaryTextColor(this.isLightMode))
+                      .borderRadius(6)
+                      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                      .enabled(this.currentPage > 1 && !this.isSearching)
+                      .onClick(() => {
+                        this.loadPreviousPage();
+                      })
+
+                    Text(`${this.currentPage} / ${this.totalPages}`)
+                      .fontSize(14)
+                      .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                      .margin({ left: 16, right: 16 })
+
+                    Button('下一页')
+                      .fontSize(13)
+                      .backgroundColor(this.hasMore ? 
+                        DesignSystem.getPrimaryColor(this.isLightMode) : 
+                        DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                      .fontColor(this.hasMore ? '#fff' : DesignSystem.getSecondaryTextColor(this.isLightMode))
+                      .borderRadius(6)
+                      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                      .enabled(this.hasMore && !this.isSearching)
+                      .onClick(() => {
+                        this.loadNextPage();
+                      })
+                  }
+                  .width('100%')
+                  .justifyContent(FlexAlign.Center)
+                  .margin({ top: 16, bottom: 16 })
+                }
               }
               .width('100%')
             }
@@ -517,7 +623,7 @@ export struct SearchPage {
                       .margin({ right: 8, bottom: 8 })
                       .onClick(() => {
                         this.searchText = item;
-                        this.performSearch();
+                        this.performSearch(1);
                       })
                   })
                 }
@@ -556,7 +662,7 @@ export struct SearchPage {
                   .margin({ bottom: 12 })
                   .onClick(() => {
                     this.searchText = item;
-                    this.performSearch();
+                    this.performSearch(1);
                   })
                 })
               }

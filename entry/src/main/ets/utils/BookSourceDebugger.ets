@@ -41,6 +41,17 @@ export interface DebugResult {
   content?: string;
 }
 
+interface UrlConfig {
+  method: 'GET' | 'POST';
+  body?: string;
+  headers: Record<string, string>;
+}
+
+interface SearchUrlResult {
+  url: string;
+  config: UrlConfig;
+}
+
 export class BookSourceDebugger {
   private static instance: BookSourceDebugger | null = null;
   private searchEngine: BookSourceSearchEngine;
@@ -98,19 +109,24 @@ export class BookSourceDebugger {
       const step2Start = Date.now();
       addStep({ name: '构建搜索 URL', status: 'running', input: `关键词: ${keyword}` });
 
-      const searchUrl = await this.buildSearchUrl(source, keyword);
+      const urlConfig = await this.buildSearchUrlWithConfig(source, keyword);
       addStep({
         name: '构建搜索 URL',
         status: 'success',
         duration: Date.now() - step2Start,
-        output: searchUrl
+        output: `${urlConfig.url} (方法: ${urlConfig.config.method})`
       });
 
       // 步骤 3: 发送网络请求
       const step3Start = Date.now();
-      addStep({ name: '发送网络请求', status: 'running', input: searchUrl });
+      addStep({ name: '发送网络请求', status: 'running', input: urlConfig.url });
 
-      const html = await NetworkAdapter.get(searchUrl, source.header ? JSON.parse(source.header) : {});
+      let html: string;
+      if (urlConfig.config.method === 'POST') {
+        html = await NetworkAdapter.post(urlConfig.url, urlConfig.config.body || '', urlConfig.config.headers);
+      } else {
+        html = await NetworkAdapter.get(urlConfig.url, urlConfig.config.headers);
+      }
 
       addStep({
         name: '发送网络请求',
@@ -347,25 +363,113 @@ export class BookSourceDebugger {
   /**
    * 构建搜索 URL
    */
-  private async buildSearchUrl(source: BookSource, key: string): Promise<string> {
+  private async buildSearchUrlWithConfig(source: BookSource, key: string): Promise<SearchUrlResult> {
     let searchUrl = source.searchUrl || '';
+    const config: UrlConfig = {
+      method: 'GET',
+      headers: {}
+    };
 
-    // 处理 JS 规则
+    if (source.header) {
+      try {
+        config.headers = JSON.parse(source.header);
+      } catch {
+        // ignore
+      }
+    }
+
     if (searchUrl.includes('@js:')) {
       const jsCode = searchUrl.replace(/^@js:/, '');
-      return this.jsEngine.executeSearchUrl(jsCode, {
+      const result = await this.jsEngine.executeSearchUrl(jsCode, {
         key,
         page: 1,
         baseUrl: source.url
       });
+      return { url: result, config };
     }
 
-    // 替换占位符
+    const commaIndex = searchUrl.indexOf(',{');
+    if (commaIndex > 0 && searchUrl.endsWith('}')) {
+      try {
+        const urlPart = searchUrl.substring(0, commaIndex);
+        const configPart = searchUrl.substring(commaIndex + 1);
+        const parsedConfig = this.parseUrlConfig(configPart, config.headers);
+        searchUrl = urlPart;
+        config.method = parsedConfig.method;
+        config.body = parsedConfig.body;
+        config.headers = parsedConfig.headers;
+      } catch {
+        // ignore
+      }
+    }
+
     searchUrl = searchUrl
       .replace(/\{\{key\}\}/g, encodeURIComponent(key))
       .replace(/\{\{page\}\}/g, '1');
 
-    return searchUrl;
+    if (config.body) {
+      config.body = config.body
+        .replace(/\{\{key\}\}/g, encodeURIComponent(key))
+        .replace(/\{\{page\}\}/g, '1');
+    }
+
+    return { url: searchUrl, config };
+  }
+
+  private parseUrlConfig(configStr: string, baseHeaders: Record<string, string>): UrlConfig {
+    const config: UrlConfig = {
+      method: 'GET',
+      headers: this.copyHeaders(baseHeaders)
+    };
+
+    try {
+      const parsed = JSON.parse(configStr) as Record<string, string | number | boolean | object | null | undefined>;
+      
+      if (parsed.method && typeof parsed.method === 'string') {
+        const method = parsed.method.toUpperCase();
+        if (method === 'POST') {
+          config.method = 'POST';
+        }
+      }
+
+      if (parsed.body && typeof parsed.body === 'string') {
+        config.body = parsed.body;
+      }
+
+      if (parsed.headers && typeof parsed.headers === 'object') {
+        const headerObj = parsed.headers as Record<string, string>;
+        const keys = Object.keys(headerObj);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          config.headers[key] = headerObj[key];
+        }
+      }
+
+      const otherKeys = Object.keys(parsed);
+      for (let i = 0; i < otherKeys.length; i++) {
+        const key = otherKeys[i];
+        if (key !== 'method' && key !== 'body' && key !== 'headers') {
+          const value = parsed[key];
+          if (typeof value === 'string') {
+            config.headers[key] = value;
+          }
+        }
+      }
+    } catch (e) {
+      Logger.warn(this.TAG, `解析URL配置失败: ${e}`);
+    }
+
+    return config;
+  }
+
+  private copyHeaders(source: Record<string, string>): Record<string, string> {
+    const result: Record<string, string> = {};
+    const keys = Object.keys(source);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      result[key] = source[key];
+    }
+    return result;
   }
 
   /**

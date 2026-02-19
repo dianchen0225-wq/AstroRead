@@ -1,8 +1,15 @@
 import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
+import { 
+  PagedSearchResult, 
+  SearchPaginationConfig, 
+  DEFAULT_PAGINATION_CONFIG,
+  SearchProgress
+} from '../models/SearchResult';
 import { databaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import SearchEnhancer from '../utils/SearchEnhancer';
+import { BookSourceSearchEngine } from '../utils/BookSourceSearchEngine';
 import { Logger } from '../utils/Logger';
 import { IdGenerator } from '../utils/IdGenerator';
 import common from '@ohos.app.ability.common';
@@ -10,6 +17,8 @@ import { preferences } from '@kit.ArkData';
 
 const SEARCH_HISTORY_KEY = 'search_history';
 const MAX_SEARCH_HISTORY = 20;
+
+export type SearchProgressCallback = (progress: SearchProgress) => void;
 
 /**
  * 书籍视图模型
@@ -20,10 +29,12 @@ export class BookViewModel {
   private readonly databaseManager = databaseManager;
   private readonly networkManager = NetworkManager.getInstance();
   private readonly searchEnhancer = SearchEnhancer;
+  private readonly searchEngine = BookSourceSearchEngine.getInstance();
   private context: common.UIAbilityContext | null = null;
   private preferences: preferences.Preferences | null = null;
   
   private searchHistory: string[] = [];
+  private paginationConfig: SearchPaginationConfig = DEFAULT_PAGINATION_CONFIG;
 
   setContext(context: common.UIAbilityContext): void {
     this.context = context;
@@ -220,6 +231,84 @@ export class BookViewModel {
       Logger.error('BookViewModel', `搜索书籍失败：${error}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
+  }
+
+  /**
+   * 分页搜索书籍 - 支持分页控制和进度回调
+   */
+  async searchBooksWithPaging(
+    keyword: string, 
+    bookSources: BookSource[], 
+    page: number = 1,
+    progressCallback?: SearchProgressCallback
+  ): Promise<PagedSearchResult> {
+    const startTime = Date.now();
+    
+    try {
+      Logger.info('BookViewModel', `开始分页搜索书籍："${keyword}", 第${page}页`);
+      
+      await this.addToSearchHistory(keyword);
+      
+      const result = await this.searchEngine.searchWithPaging(
+        bookSources,
+        {
+          key: keyword,
+          page: page,
+          pageSize: this.paginationConfig.pageSize,
+          maxResultsPerSource: this.paginationConfig.maxResultsPerSource
+        },
+        progressCallback
+      );
+      
+      const duration = Date.now() - startTime;
+      Logger.info('BookViewModel', 
+        `分页搜索完成，共${result.totalCount}本书，当前第${result.currentPage}/${result.totalPages}页，耗时${duration}ms`
+      );
+      
+      return result;
+      
+    } catch (error) {
+      Logger.error('BookViewModel', `分页搜索书籍失败：${error}`);
+      throw (error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * 设置分页配置
+   */
+  setSearchPaginationConfig(config: Partial<SearchPaginationConfig>): void {
+    if (config.pageSize !== undefined) {
+      this.paginationConfig.pageSize = Math.max(5, Math.min(50, config.pageSize));
+    }
+    if (config.maxResultsPerSource !== undefined) {
+      this.paginationConfig.maxResultsPerSource = Math.max(5, Math.min(100, config.maxResultsPerSource));
+    }
+    if (config.maxTotalResults !== undefined) {
+      this.paginationConfig.maxTotalResults = Math.max(50, Math.min(500, config.maxTotalResults));
+    }
+    if (config.enableDeduplication !== undefined) {
+      this.paginationConfig.enableDeduplication = config.enableDeduplication;
+    }
+    if (config.sortByRelevance !== undefined) {
+      this.paginationConfig.sortByRelevance = config.sortByRelevance;
+    }
+    
+    this.searchEngine.setPaginationConfig(this.paginationConfig);
+    Logger.info('BookViewModel', `分页配置已更新: pageSize=${this.paginationConfig.pageSize}`);
+  }
+
+  /**
+   * 获取分页配置
+   */
+  getSearchPaginationConfig(): SearchPaginationConfig {
+    const config: SearchPaginationConfig = {
+      pageSize: this.paginationConfig.pageSize,
+      maxResultsPerSource: this.paginationConfig.maxResultsPerSource,
+      maxTotalResults: this.paginationConfig.maxTotalResults,
+      enableDeduplication: this.paginationConfig.enableDeduplication,
+      sortByRelevance: this.paginationConfig.sortByRelevance
+    };
+    return config;
   }
 
   /**

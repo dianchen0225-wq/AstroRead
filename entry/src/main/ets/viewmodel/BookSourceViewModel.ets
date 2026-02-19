@@ -391,10 +391,11 @@ export class BookSourceViewModel {
       };
       return result;
     } catch (error) {
-      Logger.error('BookSourceViewModel', '批量删除书源失败');
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      Logger.error('BookSourceViewModel', `批量删除书源失败: ${errorMsg}`);
       return {
         success: false,
-        message: error instanceof Error ? error.message : '删除失败'
+        message: errorMsg
       };
     }
   }
@@ -475,14 +476,15 @@ export class BookSourceViewModel {
         let searchUrl = bookSource.searchUrl;
 
         // 替换关键词占位符
-        if (searchUrl.includes('{{key}}')) {
-          searchUrl = searchUrl.replace('{{key}}', encodeURIComponent(testKeyword));
-        } else if (searchUrl.includes('{key}')) {
-          searchUrl = searchUrl.replace('{key}', encodeURIComponent(testKeyword));
-        } else {
-          // 如果没有占位符，尝试直接追加
-          Logger.debug('BookSourceViewModel', `搜索URL没有关键词占位符: ${searchUrl}`);
-        }
+        searchUrl = searchUrl
+          .replace(/\{\{key\}\}/g, encodeURIComponent(testKeyword))
+          .replace(/\{\{page\}\}/g, '1')
+          .replace(/\{key\}/g, encodeURIComponent(testKeyword))
+          .replace(/\{page\}/g, '1')
+          .replace(/<key>/g, encodeURIComponent(testKeyword))
+          .replace(/<page>/g, '1')
+          .replace(/\$key\$/g, encodeURIComponent(testKeyword))
+          .replace(/\$page\$/g, '1');
 
         // 放宽URL验证，允许更多格式
         if (!searchUrl.startsWith('http://') && !searchUrl.startsWith('https://')) {
@@ -873,8 +875,25 @@ export class BookSourceViewModel {
    * 验证UUID格式
    */
   private isValidUUID(id: string): boolean {
+    if (!id || typeof id !== 'string') {
+      return false;
+    }
+    if (id.trim().length === 0) {
+      return false;
+    }
     const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return uuidPattern.test(id);
+    if (uuidPattern.test(id)) {
+      return true;
+    }
+    const customIdPattern = /^[a-zA-Z0-9_-]{8,64}$/;
+    if (customIdPattern.test(id)) {
+      return true;
+    }
+    if (id.length >= 4 && id.length <= 128) {
+      const safePattern = /^[a-zA-Z0-9_\-:.@]+$/;
+      return safePattern.test(id);
+    }
+    return false;
   }
 
   /**

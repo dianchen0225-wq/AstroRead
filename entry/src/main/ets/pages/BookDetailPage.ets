@@ -240,11 +240,7 @@ struct BookDetailPage {
         .justifyContent(FlexAlign.Center)
         .margin({ right: 15 })
         .onClick(() => {
-          try {
-            router.back();
-          } catch (error) {
-            Logger.error('BookDetailPage', `返回失败: ${error}`);
-          }
+          NavigationManager.getInstance().navigateBack();
         })
 
         Text('书籍详情')

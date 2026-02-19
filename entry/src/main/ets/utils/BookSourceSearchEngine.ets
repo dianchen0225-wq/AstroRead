@@ -1,10 +1,18 @@
 /**
  * BookSourceSearchEngine - 书源搜索引擎
- * 支持多书源并发搜索、请求频率控制、结果聚合
+ * 支持多书源并发搜索、请求频率控制、结果聚合、分页控制
  */
 
 import { BookSource } from '../models/BookSource';
 import { Book } from '../models/Book';
+import { 
+  PagedSearchResult, 
+  SourceSearchStats, 
+  SearchPaginationConfig, 
+  DEFAULT_PAGINATION_CONFIG,
+  SearchResultBuilder,
+  SearchProgress
+} from '../models/SearchResult';
 import NetworkAdapter from './NetworkAdapter';
 import { HTMLParser } from './HTMLParser';
 import { EnhancedJSEngine } from './EnhancedJSEngine';
@@ -25,6 +33,26 @@ export interface SearchOptions {
   timeout?: number;
   concurrent?: number;
   interval?: number;
+  pageSize?: number;
+  maxResultsPerSource?: number;
+}
+
+export type SearchProgressCallback = (progress: SearchProgress) => void;
+
+interface UrlConfig {
+  method: 'GET' | 'POST';
+  body?: string;
+  headers: Record<string, string>;
+}
+
+interface SearchUrlResult {
+  url: string;
+  config: UrlConfig;
+}
+
+interface MutexInterface {
+  lock: () => Promise<void>;
+  unlock: () => void;
 }
 
 export class BookSourceSearchEngine {
@@ -41,6 +69,8 @@ export class BookSourceSearchEngine {
     maxResultsPerSource: 20
   };
 
+  private paginationConfig: SearchPaginationConfig = DEFAULT_PAGINATION_CONFIG;
+
   private constructor() {
     this.htmlParser = HTMLParser.getInstance();
     this.jsEngine = EnhancedJSEngine.getInstance();
@@ -54,7 +84,134 @@ export class BookSourceSearchEngine {
   }
 
   /**
-   * 在多个书源中搜索
+   * 分页搜索 - 支持多书源并发搜索并返回分页结果
+   */
+  async searchWithPaging(
+    sources: BookSource[],
+    options: SearchOptions,
+    progressCallback?: SearchProgressCallback
+  ): Promise<PagedSearchResult> {
+    const searchKey = options.key;
+    const displayPage = options.page || 1;
+    const concurrent = options.concurrent || this.config.maxConcurrent;
+    const pageSize = options.pageSize || this.paginationConfig.pageSize;
+    const maxPerSource = options.maxResultsPerSource || this.paginationConfig.maxResultsPerSource;
+
+    const config: SearchPaginationConfig = {
+      pageSize: pageSize,
+      maxResultsPerSource: maxPerSource,
+      maxTotalResults: this.paginationConfig.maxTotalResults,
+      enableDeduplication: this.paginationConfig.enableDeduplication,
+      sortByRelevance: this.paginationConfig.sortByRelevance
+    };
+
+    const resultBuilder = new SearchResultBuilder(config);
+    const enabledSources = sources.filter((s: BookSource) => s.enabled);
+
+    Logger.info(this.TAG, `开始分页搜索: "${searchKey}", 书源数: ${enabledSources.length}, 每页: ${pageSize}`);
+
+    const progress: SearchProgress = {
+      totalSources: enabledSources.length,
+      completedSources: 0,
+      currentSource: '',
+      foundBooks: 0,
+      isComplete: false
+    };
+
+    const executing: Promise<void>[] = [];
+    const mutex = this.createMutex();
+
+    for (let i = 0; i < enabledSources.length; i++) {
+      const source = enabledSources[i];
+
+      if (executing.length >= concurrent) {
+        await Promise.race(executing);
+      }
+
+      await this.checkRateLimit(source.url);
+
+      const promise = this.searchSingleSource(source, searchKey, 1)
+        .then((result: SearchResult) => {
+          resultBuilder.addSourceResult(
+            source.id,
+            source.name,
+            result.books,
+            result.success,
+            result.error,
+            result.responseTime
+          );
+
+          if (progressCallback) {
+            progress.completedSources++;
+            progress.currentSource = source.name;
+            progress.foundBooks = resultBuilder.getTotalCount();
+            progress.isComplete = progress.completedSources >= progress.totalSources;
+            progressCallback(progress);
+          }
+        })
+        .catch((error: Error) => {
+          Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
+          resultBuilder.addSourceResult(
+            source.id,
+            source.name,
+            [],
+            false,
+            String(error),
+            0
+          );
+
+          if (progressCallback) {
+            progress.completedSources++;
+            progress.currentSource = source.name;
+            progress.foundBooks = resultBuilder.getTotalCount();
+            progress.isComplete = progress.completedSources >= progress.totalSources;
+            progressCallback(progress);
+          }
+        })
+        .finally(() => {
+          const index = executing.indexOf(promise);
+          if (index > -1) {
+            executing.splice(index, 1);
+          }
+        });
+
+      executing.push(promise);
+    }
+
+    await Promise.all(executing);
+
+    const pagedResult = resultBuilder.build(displayPage);
+
+    Logger.info(this.TAG, 
+      `分页搜索完成: 共${pagedResult.totalCount}本书, ` +
+      `第${pagedResult.currentPage}/${pagedResult.totalPages}页, ` +
+      `成功书源: ${pagedResult.sourceStats.filter((s: SourceSearchStats) => s.success).length}/${enabledSources.length}`
+    );
+
+    return pagedResult;
+  }
+
+  private createMutex(): MutexInterface {
+    let locked = false;
+    const queue: Array<() => void> = [];
+    const mutexObj: MutexInterface = {
+      lock: async (): Promise<void> => {
+        if (locked) {
+          await new Promise<void>((resolve: () => void) => queue.push(resolve));
+        }
+        locked = true;
+      },
+      unlock: (): void => {
+        locked = false;
+        const next = queue.shift();
+        if (next) next();
+      }
+    };
+    return mutexObj;
+  }
+
+  /**
+   * 在多个书源中搜索（兼容旧接口）
    */
   async search(
     sources: BookSource[],
@@ -66,25 +223,20 @@ export class BookSourceSearchEngine {
 
     Logger.info(this.TAG, `开始搜索: "${searchKey}", 书源数: ${sources.length}`);
 
-    // 只使用启用的书源
     const enabledSources = sources.filter((s: BookSource) => s.enabled);
 
-    // 并发控制搜索
     const results: SearchResult[] = [];
     const executing: Promise<void>[] = [];
 
     for (let i = 0; i < enabledSources.length; i++) {
       const source = enabledSources[i];
 
-      // 控制并发数
       if (executing.length >= concurrent) {
         await Promise.race(executing);
       }
 
-      // 检查请求频率
       await this.checkRateLimit(source.url);
 
-      // 执行搜索
       const promise = this.searchSingleSource(source, searchKey, page)
         .then((result: SearchResult) => {
           results.push(result);
@@ -110,7 +262,6 @@ export class BookSourceSearchEngine {
       executing.push(promise);
     }
 
-    // 等待所有搜索完成
     await Promise.all(executing);
 
     Logger.info(this.TAG, `搜索完成: ${results.filter((r: SearchResult) => r.success).length}/${sources.length} 成功`);
@@ -130,16 +281,13 @@ export class BookSourceSearchEngine {
     try {
       Logger.debug(this.TAG, `开始搜索: ${source.name}, 关键词: ${key}`);
 
-      // 1. 构建搜索 URL
-      const searchUrl = await this.buildSearchUrl(source, key, page);
-      if (!searchUrl) {
+      const urlConfig = await this.buildSearchUrlWithConfig(source, key, page);
+      if (!urlConfig.url) {
         throw new Error('无法构建搜索 URL');
       }
 
-      // 2. 发送搜索请求
-      const html = await this.executeSearchRequest(source, searchUrl);
+      const html = await this.executeSearchRequestWithConfig(source, urlConfig);
 
-      // 3. 解析搜索结果
       const books = await this.parseSearchResults(source, html, key);
 
       const responseTime = Date.now() - startTime;
@@ -152,16 +300,21 @@ export class BookSourceSearchEngine {
         responseTime
       };
 
-    } catch {
+    } catch (error) {
       const responseTime = Date.now() - startTime;
-      Logger.error(this.TAG, `搜索失败: ${source.name}`);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : '';
+      Logger.error(this.TAG, `搜索失败: ${source.name}, 错误: ${errorMsg}`);
+      if (errorStack) {
+        Logger.error(this.TAG, `错误堆栈: ${errorStack}`);
+      }
 
       return {
         books: [],
         sourceName: source.name,
         sourceUrl: source.url,
         success: false,
-        error: '搜索失败',
+        error: errorMsg || '搜索失败',
         responseTime
       };
     }
@@ -170,14 +323,26 @@ export class BookSourceSearchEngine {
   /**
    * 构建搜索 URL
    */
-  private async buildSearchUrl(source: BookSource, key: string, page: number): Promise<string> {
+  private async buildSearchUrlWithConfig(source: BookSource, key: string, page: number): Promise<SearchUrlResult> {
     if (!source.searchUrl) {
       throw new Error('书源未配置搜索 URL');
     }
 
     let searchUrl = source.searchUrl;
+    const config: UrlConfig = {
+      method: 'GET',
+      headers: {}
+    };
 
-    // 处理 JS 动态 URL
+    if (source.header) {
+      try {
+        const customHeaders: Record<string, string> = JSON.parse(source.header);
+        config.headers = this.copyHeaders(customHeaders);
+      } catch {
+        Logger.warn(this.TAG, '解析 header 失败');
+      }
+    }
+
     if (searchUrl.includes('@js:') || searchUrl.includes('<js>')) {
       const jsCode = searchUrl.replace(/^@js:/, '').replace(/<js>|<\/js>/g, '');
       const result = await this.jsEngine.executeSearchUrl(jsCode, {
@@ -185,43 +350,134 @@ export class BookSourceSearchEngine {
         page,
         baseUrl: source.url
       });
-      return result;
+      return { url: result, config };
     }
 
-    // 替换占位符
+    const commaIndex = searchUrl.indexOf(',{');
+    if (commaIndex > 0 && searchUrl.endsWith('}')) {
+      try {
+        const urlPart = searchUrl.substring(0, commaIndex);
+        const configPart = searchUrl.substring(commaIndex + 1);
+        const parsedConfig = this.parseUrlConfig(configPart, config.headers);
+        searchUrl = urlPart;
+        config.method = parsedConfig.method;
+        config.body = parsedConfig.body;
+        config.headers = parsedConfig.headers;
+        Logger.debug(this.TAG, `从URL中提取配置，方法: ${config.method}`);
+      } catch {
+        Logger.warn(this.TAG, 'URL配置解析失败');
+      }
+    }
+
     searchUrl = searchUrl
       .replace(/\{\{key\}\}/g, encodeURIComponent(key))
-      .replace(/\{\{page\}\}/g, String(page));
+      .replace(/\{\{page\}\}/g, String(page))
+      .replace(/\{key\}/g, encodeURIComponent(key))
+      .replace(/\{page\}/g, String(page))
+      .replace(/<key>/g, encodeURIComponent(key))
+      .replace(/<page>/g, String(page))
+      .replace(/\$key\$/g, encodeURIComponent(key))
+      .replace(/\$page\$/g, String(page));
 
-    // 处理相对 URL
+    if (config.body) {
+      config.body = config.body
+        .replace(/\{\{key\}\}/g, encodeURIComponent(key))
+        .replace(/\{\{page\}\}/g, String(page))
+        .replace(/\{key\}/g, encodeURIComponent(key))
+        .replace(/\{page\}/g, String(page))
+        .replace(/<key>/g, encodeURIComponent(key))
+        .replace(/<page>/g, String(page))
+        .replace(/\$key\$/g, encodeURIComponent(key))
+        .replace(/\$page\$/g, String(page));
+      Logger.debug(this.TAG, `POST请求体: ${config.body}`);
+    }
+
     if (!searchUrl.startsWith('http')) {
       searchUrl = this.resolveUrl(source.url, searchUrl);
     }
 
-    return searchUrl;
+    return { url: searchUrl, config };
   }
 
-  /**
-   * 执行搜索请求
-   */
-  private async executeSearchRequest(source: BookSource, url: string): Promise<string> {
-    const headers: Record<string, string> = {};
+  private parseUrlConfig(configStr: string, baseHeaders: Record<string, string>): UrlConfig {
+    const config: UrlConfig = {
+      method: 'GET',
+      headers: this.copyHeaders(baseHeaders)
+    };
 
-    if (source.header) {
-      try {
-        const customHeaders: Record<string, string> = JSON.parse(source.header);
-        const keys = Object.keys(customHeaders);
+    try {
+      const parsed = JSON.parse(configStr) as Record<string, string | number | boolean | object | null | undefined>;
+      
+      if (parsed.method && typeof parsed.method === 'string') {
+        const method = parsed.method.toUpperCase();
+        if (method === 'POST') {
+          config.method = 'POST';
+        }
+      }
+
+      if (parsed.body && typeof parsed.body === 'string') {
+        config.body = parsed.body;
+      }
+
+      if (parsed.headers && typeof parsed.headers === 'object') {
+        const headerObj = parsed.headers as Record<string, string>;
+        const keys = Object.keys(headerObj);
         for (let i = 0; i < keys.length; i++) {
           const key = keys[i];
-          headers[key] = customHeaders[key];
+          config.headers[key] = headerObj[key];
         }
-      } catch {
-        Logger.warn(this.TAG, '解析 header 失败');
       }
+
+      const otherKeys = Object.keys(parsed);
+      for (let i = 0; i < otherKeys.length; i++) {
+        const key = otherKeys[i];
+        if (key !== 'method' && key !== 'body' && key !== 'headers') {
+          const value = parsed[key];
+          if (typeof value === 'string') {
+            config.headers[key] = value;
+          }
+        }
+      }
+    } catch (e) {
+      Logger.warn(this.TAG, `解析URL配置失败: ${e}`);
     }
 
-    const html = await NetworkAdapter.get(url, headers);
-    return html;
+    return config;
+  }
+
+  private copyHeaders(source: Record<string, string>): Record<string, string> {
+    const result: Record<string, string> = {};
+    const keys = Object.keys(source);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      result[key] = source[key];
+    }
+    return result;
+  }
+
+  private async executeSearchRequestWithConfig(
+    source: BookSource,
+    urlConfig: SearchUrlResult
+  ): Promise<string> {
+    const url = urlConfig.url;
+    const config = urlConfig.config;
+
+    Logger.info(this.TAG, `执行请求: ${source.name}, URL: ${url}, 方法: ${config.method}`);
+
+    try {
+      let result: string;
+      if (config.method === 'POST') {
+        result = await NetworkAdapter.post(url, config.body || '', config.headers);
+      } else {
+        result = await NetworkAdapter.get(url, config.headers);
+      }
+      Logger.info(this.TAG, `请求成功: ${source.name}, 响应长度: ${result.length}`);
+      return result;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      Logger.error(this.TAG, `请求失败: ${source.name}, URL: ${url}, 错误: ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
   }
 
   /**
@@ -444,6 +700,42 @@ export class BookSourceSearchEngine {
     this.config.requestInterval = config.requestInterval ?? this.config.requestInterval;
     this.config.timeout = config.timeout ?? this.config.timeout;
     this.config.maxResultsPerSource = config.maxResultsPerSource ?? this.config.maxResultsPerSource;
+  }
+
+  /**
+   * 设置分页配置
+   */
+  setPaginationConfig(config: Partial<SearchPaginationConfig>): void {
+    if (config.pageSize !== undefined) {
+      this.paginationConfig.pageSize = Math.max(5, Math.min(50, config.pageSize));
+    }
+    if (config.maxResultsPerSource !== undefined) {
+      this.paginationConfig.maxResultsPerSource = Math.max(5, Math.min(100, config.maxResultsPerSource));
+    }
+    if (config.maxTotalResults !== undefined) {
+      this.paginationConfig.maxTotalResults = Math.max(50, Math.min(500, config.maxTotalResults));
+    }
+    if (config.enableDeduplication !== undefined) {
+      this.paginationConfig.enableDeduplication = config.enableDeduplication;
+    }
+    if (config.sortByRelevance !== undefined) {
+      this.paginationConfig.sortByRelevance = config.sortByRelevance;
+    }
+    Logger.info(this.TAG, `分页配置已更新: pageSize=${this.paginationConfig.pageSize}, maxPerSource=${this.paginationConfig.maxResultsPerSource}`);
+  }
+
+  /**
+   * 获取分页配置
+   */
+  getPaginationConfig(): SearchPaginationConfig {
+    const config: SearchPaginationConfig = {
+      pageSize: this.paginationConfig.pageSize,
+      maxResultsPerSource: this.paginationConfig.maxResultsPerSource,
+      maxTotalResults: this.paginationConfig.maxTotalResults,
+      enableDeduplication: this.paginationConfig.enableDeduplication,
+      sortByRelevance: this.paginationConfig.sortByRelevance
+    };
+    return config;
   }
 
   /**

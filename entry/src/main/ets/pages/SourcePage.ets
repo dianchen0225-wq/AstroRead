@@ -15,7 +15,7 @@
 
 import { themeManager } from '../common/ThemeManager';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
-import { ImportResult } from '../viewmodel/BookSourceViewModel';
+import { ImportResult, DeleteResult } from '../viewmodel/BookSourceViewModel';
 import { BookSource } from '../models/BookSource';
 import { SecurityScanResult, SecurityRisk, SecurityRiskLevel } from '../utils/SourceSandbox';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -27,6 +27,7 @@ import { DesignSystem } from '../common/DesignSystem';
 import { Logger } from '../utils/Logger';
 import { NetworkManager } from '../utils/NetworkManager';
 import { SourceImportTaskPool } from '../utils/SourceImportTaskPool';
+import promptAction from '@ohos.promptAction';
 
 export interface SourceItemData {
   name: string;
@@ -36,10 +37,20 @@ export interface SourceItemData {
   isValidating: boolean;
 }
 
+export interface DeleteConfirmState {
+  show: boolean;
+  count: number;
+  isDeleting: boolean;
+}
+
 @ComponentV2
 export struct SourcePage {
   @Local isLightMode: boolean = true;
   @Local sourceList: SourceItemData[] = [];
+  @Local allSourceList: SourceItemData[] = [];
+  @Local searchKeyword: string = '';
+  @Local isSearching: boolean = false;
+  @Local searchResultCount: number = 0;
   @Local showImportDialog: boolean = false;
   @Local importUrl: string = '';
   @Local isImporting: boolean = false;
@@ -56,10 +67,15 @@ export struct SourcePage {
   @Local currentPage: number = 1;
   @Local isLoadingMore: boolean = false;
   @Local hasMore: boolean = true;
+  @Local showDeleteConfirm: boolean = false;
+  @Local disabledSourceCount: number = 0;
+  @Local isDeletingDisabled: boolean = false;
   
   private readonly PAGE_SIZE: number = 50;
   private isComponentActive: boolean = false;
   private decoder = util.TextDecoder.create('utf-8');
+  private searchDebounceTimer: number = 0;
+  private readonly SEARCH_DEBOUNCE_DELAY: number = 300;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -75,8 +91,13 @@ export struct SourcePage {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
     this.sourceList = [];
+    this.allSourceList = [];
     this.securityScanResult = null;
     this.pendingImportContent = '';
+    if (this.searchDebounceTimer !== 0) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = 0;
+    }
   }
 
   async loadSources() {
@@ -102,8 +123,12 @@ export struct SourcePage {
           return item;
         });
       
+      this.allSourceList = this.sourceList.slice();
+      this.disabledSourceCount = this.allSourceList.filter((s: SourceItemData) => !s.enabled).length;
+      this.searchResultCount = this.sourceList.length;
+      
       this.hasMore = this.sourceList.length < this.totalCount;
-      Logger.info('SourcePage', `加载了 ${this.sourceList.length} 个书源，共 ${this.totalCount} 个`);
+      Logger.info('SourcePage', `加载了 ${this.sourceList.length} 个书源，共 ${this.totalCount} 个，禁用 ${this.disabledSourceCount} 个`);
     } catch (error) {
       Logger.error('SourcePage', `加载书源失败: ${error}`);
     }
@@ -152,6 +177,120 @@ export struct SourcePage {
       const enabled: boolean = !source.enabled;
       await bookSourceViewModel.toggleBookSource(id, enabled);
       await this.loadSources();
+    }
+  }
+  
+  onSearchKeywordChange(keyword: string): void {
+    this.searchKeyword = keyword;
+    
+    if (this.searchDebounceTimer !== 0) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = 0;
+    }
+    
+    this.searchDebounceTimer = setTimeout(() => {
+      this.performSearch(keyword);
+    }, this.SEARCH_DEBOUNCE_DELAY);
+  }
+  
+  performSearch(keyword: string): void {
+    if (!this.isComponentActive) return;
+    
+    this.isSearching = true;
+    
+    if (!keyword || keyword.trim().length === 0) {
+      this.sourceList = this.allSourceList.slice();
+      this.searchResultCount = this.sourceList.length;
+      this.isSearching = false;
+      return;
+    }
+    
+    const lowerKeyword = keyword.toLowerCase().trim();
+    const filtered = this.allSourceList.filter((item: SourceItemData) => {
+      return item.name.toLowerCase().includes(lowerKeyword) ||
+             item.status.toLowerCase().includes(lowerKeyword);
+    });
+    
+    this.sourceList = filtered;
+    this.searchResultCount = filtered.length;
+    this.isSearching = false;
+    
+    Logger.info('SourcePage', `搜索 "${keyword}" 找到 ${filtered.length} 个结果`);
+  }
+  
+  clearSearch(): void {
+    this.searchKeyword = '';
+    this.sourceList = this.allSourceList.slice();
+    this.searchResultCount = this.sourceList.length;
+  }
+  
+  async countDisabledSources(): Promise<number> {
+    let count = 0;
+    for (const item of this.allSourceList) {
+      if (!item.enabled) {
+        count++;
+      }
+    }
+    return count;
+  }
+  
+  showDeleteDisabledConfirm(): void {
+    this.disabledSourceCount = this.allSourceList.filter((s: SourceItemData) => !s.enabled).length;
+    if (this.disabledSourceCount === 0) {
+      promptAction.showToast({
+        message: '没有禁用的书源',
+        duration: 2000
+      });
+      return;
+    }
+    this.showDeleteConfirm = true;
+  }
+  
+  async deleteDisabledSources(): Promise<void> {
+    if (this.isDeletingDisabled) return;
+    
+    this.isDeletingDisabled = true;
+    this.showDeleteConfirm = false;
+    
+    try {
+      const disabledIds: string[] = [];
+      for (const item of this.allSourceList) {
+        if (!item.enabled && item.id) {
+          disabledIds.push(item.id);
+        }
+      }
+      
+      if (disabledIds.length === 0) {
+        promptAction.showToast({
+          message: '没有禁用的书源',
+          duration: 2000
+        });
+        return;
+      }
+      
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result: DeleteResult = await bookSourceViewModel.batchDeleteBookSources(disabledIds);
+      
+      if (result.success) {
+        promptAction.showToast({
+          message: `成功删除 ${result.count || disabledIds.length} 个禁用书源`,
+          duration: 2000
+        });
+        await this.loadSources();
+      } else {
+        promptAction.showToast({
+          message: result.message || '删除失败',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('SourcePage', `删除禁用书源失败: ${error}`);
+      promptAction.showToast({
+        message: '删除失败',
+        duration: 2000
+      });
+    } finally {
+      this.isDeletingDisabled = false;
     }
   }
 
@@ -486,6 +625,55 @@ export struct SourcePage {
 
         Column() {
           Row() {
+            TextInput({ placeholder: '搜索书源名称...', text: this.searchKeyword })
+              .layoutWeight(1)
+              .height(40)
+              .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+              .borderRadius(12)
+              .padding({ left: 12, right: 12 })
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .placeholderColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              .onChange((value: string) => {
+                this.onSearchKeywordChange(value);
+              })
+            
+            if (this.searchKeyword.length > 0) {
+              Button() {
+                Text('✕')
+                  .fontSize(16)
+                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              }
+              .width(40)
+              .height(40)
+              .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+              .borderRadius(12)
+              .margin({ left: 8 })
+              .onClick(() => {
+                this.clearSearch();
+              })
+            }
+          }
+          .width('100%')
+          .margin({ bottom: 10 })
+          
+          if (this.searchKeyword.length > 0) {
+            Row() {
+              if (this.isSearching) {
+                LoadingProgress()
+                  .width(14)
+                  .height(14)
+                  .color(DesignSystem.getPrimaryColor(this.isLightMode))
+                  .margin({ right: 6 })
+              }
+              Text(`找到 ${this.searchResultCount} 个匹配书源`)
+                .fontSize(12)
+                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+            }
+            .width('100%')
+            .margin({ bottom: 8 })
+          }
+
+          Row() {
             Button() {
               Row() {
                 Text('🌐')
@@ -568,6 +756,44 @@ export struct SourcePage {
           }
           .width('100%')
           .margin({ bottom: 10 })
+          
+          if (this.disabledSourceCount > 0) {
+            Row() {
+              Text(`禁用书源: ${this.disabledSourceCount} 个`)
+                .fontSize(12)
+                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                .layoutWeight(1)
+              
+              Button() {
+                Row() {
+                  if (this.isDeletingDisabled) {
+                    LoadingProgress()
+                      .width(14)
+                      .height(14)
+                      .color('#fff')
+                      .margin({ right: 4 })
+                  }
+                  Text(this.isDeletingDisabled ? '删除中...' : '删除禁用书源')
+                    .fontSize(12)
+                    .fontColor('#fff')
+                }
+              }
+              .height(32)
+              .backgroundColor('#f44336')
+              .borderRadius(8)
+              .padding({ left: 12, right: 12 })
+              .enabled(!this.isDeletingDisabled && !this.isImporting && !this.isUpdating)
+              .onClick(() => {
+                this.showDeleteDisabledConfirm();
+              })
+            }
+            .width('100%')
+            .padding({ top: 8, bottom: 8 })
+            .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+            .borderRadius(8)
+            .padding({ left: 12, right: 12 })
+            .margin({ bottom: 10 })
+          }
 
           if (this.isUpdating && this.updateProgress) {
             Row() {
@@ -926,6 +1152,79 @@ export struct SourcePage {
         .height('100%')
         .backgroundColor('rgba(0, 0, 0, 0.6)')
         .justifyContent(FlexAlign.Center)
+      }
+      
+      if (this.showDeleteConfirm) {
+        Column() {
+          Column() {
+            Row() {
+              Text('🗑️')
+                .fontSize(24)
+              Text('确认删除')
+                .fontSize(18)
+                .fontWeight(600)
+                .fontColor('#f44336')
+                .margin({ left: 8 })
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Center)
+            .margin({ bottom: 16 })
+
+            Text(`确定要删除 ${this.disabledSourceCount} 个禁用的书源吗？`)
+              .fontSize(14)
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 8 })
+
+            Text('此操作不可撤销，删除后需要重新导入书源。')
+              .fontSize(12)
+              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 20 })
+
+            Row() {
+              Button('取消')
+                .layoutWeight(1)
+                .height(44)
+                .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                .borderRadius(8)
+                .margin({ right: 10 })
+                .onClick(() => {
+                  this.showDeleteConfirm = false;
+                })
+
+              Button('确认删除')
+                .layoutWeight(1)
+                .height(44)
+                .backgroundColor('#f44336')
+                .fontColor('#fff')
+                .borderRadius(8)
+                .onClick(() => {
+                  this.deleteDisabledSources();
+                })
+            }
+            .width('100%')
+          }
+          .width('90%')
+          .constraintSize({ maxWidth: 400 })
+          .padding(24)
+          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .borderRadius(16)
+          .border({
+            width: 2,
+            color: '#f44336'
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(0, 0, 0, 0.5)')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.showDeleteConfirm = false;
+        })
       }
     }
     .width('100%')

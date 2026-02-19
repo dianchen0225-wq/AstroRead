@@ -23,6 +23,12 @@ interface NetworkSecurityOptions {
   maxResponseSize: number;
 }
 
+interface UrlConfig {
+  method: 'GET' | 'POST';
+  body?: string;
+  headers: HttpHeaderMap;
+}
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
   baseDelay: 1000,
@@ -471,7 +477,7 @@ export class NetworkManager {
       searchUrl = searchUrl.trim();
       Logger.info(TAG, `原始搜索URL模板: ${searchUrl}`);
 
-      let headers: HttpHeaderMap | undefined = undefined;
+      let headers: HttpHeaderMap = new Map<string, string>();
       if (bookSource.header) {
         try {
           headers = this.parseHeaderString(bookSource.header);
@@ -482,6 +488,10 @@ export class NetworkManager {
       }
 
       let finalUrl = '';
+      let urlConfig: UrlConfig = {
+        method: 'GET',
+        headers: headers
+      };
 
       if (searchUrl.startsWith('@js:')) {
         Logger.info(TAG, `执行JavaScript书源: ${bookSource.name}`);
@@ -503,6 +513,19 @@ export class NetworkManager {
       } else {
         finalUrl = searchUrl;
 
+        const commaIndex = finalUrl.indexOf(',{');
+        if (commaIndex > 0 && finalUrl.endsWith('}')) {
+          try {
+            const urlPart = finalUrl.substring(0, commaIndex);
+            const configPart = finalUrl.substring(commaIndex + 1);
+            urlConfig = this.parseUrlConfig(configPart, headers);
+            finalUrl = urlPart;
+            Logger.info(TAG, `从URL中提取配置，方法: ${urlConfig.method}, 最终URL: ${finalUrl}`);
+          } catch (e) {
+            Logger.warn(TAG, `URL配置解析失败，保持原URL`);
+          }
+        }
+
         if (finalUrl.includes('{{key}}')) {
           finalUrl = finalUrl.replace(/\{\{key\}\}/g, encodeURIComponent(keyword));
         }
@@ -515,27 +538,17 @@ export class NetworkManager {
           finalUrl = finalUrl.replace(/\{\{\(page - 1\) \* 10\}\}/g, String((page - 1) * 10));
         }
 
-        const commaIndex = finalUrl.indexOf(',{');
-        if (commaIndex > 0 && finalUrl.endsWith('}')) {
-          try {
-            const urlPart = finalUrl.substring(0, commaIndex);
-            const configPart = finalUrl.substring(commaIndex + 1);
-            const config = this.parseHeaderString(configPart);
-            if (config && headers) {
-              const configKeys = Array.from(config.keys());
-              for (let i = 0; i < configKeys.length; i++) {
-                const key = configKeys[i];
-                const value = config.get(key);
-                if (value !== undefined) {
-                  headers.set(key, value);
-                }
-              }
-            }
-            finalUrl = urlPart;
-            Logger.info(TAG, `从URL中提取配置，最终URL: ${finalUrl}`);
-          } catch (e) {
-            Logger.warn(TAG, `URL配置解析失败，保持原URL`);
+        if (urlConfig.body) {
+          if (urlConfig.body.includes('{{key}}')) {
+            urlConfig.body = urlConfig.body.replace(/\{\{key\}\}/g, encodeURIComponent(keyword));
           }
+          if (urlConfig.body.includes('{{page}}')) {
+            urlConfig.body = urlConfig.body.replace(/\{\{page\}\}/g, String(page));
+          }
+          if (urlConfig.body.includes('{{(page - 1) * 10}}')) {
+            urlConfig.body = urlConfig.body.replace(/\{\{\(page - 1\) \* 10\}\}/g, String((page - 1) * 10));
+          }
+          Logger.info(TAG, `POST请求体: ${urlConfig.body}`);
         }
       }
 
@@ -559,11 +572,15 @@ export class NetworkManager {
         }
       }
 
-      Logger.info(TAG, `最终搜索URL: ${finalUrl}`);
+      Logger.info(TAG, `最终搜索URL: ${finalUrl}, 方法: ${urlConfig.method}`);
       
       let html: string;
       try {
-        html = await this.get(finalUrl, headers);
+        if (urlConfig.method === 'POST') {
+          html = await this.post(finalUrl, urlConfig.body || '', urlConfig.headers);
+        } else {
+          html = await this.get(finalUrl, urlConfig.headers);
+        }
         Logger.info(TAG, `获取到HTML内容，长度: ${html.length} 字符`);
       } catch (netError) {
         Logger.error(TAG, `网络请求失败: ${netError instanceof Error ? netError.message : String(netError)}`);
@@ -578,7 +595,6 @@ export class NetworkManager {
       const results: ParsedBookItem[] = ContentParser.parseSearchResult(html, bookSource);
       Logger.info(TAG, `书源 ${bookSource.name} 找到 ${results.length} 条结果`);
 
-      // 转换为Book对象
       const books = results.map((item: ParsedBookItem) => this.convertToBook(item, bookSource));
       Logger.info(TAG, `========== 搜索完成 ==========`);
       return books;
@@ -605,6 +621,55 @@ export class NetworkManager {
       // 解析失败，返回空map
     }
     return map;
+  }
+
+  private parseUrlConfig(configStr: string, baseHeaders: HttpHeaderMap): UrlConfig {
+    const config: UrlConfig = {
+      method: 'GET',
+      headers: new Map<string, string>(baseHeaders)
+    };
+
+    try {
+      const parsed = JSON.parse(configStr) as Record<string, string | number | boolean | object | null | undefined>;
+      
+      if (parsed.method && typeof parsed.method === 'string') {
+        const method = parsed.method.toUpperCase();
+        if (method === 'POST') {
+          config.method = 'POST';
+        }
+      }
+
+      if (parsed.body && typeof parsed.body === 'string') {
+        config.body = parsed.body;
+      }
+
+      if (parsed.headers && typeof parsed.headers === 'object') {
+        const headerObj = parsed.headers as Record<string, string>;
+        const keys = Object.keys(headerObj);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          const value = headerObj[key];
+          if (typeof value === 'string') {
+            config.headers.set(key, value);
+          }
+        }
+      }
+
+      const otherKeys = Object.keys(parsed);
+      for (let i = 0; i < otherKeys.length; i++) {
+        const key = otherKeys[i];
+        if (key !== 'method' && key !== 'body' && key !== 'headers') {
+          const value = parsed[key];
+          if (typeof value === 'string') {
+            config.headers.set(key, value);
+          }
+        }
+      }
+    } catch (e) {
+      Logger.warn('NetworkManager', `解析URL配置失败: ${e}`);
+    }
+
+    return config;
   }
 
   /**

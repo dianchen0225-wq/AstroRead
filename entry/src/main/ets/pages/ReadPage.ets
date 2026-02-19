@@ -22,6 +22,7 @@ import { BookSource } from '../models/BookSource';
 import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
+import { NavigationManager } from '../common/NavigationManager';
 import { router } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import common from '@ohos.app.ability.common';
@@ -279,11 +280,7 @@ struct ReadPage {
             .margin({ right: 15 })
             .onClick(() => {
               this.updateReadProgress();
-              try {
-                router.back();
-              } catch (error) {
-                Logger.error('ReadPage', `返回失败: ${error}`);
-              }
+              NavigationManager.getInstance().navigateBack();
             })
 
             if (this.book) {
