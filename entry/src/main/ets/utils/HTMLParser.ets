@@ -5,6 +5,7 @@
 
 import { Logger } from './Logger';
 import { EntityDecoder } from '../core/utils/EntityDecoder';
+import { CssSelectorParser } from './CssSelectorParser';
 
 export interface ParseResult {
   text: string;
@@ -28,30 +29,48 @@ export class HTMLParser {
 
   /**
    * 解析 HTML 并提取元素
-   * 支持：xpath、css selector、jsonpath、正则
+   * 支持：xpath、css selector、jsonpath、正则、Legado格式
    */
   parse(html: string, rule: string): string[] {
-    if (!html || !rule) return [];
+    if (!html || !rule) {
+      Logger.debug(this.TAG, `解析参数为空: html=${html ? '有内容' : '空'}, rule=${rule || '空'}`);
+      return [];
+    }
 
     try {
       // 检测规则类型
       if (rule.startsWith('@json:')) {
+        Logger.debug(this.TAG, `使用JSON解析: ${rule.substring(6)}`);
         return this.parseJsonPath(html, rule.substring(6));
       }
       if (rule.startsWith('##') || rule.startsWith('@regex:')) {
         const regexRule = rule.startsWith('##') ? rule.substring(2) : rule.substring(7);
+        Logger.debug(this.TAG, `使用正则解析: ${regexRule}`);
         return this.parseRegex(html, regexRule);
       }
       if (rule.includes('$.') || rule.startsWith('$[')) {
+        Logger.debug(this.TAG, `使用JSONPath解析: ${rule}`);
         return this.parseJsonPath(html, rule);
       }
       if (rule.startsWith('//')) {
+        Logger.debug(this.TAG, `使用XPath解析: ${rule}`);
         return this.parseXPath(html, rule);
       }
+      
+      // Legado格式规则（如 class.bookbox@tag.div 或 @css:.book）
+      if (rule.startsWith('class.') || rule.startsWith('tag.') || rule.startsWith('@css:') || rule.includes('@')) {
+        Logger.debug(this.TAG, `使用Legado格式解析: ${rule}`);
+        const elements = CssSelectorParser.selectElements(html, rule);
+        Logger.debug(this.TAG, `Legado格式解析结果: ${elements.length} 个元素`);
+        return elements;
+      }
+      
       // 默认按 CSS Selector 处理
+      Logger.debug(this.TAG, `使用CSS选择器解析: ${rule}`);
       return this.parseCSSSelector(html, rule);
     } catch (error) {
-      Logger.error(this.TAG, `解析失败: ${error}`);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      Logger.error(this.TAG, `解析失败: 规则=${rule}, 错误=${errorMsg}`);
       return [];
     }
   }

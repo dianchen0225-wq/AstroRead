@@ -15,6 +15,7 @@
 
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
+import { router } from '@kit.ArkUI';
 
 @ComponentV2
 export struct SettingsPage {
@@ -202,6 +203,23 @@ export struct SettingsPage {
             })
             .onClick(() => {
               this.cacheSize = '0MB';
+            })
+
+            Row() {
+              Text('调试日志')
+                .fontSize(14)
+                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+
+              Text('›')
+                .fontSize(20)
+                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+            }
+            .width('100%')
+            .padding({ top: 12, bottom: 12 })
+            .onClick(() => {
+              router.pushUrl({
+                url: 'pages/DebugLogPage'
+              });
             })
 
             Row() {

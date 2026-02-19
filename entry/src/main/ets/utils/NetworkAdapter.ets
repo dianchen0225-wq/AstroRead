@@ -19,12 +19,73 @@ export interface NetworkRequestOptions {
   type?: string;
 }
 
+export interface NetworkError {
+  type: 'timeout' | 'ssl' | 'dns' | 'http' | 'network' | 'unknown';
+  message: string;
+  statusCode?: number;
+}
+
+const DEFAULT_TIMEOUT = 10000;
+const MAX_TIMEOUT = 30000;
+
+const DEFAULT_USER_AGENTS: string[] = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15'
+];
+
 export class NetworkAdapter {
   private static instance: NetworkAdapter | null = null;
   private readonly TAG = 'NetworkAdapter';
   private defaultHeaders: Map<string, string> = new Map();
+  private userAgentIndex: number = 0;
 
-  private constructor() {}
+  private constructor() {
+    this.initDefaultHeaders();
+  }
+
+  private initDefaultHeaders(): void {
+    this.defaultHeaders.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8');
+    this.defaultHeaders.set('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8');
+    this.defaultHeaders.set('Accept-Encoding', 'gzip, deflate');
+    this.defaultHeaders.set('Cache-Control', 'no-cache');
+    this.defaultHeaders.set('Pragma', 'no-cache');
+    this.defaultHeaders.set('Connection', 'keep-alive');
+    this.defaultHeaders.set('Upgrade-Insecure-Requests', '1');
+  }
+
+  private getRandomUserAgent(): string {
+    const ua = DEFAULT_USER_AGENTS[this.userAgentIndex];
+    this.userAgentIndex = (this.userAgentIndex + 1) % DEFAULT_USER_AGENTS.length;
+    return ua;
+  }
+
+  private extractReferer(url: string): string {
+    if (!url) return '';
+    
+    const protocolEnd = url.indexOf('://');
+    if (protocolEnd === -1) return '';
+    
+    const protocol = url.substring(0, protocolEnd + 3);
+    const hostStart = protocolEnd + 3;
+    const pathStart = url.indexOf('/', hostStart);
+    
+    let hostname: string;
+    if (pathStart === -1) {
+      hostname = url.substring(hostStart);
+    } else {
+      hostname = url.substring(hostStart, pathStart);
+    }
+    
+    const portIndex = hostname.indexOf(':');
+    if (portIndex !== -1) {
+      hostname = hostname.substring(0, portIndex);
+    }
+    
+    return `${protocol}${hostname}/`;
+  }
 
   static getInstance(): NetworkAdapter {
     if (!NetworkAdapter.instance) {
@@ -62,21 +123,34 @@ export class NetworkAdapter {
       const method: 'GET' | 'POST' = options.method || 'GET';
       const headers: Record<string, string> = options.headers || {};
       
+      if (!headers['User-Agent']) {
+        headers['User-Agent'] = this.getRandomUserAgent();
+      }
+      
+      if (!headers['Referer'] && url) {
+        const referer = this.extractReferer(url);
+        if (referer) {
+          headers['Referer'] = referer;
+        }
+      }
+      
       this.defaultHeaders.forEach((value: string, key: string) => {
         if (!headers[key]) {
           headers[key] = value;
         }
       });
 
+      const timeout = Math.min(options.timeout || DEFAULT_TIMEOUT, MAX_TIMEOUT);
+      
       const requestOptions: http.HttpRequestOptions = {
         method: method === 'GET' ? http.RequestMethod.GET : http.RequestMethod.POST,
         header: headers,
         extraData: options.body || '',
-        readTimeout: options.timeout || 30000,
-        connectTimeout: options.timeout || 30000,
+        readTimeout: timeout,
+        connectTimeout: timeout,
       };
 
-      Logger.debug(this.TAG, `发起请求: ${url}, 方法: ${method}`);
+      Logger.debug(this.TAG, `发起请求: ${url}, 方法: ${method}, 超时: ${timeout}ms`);
 
       httpRequest.request(url, requestOptions, (err: Error | null, data: http.HttpResponse) => {
         if (!err && data) {
@@ -86,17 +160,84 @@ export class NetworkAdapter {
           
           if (responseCode >= 200 && responseCode < 300) {
             resolve(result);
+          } else if (responseCode === 403) {
+            const networkError: NetworkError = {
+              type: 'http',
+              message: '访问被拒绝(403)，可能触发了反爬机制',
+              statusCode: 403
+            };
+            reject(new Error(`NETWORK_ERROR:${JSON.stringify(networkError)}`));
+          } else if (responseCode === 404) {
+            const networkError: NetworkError = {
+              type: 'http',
+              message: '页面不存在(404)',
+              statusCode: 404
+            };
+            reject(new Error(`NETWORK_ERROR:${JSON.stringify(networkError)}`));
+          } else if (responseCode >= 500) {
+            const networkError: NetworkError = {
+              type: 'http',
+              message: `服务器错误(${responseCode})`,
+              statusCode: responseCode
+            };
+            reject(new Error(`NETWORK_ERROR:${JSON.stringify(networkError)}`));
           } else {
             reject(new Error(`HTTP ${responseCode}: ${result.substring(0, 200)}`));
           }
         } else {
           const errorMsg = err?.message || 'Unknown error';
-          Logger.error(this.TAG, `请求失败: ${url}, 错误: ${errorMsg}`);
-          reject(new Error(`HTTP Error: ${errorMsg}`));
+          const lowerErrorMsg = errorMsg.toLowerCase();
+          
+          let networkError: NetworkError;
+          
+          if (lowerErrorMsg.includes('timeout') || lowerErrorMsg.includes('timed out')) {
+            networkError = {
+              type: 'timeout',
+              message: `请求超时(${timeout}ms)`
+            };
+          } else if (lowerErrorMsg.includes('ssl') || lowerErrorMsg.includes('certificate') || lowerErrorMsg.includes('cert')) {
+            networkError = {
+              type: 'ssl',
+              message: 'SSL证书错误'
+            };
+          } else if (lowerErrorMsg.includes('resolve') || lowerErrorMsg.includes('dns') || lowerErrorMsg.includes('host')) {
+            networkError = {
+              type: 'dns',
+              message: '域名解析失败'
+            };
+          } else if (lowerErrorMsg.includes('network') || lowerErrorMsg.includes('connection')) {
+            networkError = {
+              type: 'network',
+              message: '网络连接失败'
+            };
+          } else {
+            networkError = {
+              type: 'unknown',
+              message: errorMsg
+            };
+          }
+          
+          Logger.error(this.TAG, `请求失败: ${url}, 错误类型: ${networkError.type}, 消息: ${networkError.message}`);
+          reject(new Error(`NETWORK_ERROR:${JSON.stringify(networkError)}`));
         }
         httpRequest.destroy();
       });
     });
+  }
+
+  parseNetworkError(errorMsg: string): NetworkError {
+    if (errorMsg.startsWith('NETWORK_ERROR:')) {
+      try {
+        const jsonStr = errorMsg.substring('NETWORK_ERROR:'.length);
+        return JSON.parse(jsonStr) as NetworkError;
+      } catch {
+        // ignore
+      }
+    }
+    return {
+      type: 'unknown',
+      message: errorMsg
+    };
   }
 
   setDefaultHeader(key: string, value: string): void {

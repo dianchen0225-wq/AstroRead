@@ -2,6 +2,8 @@
  * 日志工具类 - 统一的日志管理
  */
 
+import { logCollector } from './LogCollector';
+
 class Logger {
   
   private static isDebugEnabled: boolean = true;
@@ -48,30 +50,38 @@ class Logger {
    * 调试日志
    */
   static debug(tag: string, message: string): void {
+    const filteredMessage = Logger.filterSensitiveInfo(message);
     if (Logger.isDebugEnabled) {
-      console.debug(`[DEBUG][${tag}] ${Logger.filterSensitiveInfo(message)}`);
+      console.debug(`[DEBUG][${tag}] ${filteredMessage}`);
     }
+    logCollector.addLog('debug', tag, filteredMessage);
   }
-  
+
   /**
    * 信息日志
    */
   static info(tag: string, message: string): void {
-    console.info(`[INFO][${tag}] ${Logger.filterSensitiveInfo(message)}`);
+    const filteredMessage = Logger.filterSensitiveInfo(message);
+    console.info(`[INFO][${tag}] ${filteredMessage}`);
+    logCollector.addLog('info', tag, filteredMessage);
   }
-  
+
   /**
    * 警告日志
    */
   static warn(tag: string, message: string): void {
-    console.warn(`[WARN][${tag}] ${Logger.filterSensitiveInfo(message)}`);
+    const filteredMessage = Logger.filterSensitiveInfo(message);
+    console.warn(`[WARN][${tag}] ${filteredMessage}`);
+    logCollector.addLog('warn', tag, filteredMessage);
   }
-  
+
   /**
    * 错误日志
    */
   static error(tag: string, message: string): void {
-    console.error(`[ERROR][${tag}] ${Logger.filterSensitiveInfo(message)}`);
+    const filteredMessage = Logger.filterSensitiveInfo(message);
+    console.error(`[ERROR][${tag}] ${filteredMessage}`);
+    logCollector.addLog('error', tag, filteredMessage);
   }
   
   /**

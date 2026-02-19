@@ -13,10 +13,11 @@ import {
   SearchResultBuilder,
   SearchProgress
 } from '../models/SearchResult';
-import NetworkAdapter from './NetworkAdapter';
+import NetworkAdapter, { NetworkError } from './NetworkAdapter';
 import { HTMLParser } from './HTMLParser';
 import { EnhancedJSEngine } from './EnhancedJSEngine';
 import { Logger } from './Logger';
+import { sourceHealthManager } from './SourceHealthManager';
 
 export interface SearchResult {
   books: Book[];
@@ -63,9 +64,9 @@ export class BookSourceSearchEngine {
   private readonly TAG = 'BookSourceSearchEngine';
 
   private config: SearchConfig = {
-    maxConcurrent: 3,
-    requestInterval: 1000,
-    timeout: 30000,
+    maxConcurrent: 5,
+    requestInterval: 500,
+    timeout: 10000,
     maxResultsPerSource: 20
   };
 
@@ -106,12 +107,27 @@ export class BookSourceSearchEngine {
     };
 
     const resultBuilder = new SearchResultBuilder(config);
-    const enabledSources = sources.filter((s: BookSource) => s.enabled);
+    const enabledSources = sources.filter((s: BookSource) => {
+      if (!s.enabled) {
+        return false;
+      }
+      if (!sourceHealthManager.isSourceEnabled(s.id)) {
+        Logger.debug(this.TAG, `跳过已禁用的书源: ${s.name}`);
+        return false;
+      }
+      return true;
+    });
 
-    Logger.info(this.TAG, `开始分页搜索: "${searchKey}", 书源数: ${enabledSources.length}, 每页: ${pageSize}`);
+    const sortedSources = enabledSources.sort((a: BookSource, b: BookSource) => {
+      const scoreA = sourceHealthManager.getSourceScore(a.id);
+      const scoreB = sourceHealthManager.getSourceScore(b.id);
+      return scoreB - scoreA;
+    });
+
+    Logger.info(this.TAG, `开始分页搜索: "${searchKey}", 书源数: ${sortedSources.length}, 每页: ${pageSize}`);
 
     const progress: SearchProgress = {
-      totalSources: enabledSources.length,
+      totalSources: sortedSources.length,
       completedSources: 0,
       currentSource: '',
       foundBooks: 0,
@@ -121,8 +137,8 @@ export class BookSourceSearchEngine {
     const executing: Promise<void>[] = [];
     const mutex = this.createMutex();
 
-    for (let i = 0; i < enabledSources.length; i++) {
-      const source = enabledSources[i];
+    for (let i = 0; i < sortedSources.length; i++) {
+      const source = sortedSources[i];
 
       if (executing.length >= concurrent) {
         await Promise.race(executing);
@@ -140,6 +156,13 @@ export class BookSourceSearchEngine {
             result.error,
             result.responseTime
           );
+          
+          if (result.success) {
+            sourceHealthManager.recordSuccess(source.id, source.name, source.url, result.responseTime);
+          } else {
+            const networkError = this.parseNetworkError(result.error || '');
+            sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
+          }
 
           if (progressCallback) {
             progress.completedSources++;
@@ -151,6 +174,10 @@ export class BookSourceSearchEngine {
         })
         .catch((error: Error) => {
           Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
+          
+          const networkError = this.parseNetworkError(error.message);
+          sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
+          
           resultBuilder.addSourceResult(
             source.id,
             source.name,
@@ -472,6 +499,7 @@ export class BookSourceSearchEngine {
         result = await NetworkAdapter.get(url, config.headers);
       }
       Logger.info(this.TAG, `请求成功: ${source.name}, 响应长度: ${result.length}`);
+      Logger.debug(this.TAG, `响应内容片段[${source.name}]: ${result.substring(0, 1000)}`);
       return result;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -492,28 +520,41 @@ export class BookSourceSearchEngine {
     const searchRule = source.searchRule;
 
     if (!searchRule) {
+      Logger.error(this.TAG, `书源未配置搜索规则: ${source.name}`);
       throw new Error('书源未配置搜索规则');
     }
+
+    Logger.debug(this.TAG, `开始解析: ${source.name}, 列表规则: ${searchRule.bookList}`);
 
     // 1. 获取书籍列表
     const bookListHtml = this.htmlParser.parse(html, searchRule.bookList);
 
     if (!bookListHtml || bookListHtml.length === 0) {
+      Logger.warn(this.TAG, `解析结果为空: ${source.name}, 列表规则: ${searchRule.bookList}`);
+      Logger.debug(this.TAG, `HTML前500字符: ${html.substring(0, 500)}`);
       return books;
     }
 
+    Logger.info(this.TAG, `解析到 ${bookListHtml.length} 个书籍块: ${source.name}`);
+
     // 2. 遍历每本书
-    for (const bookHtml of bookListHtml) {
+    for (let i = 0; i < bookListHtml.length; i++) {
+      const bookHtml = bookListHtml[i];
       try {
         const book = await this.parseSingleBook(source, bookHtml, key);
         if (book && book.name) {
           books.push(book);
+          Logger.debug(this.TAG, `解析书籍成功: ${book.name} - ${book.author || '未知作者'}`);
+        } else {
+          Logger.debug(this.TAG, `第 ${i + 1} 个书籍块解析返回空`);
         }
-      } catch {
-        Logger.warn(this.TAG, '解析单本书失败');
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        Logger.warn(this.TAG, `解析第 ${i + 1} 本书失败: ${errorMsg}`);
       }
     }
 
+    Logger.info(this.TAG, `解析完成: ${source.name}, 成功 ${books.length}/${bookListHtml.length} 本`);
     return books;
   }
 
@@ -529,10 +570,14 @@ export class BookSourceSearchEngine {
 
     // 提取书名
     const name = await this.extractField(html, searchRule.name, source);
-    if (!name) return null;
+    if (!name) {
+      Logger.debug(this.TAG, `书名提取失败: 书源=${source.name}, 规则=${searchRule.name}, HTML片段=${html.substring(0, 200)}`);
+      return null;
+    }
 
     // 提取作者
     const author = await this.extractField(html, searchRule.author, source);
+    Logger.debug(this.TAG, `字段提取: 书源=${source.name}, 书名=${name}, 作者=${author || '空'}, 作者规则=${searchRule.author}`);
 
     // 提取封面
     let cover = await this.extractField(html, searchRule.cover || '', source);
@@ -548,9 +593,10 @@ export class BookSourceSearchEngine {
     if (bookUrl && !bookUrl.startsWith('http')) {
       bookUrl = this.resolveUrl(source.url, bookUrl);
     }
+    Logger.debug(this.TAG, `字段提取: 书源=${source.name}, 书籍URL=${bookUrl || '空'}, URL规则=${searchRule.bookUrl}`);
 
     const book: Book = {
-      id: '',  // 由 ViewModel 生成
+      id: '',
       name: this.cleanText(name),
       author: this.cleanText(author) || '未知作者',
       cover: cover || undefined,
@@ -666,6 +712,39 @@ export class BookSourceSearchEngine {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise<void>((resolve: () => void) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 解析网络错误
+   */
+  private parseNetworkError(errorMsg: string): NetworkError {
+    if (errorMsg.startsWith('NETWORK_ERROR:')) {
+      try {
+        const jsonStr = errorMsg.substring('NETWORK_ERROR:'.length);
+        return JSON.parse(jsonStr) as NetworkError;
+      } catch {
+        // ignore
+      }
+    }
+    
+    const lowerMsg = errorMsg.toLowerCase();
+    if (lowerMsg.includes('timeout')) {
+      return { type: 'timeout', message: errorMsg };
+    }
+    if (lowerMsg.includes('ssl') || lowerMsg.includes('certificate')) {
+      return { type: 'ssl', message: errorMsg };
+    }
+    if (lowerMsg.includes('resolve') || lowerMsg.includes('dns') || lowerMsg.includes('host')) {
+      return { type: 'dns', message: errorMsg };
+    }
+    if (lowerMsg.includes('403')) {
+      return { type: 'http', message: errorMsg, statusCode: 403 };
+    }
+    if (lowerMsg.includes('404')) {
+      return { type: 'http', message: errorMsg, statusCode: 404 };
+    }
+    
+    return { type: 'unknown', message: errorMsg };
   }
 
   /**
