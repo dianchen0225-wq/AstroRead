@@ -15,6 +15,7 @@ import {
 } from '../models/SearchResult';
 import NetworkAdapter, { NetworkError } from './NetworkAdapter';
 import { HTMLParser } from './HTMLParser';
+import { CssSelectorParser } from './CssSelectorParser';
 import { EnhancedJSEngine } from './EnhancedJSEngine';
 import { Logger } from './Logger';
 import { sourceHealthManager } from './SourceHealthManager';
@@ -634,9 +635,9 @@ export class BookSourceSearchEngine {
       return result;
     }
 
-    // 使用 HTML 解析器
-    const results = this.htmlParser.parse(html, rule);
-    return results[0] || '';
+    // 使用 CSS 选择器解析器提取文本内容
+    const text = CssSelectorParser.extractValue(html, rule);
+    return text || '';
   }
 
   /**

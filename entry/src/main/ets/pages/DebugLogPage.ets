@@ -80,9 +80,9 @@ struct DebugLogPage {
       // 标题栏
       Row() {
         Button() {
-          Image($r('app.media.ic_back'))
-            .width(24)
-            .height(24)
+          Text('<')
+            .fontSize(20)
+            .fontColor('#333')
         }
         .type(ButtonType.Circle)
         .backgroundColor('transparent')
@@ -141,11 +141,11 @@ struct DebugLogPage {
             .margin({ right: 8 })
 
           Select([
-            { value: 'all', icon: $r('app.media.ic_default') },
-            { value: 'error', icon: $r('app.media.ic_error') },
-            { value: 'warn', icon: $r('app.media.ic_warning') },
-            { value: 'info', icon: $r('app.media.ic_info') },
-            { value: 'debug', icon: $r('app.media.ic_debug') }
+            { value: 'all' },
+            { value: 'error' },
+            { value: 'warn' },
+            { value: 'info' },
+            { value: 'debug' }
           ])
             .selected(this.filterLevel === 'all' ? 0 :
               this.filterLevel === 'error' ? 1 :

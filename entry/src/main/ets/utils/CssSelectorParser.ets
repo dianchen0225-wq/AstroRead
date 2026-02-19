@@ -13,6 +13,7 @@ export class CssSelectorParser {
       }
 
       let processedSelector = selector.trim();
+      let skipFirst = 0;
 
       // 移除@js:前缀
       if (processedSelector.startsWith('@js:') || processedSelector.startsWith('<js>')) {
@@ -25,9 +26,14 @@ export class CssSelectorParser {
         processedSelector = processedSelector.substring(5).trim();
       }
 
-      // 移除@class.前缀（Legado格式简写）
+      // 处理@class.前缀（Legado格式简写）
       if (processedSelector.startsWith('class.')) {
         processedSelector = '.' + processedSelector.substring(6);
+      }
+
+      // 处理@tag.前缀（Legado格式简写）
+      if (processedSelector.startsWith('tag.')) {
+        processedSelector = processedSelector.substring(4);
       }
 
       // 处理XPath格式（简化处理，转换为正则）
@@ -35,7 +41,14 @@ export class CssSelectorParser {
         return CssSelectorParser.selectByXPath(html, processedSelector);
       }
 
-      // 处理子选择器（如 .class@tag 或 .class.0）
+      // 处理!N跳过前N个元素（如 tag.li!0 或 .class!1）
+      const skipMatch = processedSelector.match(/!(\d+)$/);
+      if (skipMatch) {
+        skipFirst = parseInt(skipMatch[1], 10);
+        processedSelector = processedSelector.substring(0, processedSelector.lastIndexOf('!'));
+      }
+
+      // 处理子选择器（如 .class@tag 或 .class@tag.div）
       if (processedSelector.includes('@')) {
         const atIndex = processedSelector.indexOf('@');
         const parentSelector = processedSelector.substring(0, atIndex).trim();
@@ -45,6 +58,10 @@ export class CssSelectorParser {
         for (const parentHtml of parentElements) {
           const childElements = CssSelectorParser.selectElements(parentHtml, childSelector);
           elements.push(...childElements);
+        }
+        
+        if (skipFirst > 0 && elements.length > skipFirst) {
+          return elements.slice(skipFirst);
         }
         return elements;
       }
@@ -181,6 +198,10 @@ export class CssSelectorParser {
       if (index >= 0 && index < elements.length) {
         return [elements[index]];
       }
+      
+      if (skipFirst > 0 && elements.length > skipFirst) {
+        return elements.slice(skipFirst);
+      }
     } catch (error) {
       Logger.error(CssSelectorParser.TAG, `选择元素失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -193,60 +214,150 @@ export class CssSelectorParser {
 
     try {
       // 简化的XPath解析，支持常见格式
-      // 例如: //div[@class="book"] 或 //a[@class="title"]
+      // 例如: //div[@class="book"] 或 //a[@class="title"] 或 //table/tr[position()>1]
 
       let processedXpath = xpath;
+      let skipFirst = 0;
+      
       if (processedXpath.startsWith('//')) {
         processedXpath = processedXpath.substring(2);
       } else if (processedXpath.startsWith('./')) {
         processedXpath = processedXpath.substring(2);
       }
 
-      // 解析XPath表达式
-      const xpathMatch = processedXpath.match(/^([a-zA-Z*]+)(?:\[([^\]]+)\])?$/);
+      // 处理 position()>N 语法，如 tr[position()>1]
+      const posMatch = processedXpath.match(/\[position\(\)>(\d+)\]/);
+      if (posMatch) {
+        skipFirst = parseInt(posMatch[1], 10);
+        processedXpath = processedXpath.replace(/\[position\(\)>\d+\]/, '');
+      }
 
-      if (xpathMatch) {
-        const tagName = xpathMatch[1] === '*' ? '' : xpathMatch[1];
-        const condition = xpathMatch[2] || '';
+      // 处理路径分隔符 /，如 table/tr 或 div/a
+      if (processedXpath.includes('/') && !processedXpath.startsWith('[')) {
+        const parts = processedXpath.split('/').filter((p: string) => p.length > 0);
+        let currentElements = [html];
 
-        let pattern: string;
+        for (const part of parts) {
+          const nextElements: string[] = [];
+          for (const currentHtml of currentElements) {
+            const found = CssSelectorParser.selectByXPathSimple(currentHtml, part);
+            nextElements.push(...found);
+          }
+          currentElements = nextElements;
+          
+          if (currentElements.length === 0) {
+            break;
+          }
+        }
+
+        if (skipFirst > 0 && currentElements.length > skipFirst) {
+          return currentElements.slice(skipFirst);
+        }
+        return currentElements;
+      }
+
+      // 简单XPath解析
+      const result = CssSelectorParser.selectByXPathSimple(html, processedXpath);
+      
+      if (skipFirst > 0 && result.length > skipFirst) {
+        return result.slice(skipFirst);
+      }
+      return result;
+    } catch (error) {
+      Logger.error(CssSelectorParser.TAG, `XPath解析失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return elements;
+  }
+
+  private static selectByXPathSimple(html: string, xpathPart: string): string[] {
+    const elements: string[] = [];
+
+    try {
+      // 解析XPath表达式，支持:
+      // tagName
+      // tagName[@attr="value"]
+      // tagName[N] (索引)
+      // tagName[contains(@class,"value")]
+      // * (通配符)
+
+      let tagName = '';
+      let attrCondition = '';
+      let index = -1;
+
+      // 匹配 tagName[@attr="value"] 或 tagName[N] 或 tagName[contains(@class,"value")]
+      const complexMatch = xpathPart.match(/^([a-zA-Z*]+)(?:\[([^\]]+)\])?$/);
+      
+      if (complexMatch) {
+        tagName = complexMatch[1] === '*' ? '' : complexMatch[1];
+        const condition = complexMatch[2] || '';
 
         if (condition) {
-          // 处理属性条件，如 @class="book"
-          const attrMatch = condition.match(/@([a-zA-Z-]+)=["']([^"']*)["']/);
-          if (attrMatch) {
-            const attrName = attrMatch[1];
-            const attrValue = attrMatch[2];
-
-            if (tagName) {
-              pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*${CssSelectorParser.escapeRegex(attrName)}=["']${CssSelectorParser.escapeRegex(attrValue)}["'][^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
-            } else {
-              pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*${CssSelectorParser.escapeRegex(attrName)}=["']${CssSelectorParser.escapeRegex(attrValue)}["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
-            }
+          // 检查是否是纯数字索引
+          const indexMatch = condition.match(/^(\d+)$/);
+          if (indexMatch) {
+            index = parseInt(indexMatch[1], 10) - 1; // XPath索引从1开始
           } else {
-            // 其他条件，使用通用匹配
-            if (tagName) {
-              pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
-            } else {
-              pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*>([\\s\\S]*?)<\\/\\1>`;
-            }
+            attrCondition = condition;
+          }
+        }
+      } else {
+        tagName = xpathPart;
+      }
+
+      let pattern: string;
+
+      if (attrCondition) {
+        // 处理 @class="value" 或 contains(@class,"value")
+        const attrMatch = attrCondition.match(/@([a-zA-Z-]+)=["']([^"']*)["']/);
+        const containsMatch = attrCondition.match(/contains\s*\(\s*@([a-zA-Z-]+)\s*,\s*["']([^"']*)["']\s*\)/);
+        
+        if (attrMatch) {
+          const attrName = attrMatch[1];
+          const attrValue = attrMatch[2];
+
+          if (tagName) {
+            pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*${CssSelectorParser.escapeRegex(attrName)}=["']${CssSelectorParser.escapeRegex(attrValue)}["'][^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
+          } else {
+            pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*${CssSelectorParser.escapeRegex(attrName)}=["']${CssSelectorParser.escapeRegex(attrValue)}["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
+          }
+        } else if (containsMatch) {
+          const attrName = containsMatch[1];
+          const attrValue = containsMatch[2];
+
+          if (tagName) {
+            pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*${CssSelectorParser.escapeRegex(attrName)}=["'][^"']*${CssSelectorParser.escapeRegex(attrValue)}[^"']*["'][^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
+          } else {
+            pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*${CssSelectorParser.escapeRegex(attrName)}=["'][^"']*${CssSelectorParser.escapeRegex(attrValue)}[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
           }
         } else {
+          // 其他条件，使用通用匹配
           if (tagName) {
             pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
           } else {
             pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*>([\\s\\S]*?)<\\/\\1>`;
           }
         }
-
-        const regex = new RegExp(pattern, 'gi');
-        const matches = html.matchAll(regex);
-        for (const match of matches) {
-          elements.push(match[0]);
+      } else {
+        if (tagName) {
+          pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
+        } else {
+          pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*>([\\s\\S]*?)<\\/\\1>`;
         }
       }
+
+      const regex = new RegExp(pattern, 'gi');
+      const matches = html.matchAll(regex);
+      for (const match of matches) {
+        elements.push(match[0]);
+      }
+
+      // 处理索引
+      if (index >= 0 && index < elements.length) {
+        return [elements[index]];
+      }
     } catch (error) {
-      Logger.error(CssSelectorParser.TAG, `XPath解析失败: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CssSelectorParser.TAG, `XPath简单解析失败: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return elements;
@@ -259,6 +370,7 @@ export class CssSelectorParser {
       }
 
       let processedRule = rule.trim();
+      let skipFirst = 0;
 
       // 移除@css:前缀
       if (processedRule.startsWith('@css:')) {
@@ -268,6 +380,11 @@ export class CssSelectorParser {
       // 移除@class.前缀
       if (processedRule.startsWith('class.')) {
         processedRule = '.' + processedRule.substring(6);
+      }
+
+      // 移除@tag.前缀
+      if (processedRule.startsWith('tag.')) {
+        processedRule = processedRule.substring(4);
       }
 
       // 处理XPath格式
@@ -292,6 +409,13 @@ export class CssSelectorParser {
         return CssSelectorParser.processTemplate(html, processedRule);
       }
 
+      // 处理!N跳过前N个元素
+      const skipMatch = processedRule.match(/!(\d+)$/);
+      if (skipMatch) {
+        skipFirst = parseInt(skipMatch[1], 10);
+        processedRule = processedRule.substring(0, processedRule.lastIndexOf('!'));
+      }
+
       // 处理索引选择器（如 .class.0）
       let index = -1;
       const indexMatch = processedRule.match(/\.(\d+)$/);
@@ -311,6 +435,10 @@ export class CssSelectorParser {
           elements = CssSelectorParser.selectElements(html, selector);
         } else {
           elements = [html];
+        }
+
+        if (skipFirst > 0 && elements.length > skipFirst) {
+          elements = elements.slice(skipFirst);
         }
 
         if (elements.length > 0) {
