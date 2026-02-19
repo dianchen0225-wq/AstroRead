@@ -45,6 +45,7 @@ export class DatabaseManager {
       this.appContext = context;
       this.rdbStore = await relationalStore.getRdbStore(context, DatabaseSchema.DB_CONFIG);
       await DatabaseSchema.createTables(this.rdbStore);
+      await DatabaseSchema.migrateDatabase(this.rdbStore);
       this.initRepositories();
       await this.initDefaultData();
     } catch (error) {

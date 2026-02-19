@@ -126,6 +126,12 @@ export class BookRepository {
       const addTimeIndex = resultSet.getColumnIndex('add_time');
       const readProgressIndex = resultSet.getColumnIndex('read_progress');
       const lastReadChapterIndex = resultSet.getColumnIndex('last_read_chapter');
+      let lastReadChapterIndexNumIndex: number = -1;
+      try {
+        lastReadChapterIndexNumIndex = resultSet.getColumnIndex('last_read_chapter_index');
+      } catch (e) {
+        Logger.warn(BookRepository.TAG, `last_read_chapter_index 列不存在，使用默认值`);
+      }
 
       return {
         id: resultSet.getString(idIndex) || '',
@@ -155,9 +161,9 @@ export class BookRepository {
         lastReadChapter: resultSet.isColumnNull(lastReadChapterIndex)
           ? undefined
           : resultSet.getString(lastReadChapterIndex) || '',
-        lastReadChapterIndex: resultSet.isColumnNull(lastReadChapterIndex)
-          ? undefined
-          : resultSet.getLong(lastReadChapterIndex) || 0
+        lastReadChapterIndex: lastReadChapterIndexNumIndex >= 0 && !resultSet.isColumnNull(lastReadChapterIndexNumIndex)
+          ? resultSet.getLong(lastReadChapterIndexNumIndex)
+          : undefined
       };
     } catch (error) {
       Logger.error(BookRepository.TAG, `解析书籍数据失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -203,7 +209,8 @@ export class BookRepository {
       'last_update_time': Date.now(),
       'add_time': book.addTime || Date.now(),
       'read_progress': book.readProgress,
-      'last_read_chapter': book.lastReadChapter || null
+      'last_read_chapter': book.lastReadChapter || null,
+      'last_read_chapter_index': book.lastReadChapterIndex ?? 0
     };
 
     try {

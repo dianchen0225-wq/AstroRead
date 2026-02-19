@@ -29,7 +29,8 @@ export class DatabaseSchema {
       last_update_time INTEGER DEFAULT 0,
       add_time INTEGER DEFAULT 0,
       read_progress REAL DEFAULT 0,
-      last_read_chapter TEXT
+      last_read_chapter TEXT,
+      last_read_chapter_index INTEGER DEFAULT 0
     )`,
     
     // 书源表
@@ -123,6 +124,29 @@ export class DatabaseSchema {
     } catch (error) {
       Logger.error(DatabaseSchema.TAG, `创建数据表失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * 数据库迁移 - 为已有表添加缺失的列
+   */
+  static async migrateDatabase(rdbStore: relationalStore.RdbStore): Promise<void> {
+    const migrations: string[] = [
+      `ALTER TABLE book ADD COLUMN last_read_chapter_index INTEGER DEFAULT 0`
+    ];
+
+    for (const sql of migrations) {
+      try {
+        await rdbStore.executeSql(sql);
+        Logger.info(DatabaseSchema.TAG, `数据库迁移成功: ${sql.substring(0, 50)}...`);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (errorMsg.includes('duplicate column name') || errorMsg.includes('already exists')) {
+          Logger.debug(DatabaseSchema.TAG, `列已存在，跳过迁移`);
+        } else {
+          Logger.warn(DatabaseSchema.TAG, `数据库迁移警告: ${errorMsg}`);
+        }
+      }
     }
   }
 }
