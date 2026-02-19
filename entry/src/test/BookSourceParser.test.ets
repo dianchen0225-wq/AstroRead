@@ -2,8 +2,8 @@ import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from
 import { ContentParser, ParsedBookItem, ParsedChapterItem, ReplaceRuleConfig, ReplaceRuleItem } from '../main/ets/utils/ContentParser';
 import { NetworkManager } from '../main/ets/utils/NetworkManager';
 import { BookSource, SearchRule, ChapterRule, ContentRule } from '../main/ets/models/BookSource';
+import { EntityDecoder } from '../main/ets/core/utils/EntityDecoder';
 
-// JSON测试数据接口定义
 interface JsonBookItem {
   name: string;
   author: string;
@@ -331,7 +331,7 @@ export default function bookSourceParserTest() {
     // 测试HTML实体解码
     it('testHtmlEntityDecoding', 0, () => {
       const html = '&lt;p&gt;测试内容&lt;/p&gt; &nbsp; &amp; &quot; &apos;';
-      const decoded = ContentParser.decodeHtmlEntities(html);
+      const decoded = EntityDecoder.decode(html);
       expect(decoded).assertEqual('<p>测试内容</p>   & " \'');
     });
   });
