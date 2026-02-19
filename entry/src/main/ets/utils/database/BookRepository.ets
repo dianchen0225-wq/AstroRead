@@ -37,7 +37,11 @@ export class BookRepository {
       return [];
     } finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
     }
   }
@@ -86,10 +90,18 @@ export class BookRepository {
       return [];
     } finally {
       if (relationResultSet) {
-        relationResultSet.close();
+        try {
+          relationResultSet.close();
+        } catch (e) {
+          Logger.warn(BookRepository.TAG, `关闭relationResultSet失败: ${e}`);
+        }
       }
       if (bookResultSet) {
-        bookResultSet.close();
+        try {
+          bookResultSet.close();
+        } catch (e) {
+          Logger.warn(BookRepository.TAG, `关闭bookResultSet失败: ${e}`);
+        }
       }
     }
   }

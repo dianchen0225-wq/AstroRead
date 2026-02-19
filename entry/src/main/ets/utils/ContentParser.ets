@@ -99,19 +99,34 @@ export class ContentParser {
 
     try {
       const rule = bookSource.chapterRule;
+      
+      Logger.info(ContentParser.TAG, `开始解析章节列表 - 书源: ${bookSource.name}, ruleType: ${bookSource.ruleType}`);
+      Logger.info(ContentParser.TAG, `章节规则 - chapterList: ${rule.chapterList}, chapterName: ${rule.chapterName}, chapterUrl: ${rule.chapterUrl}`);
+      Logger.debug(ContentParser.TAG, `HTML内容长度: ${html.length}, 前500字符: ${html.substring(0, 500)}`);
 
       RuleEngine.setContext({ baseUrl: bookSource.url, html: html });
 
+      let chapters: ParsedChapterItem[];
       switch (bookSource.ruleType) {
         case 'jsonpath':
-          return ContentParser.parseChaptersByJsonPath(html, rule.chapterList, rule);
+          chapters = ContentParser.parseChaptersByJsonPath(html, rule.chapterList, rule);
+          break;
         case 'xpath':
-          return ContentParser.parseChaptersByXPath(html, rule.chapterList, rule);
+          chapters = ContentParser.parseChaptersByXPath(html, rule.chapterList, rule);
+          break;
         case 'regex':
-          return ContentParser.parseChaptersByRegex(html, rule.chapterList, rule);
+          chapters = ContentParser.parseChaptersByRegex(html, rule.chapterList, rule);
+          break;
         default:
-          return ContentParser.parseChaptersByXPath(html, rule.chapterList, rule);
+          chapters = ContentParser.parseChaptersByXPath(html, rule.chapterList, rule);
       }
+      
+      Logger.info(ContentParser.TAG, `章节解析完成 - 找到 ${chapters.length} 个章节`);
+      if (chapters.length > 0) {
+        Logger.debug(ContentParser.TAG, `第一个章节: title=${chapters[0].title}, url=${chapters[0].url}`);
+      }
+      
+      return chapters;
     } catch (error) {
       Logger.error(ContentParser.TAG, `章节解析异常: ${error instanceof Error ? error.message : String(error)}`);
       return [];
@@ -620,13 +635,22 @@ export class ContentParser {
     try {
       const chapters: ParsedChapterItem[] = [];
 
+      Logger.info(ContentParser.TAG, `XPath章节解析 - listRule: ${listRule}`);
+
       if (listRule.startsWith('<js>') || listRule.startsWith('@js:')) {
         Logger.warn(ContentParser.TAG, 'JavaScript规则暂不支持，使用正则表达式回退');
         return ContentParser.parseChaptersByRegex(html, listRule, rule);
       }
 
       const listElements = CssSelectorParser.selectElements(html, listRule);
+      Logger.info(ContentParser.TAG, `XPath选择器找到 ${listElements.length} 个元素`);
+      
+      if (listElements.length > 0) {
+        Logger.debug(ContentParser.TAG, `第一个元素内容(前200字符): ${listElements[0].substring(0, 200)}`);
+      }
+      
       let order = 0;
+      let skippedCount = 0;
 
       for (const elementHtml of listElements) {
         const chapter: ParsedChapterItem = {
@@ -649,7 +673,16 @@ export class ContentParser {
 
         if (chapter.title && chapter.url) {
           chapters.push(chapter);
+        } else {
+          skippedCount++;
+          if (skippedCount <= 3) {
+            Logger.debug(ContentParser.TAG, `跳过章节 - title: ${chapter.title || '空'}, url: ${chapter.url || '空'}`);
+          }
         }
+      }
+      
+      if (skippedCount > 0) {
+        Logger.warn(ContentParser.TAG, `共跳过 ${skippedCount} 个无效章节`);
       }
 
       return chapters;

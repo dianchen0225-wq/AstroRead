@@ -24,7 +24,7 @@ import { NavigationManager } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/NetworkManager';
 import { ContentPurifier, purifyIntro } from '../utils/ContentPurifier';
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 
 export interface RankColor {
   light: string;
@@ -239,28 +239,20 @@ export struct SearchPage {
       Logger.error('SearchPage', `添加到书架失败: ${error}`);
     }
   }
-
   private async openBook(book: Book): Promise<void> {
     try {
       await this.addToBookshelf(book);
       
-      router.pushUrl({
-        url: 'pages/BookDetailPage',
-        params: {
-          bookId: book.id
-        }
-      }, router.RouterMode.Standard);
+      NavigationManager.getInstance().navigateTo('BookDetailPage', {
+        bookId: book.id
+      });
     } catch (error) {
       Logger.error('SearchPage', `打开书籍失败: ${error}`);
     }
   }
-
   private navigateToSourcePage(): void {
     try {
-      router.pushUrl({
-        url: 'pages/MainPage',
-        params: { tabIndex: 3 }
-      }, router.RouterMode.Standard);
+      NavigationManager.getInstance().navigateTo('MainPage', { tabIndex: 3 });
     } catch (err) {
       Logger.error('SearchPage', `跳转失败: ${err}`);
     }

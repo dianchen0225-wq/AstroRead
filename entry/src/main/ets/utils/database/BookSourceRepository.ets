@@ -52,7 +52,11 @@ export class BookSourceRepository {
     }
     finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookSourceRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
     }
   }
@@ -83,7 +87,11 @@ export class BookSourceRepository {
     }
     finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookSourceRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
     }
   }
@@ -113,7 +121,11 @@ export class BookSourceRepository {
       }
       finally {
         if (resultSet) {
-          resultSet.close();
+          try {
+            resultSet.close();
+          } catch (e) {
+            Logger.warn(BookSourceRepository.TAG, `关闭resultSet失败: ${e}`);
+          }
         }
       }
     }
@@ -136,7 +148,11 @@ export class BookSourceRepository {
         bookSources.push(bookSource);
       }
 
-      resultSet.close();
+      try {
+        resultSet.close();
+      } catch (closeError) {
+        Logger.warn(BookSourceRepository.TAG, `关闭resultSet失败: ${closeError}`);
+      }
       resultSet = null;
 
       const totalPredicates = new relationalStore.RdbPredicates('book_source');
@@ -156,10 +172,18 @@ export class BookSourceRepository {
     }
     finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookSourceRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
       if (totalResultSet) {
-        totalResultSet.close();
+        try {
+          totalResultSet.close();
+        } catch (e) {
+          Logger.warn(BookSourceRepository.TAG, `关闭totalResultSet失败: ${e}`);
+        }
       }
     }
   }
@@ -181,7 +205,11 @@ export class BookSourceRepository {
     }
     finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookSourceRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
     }
   }

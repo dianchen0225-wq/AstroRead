@@ -9,8 +9,11 @@ export class CssSelectorParser {
 
     try {
       if (!html || !selector) {
+        Logger.warn(CssSelectorParser.TAG, `selectElements参数无效 - html: ${html ? '有内容' : '空'}, selector: ${selector || '空'}`);
         return elements;
       }
+
+      Logger.debug(CssSelectorParser.TAG, `selectElements - selector: ${selector}, html长度: ${html.length}`);
 
       let processedSelector = selector.trim();
       let skipFirst = 0;
@@ -38,6 +41,7 @@ export class CssSelectorParser {
 
       // 处理XPath格式（简化处理，转换为正则）
       if (processedSelector.startsWith('//') || processedSelector.startsWith('./')) {
+        Logger.debug(CssSelectorParser.TAG, `使用XPath解析: ${processedSelector}`);
         return CssSelectorParser.selectByXPath(html, processedSelector);
       }
 
@@ -213,8 +217,7 @@ export class CssSelectorParser {
     const elements: string[] = [];
 
     try {
-      // 简化的XPath解析，支持常见格式
-      // 例如: //div[@class="book"] 或 //a[@class="title"] 或 //table/tr[position()>1]
+      Logger.debug(CssSelectorParser.TAG, `selectByXPath - 原始xpath: ${xpath}`);
 
       let processedXpath = xpath;
       let skipFirst = 0;
@@ -224,6 +227,8 @@ export class CssSelectorParser {
       } else if (processedXpath.startsWith('./')) {
         processedXpath = processedXpath.substring(2);
       }
+
+      Logger.debug(CssSelectorParser.TAG, `selectByXPath - 处理后xpath: ${processedXpath}`);
 
       // 处理 position()>N 语法，如 tr[position()>1]
       const posMatch = processedXpath.match(/\[position\(\)>(\d+)\]/);
@@ -235,6 +240,7 @@ export class CssSelectorParser {
       // 处理路径分隔符 /，如 table/tr 或 div/a
       if (processedXpath.includes('/') && !processedXpath.startsWith('[')) {
         const parts = processedXpath.split('/').filter((p: string) => p.length > 0);
+        Logger.debug(CssSelectorParser.TAG, `XPath路径分割: ${parts.join(' -> ')}`);
         let currentElements = [html];
 
         for (const part of parts) {
@@ -244,8 +250,10 @@ export class CssSelectorParser {
             nextElements.push(...found);
           }
           currentElements = nextElements;
+          Logger.debug(CssSelectorParser.TAG, `处理路径部分 "${part}" 后找到 ${currentElements.length} 个元素`);
           
           if (currentElements.length === 0) {
+            Logger.warn(CssSelectorParser.TAG, `XPath路径部分 "${part}" 未找到匹配元素`);
             break;
           }
         }
@@ -258,6 +266,7 @@ export class CssSelectorParser {
 
       // 简单XPath解析
       const result = CssSelectorParser.selectByXPathSimple(html, processedXpath);
+      Logger.debug(CssSelectorParser.TAG, `XPath简单解析找到 ${result.length} 个元素`);
       
       if (skipFirst > 0 && result.length > skipFirst) {
         return result.slice(skipFirst);
@@ -274,6 +283,8 @@ export class CssSelectorParser {
     const elements: string[] = [];
 
     try {
+      Logger.debug(CssSelectorParser.TAG, `selectByXPathSimple - xpathPart: ${xpathPart}`);
+
       // 解析XPath表达式，支持:
       // tagName
       // tagName[@attr="value"]
@@ -305,12 +316,16 @@ export class CssSelectorParser {
         tagName = xpathPart;
       }
 
+      Logger.debug(CssSelectorParser.TAG, `XPath解析 - tagName: ${tagName || '*'}, attrCondition: ${attrCondition || '无'}, index: ${index}`);
+
       let pattern: string;
 
       if (attrCondition) {
         // 处理 @class="value" 或 contains(@class,"value")
         const attrMatch = attrCondition.match(/@([a-zA-Z-]+)=["']([^"']*)["']/);
         const containsMatch = attrCondition.match(/contains\s*\(\s*@([a-zA-Z-]+)\s*,\s*["']([^"']*)["']\s*\)/);
+        
+        Logger.debug(CssSelectorParser.TAG, `属性匹配 - attrMatch: ${attrMatch ? '是' : '否'}, containsMatch: ${containsMatch ? '是' : '否'}`);
         
         if (attrMatch) {
           const attrName = attrMatch[1];

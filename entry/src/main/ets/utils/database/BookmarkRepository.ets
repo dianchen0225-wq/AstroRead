@@ -38,7 +38,11 @@ export class BookmarkRepository {
       return [];
     } finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookmarkRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
     }
   }

@@ -46,7 +46,11 @@ export class ChapterRepository {
     }
     finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(ChapterRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
     }
   }

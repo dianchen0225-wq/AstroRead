@@ -12,10 +12,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
-import { router } from '@kit.ArkUI';
+import { NavigationManager } from '../common/NavigationManager';
 
 @ComponentV2
 export struct SettingsPage {
@@ -217,9 +216,7 @@ export struct SettingsPage {
             .width('100%')
             .padding({ top: 12, bottom: 12 })
             .onClick(() => {
-              router.pushUrl({
-                url: 'pages/DebugLogPage'
-              });
+              NavigationManager.getInstance().navigateTo('DebugLogPage');
             })
 
             Row() {

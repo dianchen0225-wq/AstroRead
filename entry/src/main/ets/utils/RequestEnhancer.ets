@@ -148,7 +148,13 @@ let lastUAIndex: number = -1;
 const TAG: string = 'RequestEnhancer';
 
 const UA_CACHE_TTL = 30 * 60 * 1000;
-const domainUACache: Map<string, { profile: UserAgentProfile; timestamp: number }> = new Map();
+
+interface UACacheEntry {
+  profile: UserAgentProfile;
+  timestamp: number;
+}
+
+const domainUACache: Map<string, UACacheEntry> = new Map();
 
 function extractDomain(url: string): string {
   try {
@@ -184,7 +190,7 @@ function cacheUAForDomain(domain: string, profile: UserAgentProfile): void {
     keysToDelete.forEach(key => domainUACache.delete(key));
   }
   
-  domainUACache.set(domain, { profile, timestamp: Date.now() });
+  domainUACache.set(domain, { profile: profile, timestamp: Date.now() } as UACacheEntry);
 }
 
 export class RequestEnhancer {

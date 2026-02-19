@@ -21,7 +21,7 @@ import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
 import common from '@ohos.app.ability.common';
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 
 
 interface RouterParams {
@@ -102,7 +102,7 @@ struct BookDetailPage {
 
     // 在aboutToAppear中获取路由参数
     try {
-      this.params = router.getState()?.params as RouterParams;
+      this.params = router.getParams() as RouterParams;
       this.bookId = this.params?.bookId || '';
     } catch (error) {
       Logger.error('BookDetailPage', `获取路由参数失败: ${error}`);

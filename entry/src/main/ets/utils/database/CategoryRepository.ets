@@ -37,7 +37,11 @@ export class CategoryRepository {
       return [];
     } finally {
       if (resultSet) {
-        resultSet.close();
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(CategoryRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
       }
     }
   }

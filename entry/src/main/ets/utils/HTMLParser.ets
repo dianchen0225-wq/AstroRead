@@ -40,9 +40,10 @@ export class HTMLParser {
     }
     
     if (this.regexCache.size >= HTMLParser.MAX_CACHE_SIZE) {
-      const firstKey = this.regexCache.keys().next().value;
-      if (firstKey) {
-        this.regexCache.delete(firstKey);
+      const keysIterator = this.regexCache.keys();
+      const firstResult = keysIterator.next();
+      if (!firstResult.done && firstResult.value) {
+        this.regexCache.delete(firstResult.value);
       }
     }
     
