@@ -109,7 +109,7 @@ export class BookSourceManager {
 
       // 3. 判断格式类型
       if (Array.isArray(data)) {
-        // 可能是 Legado 格式或 YCK 格式
+        // 可能是标准格式或 YCK 格式
         const firstItem = (data as JsonObject[])[0];
         if (firstItem && this.isYCKFormat(firstItem)) {
           return this.parseYCKSources(data as YCKSourceData[]);

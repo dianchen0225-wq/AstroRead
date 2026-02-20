@@ -23,6 +23,28 @@ export interface Book {
   currentChapterIndex?: number;
   currentChapterTitle?: string;
   isInShelf?: boolean;
+  sourceStatus?: SourceStatus;
+}
+
+/**
+ * 书源状态枚举
+ */
+export enum SourceStatus {
+  UNKNOWN = 0,
+  VALID = 1,
+  INVALID = 2,
+  CHECKING = 3
+}
+
+/**
+ * 书源验证结果
+ */
+export interface SourceValidationResult {
+  bookId: string;
+  bookSourceId: string;
+  bookSourceName: string;
+  status: SourceStatus;
+  errorMessage?: string;
 }
 
 /**

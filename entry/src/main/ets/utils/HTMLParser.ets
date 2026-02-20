@@ -54,7 +54,7 @@ export class HTMLParser {
 
   /**
    * 解析 HTML 并提取元素
-   * 支持：xpath、css selector、jsonpath、正则、Legado格式
+   * 支持：xpath、css selector、jsonpath、正则、标准格式
    */
   parse(html: string, rule: string): string[] {
     if (!html || !rule) {
@@ -82,11 +82,11 @@ export class HTMLParser {
         return this.parseXPath(html, rule);
       }
       
-      // Legado格式规则（如 class.bookbox@tag.div 或 @css:.book）
+      // 标准格式规则（如 class.bookbox@tag.div 或 @css:.book）
       if (rule.startsWith('class.') || rule.startsWith('tag.') || rule.startsWith('@css:') || rule.includes('@')) {
-        Logger.debug(this.TAG, `使用Legado格式解析: ${rule}`);
+        Logger.debug(this.TAG, `使用标准格式解析: ${rule}`);
         const elements = CssSelectorParser.selectElements(html, rule);
-        Logger.debug(this.TAG, `Legado格式解析结果: ${elements.length} 个元素`);
+        Logger.debug(this.TAG, `标准格式解析结果: ${elements.length} 个元素`);
         return elements;
       }
       

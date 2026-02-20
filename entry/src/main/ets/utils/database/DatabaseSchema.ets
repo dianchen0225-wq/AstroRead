@@ -131,25 +131,48 @@ export class DatabaseSchema {
    * 数据库迁移 - 为已有表添加缺失的列
    */
   static async migrateDatabase(rdbStore: relationalStore.RdbStore): Promise<void> {
-    const migrations: string[] = [
-      `ALTER TABLE book ADD COLUMN last_read_chapter_index INTEGER DEFAULT 0`
-    ];
+    // 检查并添加 last_read_chapter_index 列（如果不存在）
+    await DatabaseSchema.addColumnIfNotExists(rdbStore, 'book', 'last_read_chapter_index', 'INTEGER DEFAULT 0');
 
-    for (const sql of migrations) {
-      try {
-        await rdbStore.executeSql(sql);
-        Logger.info(DatabaseSchema.TAG, `数据库迁移成功: ${sql.substring(0, 50)}...`);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        if (errorMsg.includes('duplicate column name') || errorMsg.includes('already exists')) {
-          Logger.debug(DatabaseSchema.TAG, `列已存在，跳过迁移`);
-        } else {
-          Logger.warn(DatabaseSchema.TAG, `数据库迁移警告: ${errorMsg}`);
-        }
+    // 执行其他迁移
+    await DatabaseSchema.migrateChapterOrderColumn(rdbStore);
+  }
+
+  /**
+   * 检查列是否存在，如果不存在则添加
+   */
+  private static async addColumnIfNotExists(
+    rdbStore: relationalStore.RdbStore,
+    tableName: string,
+    columnName: string,
+    columnDefinition: string
+  ): Promise<void> {
+    try {
+      const tableInfo = await rdbStore.querySql(`PRAGMA table_info(${tableName})`);
+      const columnNames: string[] = [];
+      while (tableInfo.goToNextRow()) {
+        const nameIndex = tableInfo.getColumnIndex('name');
+        columnNames.push(tableInfo.getString(nameIndex));
+      }
+      tableInfo.close();
+
+      if (columnNames.includes(columnName)) {
+        Logger.debug(DatabaseSchema.TAG, `表 ${tableName} 的列 ${columnName} 已存在，跳过添加`);
+        return;
+      }
+
+      const sql = `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`;
+      await rdbStore.executeSql(sql);
+      Logger.info(DatabaseSchema.TAG, `成功为表 ${tableName} 添加列 ${columnName}`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      // 如果是重复列错误，静默忽略（可能是并发导致的竞态条件）
+      if (errorMsg.includes('duplicate column name') || errorMsg.includes('already exists')) {
+        Logger.debug(DatabaseSchema.TAG, `列 ${columnName} 已存在（并发添加），跳过`);
+      } else {
+        Logger.warn(DatabaseSchema.TAG, `添加列 ${columnName} 失败: ${errorMsg}`);
       }
     }
-
-    await DatabaseSchema.migrateChapterOrderColumn(rdbStore);
   }
 
   /**

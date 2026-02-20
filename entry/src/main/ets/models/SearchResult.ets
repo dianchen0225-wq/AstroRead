@@ -45,12 +45,26 @@ export interface SearchProgress {
   currentSource: string;
   foundBooks: number;
   isComplete: boolean;
+  newBooks?: Book[];
 }
+
+export interface SearchStopCondition {
+  maxBooks: number;
+  maxTime: number;
+  minSources: number;
+}
+
+export const DEFAULT_STOP_CONDITION: SearchStopCondition = {
+  maxBooks: 50,
+  maxTime: 15000,
+  minSources: 3
+};
 
 export class SearchResultBuilder {
   private allBooks: Book[] = [];
   private sourceStats: SourceSearchStats[] = [];
   private config: SearchPaginationConfig;
+  private seenKeys: Set<string> = new Set();
 
   constructor(config: SearchPaginationConfig) {
     this.config = config;
@@ -63,7 +77,7 @@ export class SearchResultBuilder {
     success: boolean,
     error?: string,
     responseTime: number = 0
-  ): void {
+  ): Book[] {
     const stats: SourceSearchStats = {
       sourceId,
       sourceName,
@@ -74,11 +88,21 @@ export class SearchResultBuilder {
     };
     this.sourceStats.push(stats);
 
+    const newBooks: Book[] = [];
     if (success && books.length > 0) {
       for (let i = 0; i < books.length; i++) {
-        this.allBooks.push(books[i]);
+        const book = books[i];
+        const key = `${book.name}_${book.author || ''}`.toLowerCase().trim();
+        
+        if (!this.seenKeys.has(key)) {
+          this.seenKeys.add(key);
+          this.allBooks.push(book);
+          newBooks.push(book);
+        }
       }
     }
+    
+    return newBooks;
   }
 
   build(page: number = 1): PagedSearchResult {

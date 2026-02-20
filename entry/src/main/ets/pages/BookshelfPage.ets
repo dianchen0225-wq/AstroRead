@@ -16,6 +16,8 @@ export struct BookshelfPage {
   @Local bookList: Book[] = [];
   @Local isLoading: boolean = false;
   @Local viewMode: ViewMode = 'list';
+  @Local pressedBookId: string = '';
+  @Param safeAreaTop: number = 0;
   
   private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
@@ -60,256 +62,423 @@ export struct BookshelfPage {
     this.viewMode = this.viewMode === 'list' ? 'grid' : 'list';
   }
 
-  @Builder
-  listViewBuilder() {
-    List({ space: 12 }) {
-      ForEach(this.bookList, (book: Book) => {
-        ListItem() {
-          Row() {
-            BookCoverImage({
-              src: book.cover || $r('app.media.startIcon'),
-              bookWidth: 60,
-              bookHeight: 80,
-              radius: 6
-            })
-
-            Column() {
-              Text(book.name)
-                .fontSize(16)
-                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                .fontWeight(600)
-                .margin({ bottom: 4 })
-
-              if (book.author) {
-                Text(book.author)
-                  .fontSize(12)
-                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                  .margin({ bottom: 8 })
-              }
-
-              Row() {
-                Progress({
-                  value: book.readProgress,
-                  total: 100,
-                  type: ProgressType.Linear
-                })
-                  .width('100%')
-                  .height(4)
-                  .color(DesignSystem.getPrimaryColor(this.isLightMode))
-                  .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                  .margin({ right: 10 })
-
-                Text(`${book.readProgress}%`)
-                  .fontSize(11)
-                  .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                  .width(35)
-                  .textAlign(TextAlign.End)
-              }
-            }
-            .layoutWeight(1)
-            .justifyContent(FlexAlign.SpaceBetween)
-          }
-          .width('100%')
-          .padding(15)
-          .borderRadius(12)
-          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-          .onClick(() => {
-            try {
-              NavigationManager.getInstance().navigateTo('BookDetailPage', {
-                bookId: book.id
-              });
-              Logger.info('BookshelfPage', 'push page success');
-            } catch (err) {
-              Logger.error('BookshelfPage', `pushPage failed: ${err}`);
-            }
-          })
-        }
-      }, (book: Book) => book.id)
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ left: 20, right: 20 })
-    .cachedCount(5)
-  }
-
-  @Builder
-  gridViewBuilder() {
-    Grid() {
-      ForEach(this.bookList, (book: Book) => {
-        GridItem() {
-          Column() {
-            BookCoverImage({
-              src: book.cover || $r('app.media.startIcon'),
-              bookWidth: 100,
-              bookHeight: 140,
-              radius: 8
-            })
-
-            Text(book.name)
-              .fontSize(14)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .fontWeight(500)
-              .maxLines(2)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-              .margin({ top: 8 })
-              .textAlign(TextAlign.Center)
-
-            if (book.author) {
-              Text(book.author)
-                .fontSize(11)
-                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-                .textAlign(TextAlign.Center)
-            }
-          }
-          .width('100%')
-          .padding(8)
-          .onClick(() => {
-            try {
-              NavigationManager.getInstance().navigateTo('BookDetailPage', {
-                bookId: book.id
-              });
-              Logger.info('BookshelfPage', 'push page success');
-            } catch (err) {
-              Logger.error('BookshelfPage', `pushPage failed: ${err}`);
-            }
-          })
-        }
-      }, (book: Book) => book.id)
-    }
-    .columnsTemplate('1fr 1fr 1fr')
-    .rowsGap(12)
-    .columnsGap(12)
-    .width('100%')
-    .height('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-  }
-
   build() {
     Column() {
-      Row() {
-        Text($r('app.string.bookshelf'))
-          .fontSize(18)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(600)
-          .layoutWeight(1)
-
-        Row() {
-          Text(this.viewMode === 'list' ? '☰' : '▦')
-            .fontSize(18)
-            .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-        }
-        .width(36)
-        .height(36)
-        .borderRadius(18)
-        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.toggleViewMode();
-        })
-      }
-      .width('100%')
-      .padding({ left: 20, right: 20, top: 15, bottom: 15 })
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-      .border({
-        width: { bottom: 1 },
-        color: DesignSystem.getBorderColor(this.isLightMode)
-      })
-
-      Row() {
-        Column() {
-          Text($r('app.string.recent_read'))
-            .fontSize(14)
-            .fontColor(this.activeTabIndex === 0 ?
-              DesignSystem.getPrimaryColor(this.isLightMode) :
-              DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .padding({ top: 12, bottom: 10 })
-            .onClick(() => {
-              this.activeTabIndex = 0;
-            })
-
-          Row()
-            .width(24)
-            .height(2)
-            .borderRadius(1)
-            .backgroundColor(this.activeTabIndex === 0 ?
-              DesignSystem.getPrimaryColor(this.isLightMode) :
-              Color.Transparent)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
-
-        Column() {
-          Text($r('app.string.favorites'))
-            .fontSize(14)
-            .fontColor(this.activeTabIndex === 1 ?
-              DesignSystem.getPrimaryColor(this.isLightMode) :
-              DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .padding({ top: 12, bottom: 10 })
-            .onClick(() => {
-              this.activeTabIndex = 1;
-            })
-
-          Row()
-            .width(24)
-            .height(2)
-            .borderRadius(1)
-            .backgroundColor(this.activeTabIndex === 1 ?
-              DesignSystem.getPrimaryColor(this.isLightMode) :
-              Color.Transparent)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
-      }
-      .width('100%')
-      .border({
-        width: { bottom: 1 },
-        color: DesignSystem.getBorderColor(this.isLightMode)
-      })
-
-      if (this.isLoading) {
-        Column() {
-          LoadingProgress()
-            .width(40)
-            .height(40)
-            .color(DesignSystem.getPrimaryColor(this.isLightMode))
-          Text('加载中...')
-            .fontSize(14)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .margin({ top: 10 })
-        }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-      } else if (this.bookList.length === 0) {
-        Column() {
-          Text('📚')
-            .fontSize(48)
-            .margin({ bottom: 16 })
-          Text('书架空空如也')
-            .fontSize(16)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .margin({ bottom: 8 })
-          Text('去搜索页面添加书籍吧')
-            .fontSize(14)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-        }
-        .width('100%')
-        .height(300)
-        .justifyContent(FlexAlign.Center)
-      } else {
-        if (this.viewMode === 'list') {
-          this.listViewBuilder()
-        } else {
-          this.gridViewBuilder()
-        }
-      }
+      this.buildHeader()
+      
+      this.buildTabBar()
+      
+      this.buildContent()
     }
     .width('100%')
     .height('100%')
     .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+  }
+
+  @Builder
+  buildHeader() {
+    Row() {
+      Column() {
+        Text($r('app.string.bookshelf'))
+          .fontSize(DesignSystem.Typography.size.xl)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.bold)
+        
+        if (this.bookList.length > 0) {
+          Text(`${this.bookList.length} 本书`)
+            .fontSize(DesignSystem.Typography.size.xs)
+            .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+            .margin({ top: DesignSystem.Spacing.xs })
+        }
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      
+      Row() {
+        Row() {
+          Text(this.viewMode === 'list' ? '▦' : '☰')
+            .fontSize(DesignSystem.Typography.size.base)
+            .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(DesignSystem.BorderRadius.md)
+        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+        .justifyContent(FlexAlign.Center)
+        .border({
+          width: 1,
+          color: DesignSystem.getBorderColor(this.isLightMode)
+        })
+        .onClick(() => {
+          this.toggleViewMode();
+        })
+      }
+    }
+    .width('100%')
+    .padding({
+      left: DesignSystem.Spacing.lg,
+      right: DesignSystem.Spacing.lg,
+      top: this.safeAreaTop + DesignSystem.Spacing.md,
+      bottom: DesignSystem.Spacing.md
+    })
+    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+  }
+
+  @Builder
+  buildTabBar() {
+    Row() {
+      this.buildTabItem($r('app.string.recent_read'), 0)
+      this.buildTabItem($r('app.string.favorites'), 1)
+    }
+    .width('100%')
+    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+    .border({
+      width: { bottom: 1 },
+      color: DesignSystem.getBorderColor(this.isLightMode)
+    })
+  }
+
+  @Builder
+  buildTabItem(title: ResourceStr, index: number) {
+    Column() {
+      Text(title)
+        .fontSize(DesignSystem.Typography.size.sm)
+        .fontColor(this.activeTabIndex === index ?
+          DesignSystem.getPrimaryColor(this.isLightMode) :
+          DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .fontWeight(this.activeTabIndex === index ?
+          DesignSystem.Typography.weight.semibold :
+          DesignSystem.Typography.weight.regular)
+        .padding({
+          top: DesignSystem.Spacing.md,
+          bottom: DesignSystem.Spacing.sm
+        })
+        .onClick(() => {
+          this.activeTabIndex = index;
+        })
+      
+      Row()
+        .width(24)
+        .height(3)
+        .borderRadius(2)
+        .backgroundColor(this.activeTabIndex === index ?
+          DesignSystem.getPrimaryColor(this.isLightMode) :
+          Color.Transparent)
+        .animation({
+          duration: DesignSystem.AnimationDuration.fast,
+          curve: DesignSystem.AnimationCurve.easeOut
+        })
+    }
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  @Builder
+  buildContent() {
+    if (this.isLoading) {
+      this.buildLoadingState()
+    } else if (this.bookList.length === 0) {
+      this.buildEmptyState()
+    } else {
+      if (this.viewMode === 'list') {
+        this.buildListView()
+      } else {
+        this.buildGridView()
+      }
+    }
+  }
+
+  @Builder
+  buildLoadingState() {
+    Column() {
+      LoadingProgress()
+        .width(48)
+        .height(48)
+        .color(DesignSystem.getPrimaryColor(this.isLightMode))
+      
+      Text('加载中...')
+        .fontSize(DesignSystem.Typography.size.sm)
+        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .margin({ top: DesignSystem.Spacing.md })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  buildEmptyState() {
+    Column() {
+      Column() {
+        Text('📚')
+          .fontSize(64)
+          .margin({ bottom: DesignSystem.Spacing.lg })
+        
+        Text('书架空空如也')
+          .fontSize(DesignSystem.Typography.size.lg)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.medium)
+          .margin({ bottom: DesignSystem.Spacing.sm })
+        
+        Text('去搜索页面添加书籍吧')
+          .fontSize(DesignSystem.Typography.size.sm)
+          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+      }
+      .padding(DesignSystem.Spacing.xxl)
+      .borderRadius(DesignSystem.BorderRadius.xl)
+      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+      .border({
+        width: 1,
+        color: DesignSystem.getBorderColor(this.isLightMode)
+      })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+    .padding(DesignSystem.Spacing.xxl)
+  }
+
+  @Builder
+  buildListView() {
+    List({ space: DesignSystem.Spacing.md }) {
+      ForEach(this.bookList, (book: Book) => {
+        ListItem() {
+          this.buildBookListItem(book)
+        }
+      }, (book: Book) => book.id)
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .padding({
+      left: DesignSystem.Spacing.lg,
+      right: DesignSystem.Spacing.lg,
+      top: DesignSystem.Spacing.md,
+      bottom: DesignSystem.Spacing.md
+    })
+    .cachedCount(5)
+  }
+
+  @Builder
+  buildBookListItem(book: Book) {
+    Row() {
+      Stack() {
+        BookCoverImage({
+          src: book.cover || $r('app.media.startIcon'),
+          bookWidth: 60,
+          bookHeight: 80,
+          radius: DesignSystem.BorderRadius.md
+        })
+        
+        if (book.readProgress > 0) {
+          Column() {
+            Row() {
+              Text(`${book.readProgress}%`)
+                .fontSize(8)
+                .fontColor('#FFFFFF')
+                .fontWeight(DesignSystem.Typography.weight.bold)
+            }
+            .padding({
+              left: DesignSystem.Spacing.xs,
+              right: DesignSystem.Spacing.xs,
+              top: 2,
+              bottom: 2
+            })
+            .borderRadius(DesignSystem.BorderRadius.sm)
+            .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+          }
+          .alignItems(HorizontalAlign.End)
+          .width('100%')
+        }
+      }
+      .alignContent(Alignment.TopEnd)
+
+      Column() {
+        Text(book.name)
+          .fontSize(DesignSystem.Typography.size.base)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        if (book.author) {
+          Text(book.author)
+            .fontSize(DesignSystem.Typography.size.xs)
+            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+            .margin({ top: DesignSystem.Spacing.xs })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+
+        Blank()
+
+        Row() {
+          Column() {
+            Progress({
+              value: book.readProgress,
+              total: 100,
+              type: ProgressType.Linear
+            })
+              .width('100%')
+              .height(4)
+              .color(DesignSystem.getPrimaryColor(this.isLightMode))
+              .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          }
+          .layoutWeight(1)
+          
+          Text('›')
+            .fontSize(DesignSystem.Typography.size.xl)
+            .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+            .margin({ left: DesignSystem.Spacing.sm })
+        }
+      }
+      .layoutWeight(1)
+      .height(80)
+      .justifyContent(FlexAlign.Start)
+      .margin({ left: DesignSystem.Spacing.md })
+    }
+    .width('100%')
+    .padding(DesignSystem.Spacing.md)
+    .borderRadius(DesignSystem.BorderRadius.lg)
+    .backgroundColor(this.pressedBookId === book.id ?
+      DesignSystem.getActiveColor(this.isLightMode) :
+      DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+    .border({
+      width: 1,
+      color: DesignSystem.getBorderColor(this.isLightMode)
+    })
+    .shadow({
+      radius: 2,
+      color: this.isLightMode ? 'rgba(0,0,0,0.03)' : 'rgba(0,0,0,0.15)',
+      offsetX: 0,
+      offsetY: 1
+    })
+    .scale({
+      x: this.pressedBookId === book.id ? 0.98 : 1,
+      y: this.pressedBookId === book.id ? 0.98 : 1
+    })
+    .animation({
+      duration: DesignSystem.AnimationDuration.fast,
+      curve: DesignSystem.AnimationCurve.easeOut
+    })
+    .onClick(() => {
+      NavigationManager.getInstance().navigateTo('BookDetailPage', {
+        bookId: book.id
+      });
+    })
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        this.pressedBookId = book.id;
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.pressedBookId = '';
+      }
+    })
+  }
+
+  @Builder
+  buildGridView() {
+    Grid() {
+      ForEach(this.bookList, (book: Book) => {
+        GridItem() {
+          this.buildBookGridItem(book)
+        }
+      }, (book: Book) => book.id)
+    }
+    .columnsTemplate('1fr 1fr 1fr')
+    .rowsGap(DesignSystem.Spacing.md)
+    .columnsGap(DesignSystem.Spacing.md)
+    .width('100%')
+    .layoutWeight(1)
+    .padding({
+      left: DesignSystem.Spacing.lg,
+      right: DesignSystem.Spacing.lg,
+      top: DesignSystem.Spacing.md,
+      bottom: DesignSystem.Spacing.md
+    })
+  }
+
+  @Builder
+  buildBookGridItem(book: Book) {
+    Column() {
+      Stack() {
+        BookCoverImage({
+          src: book.cover || $r('app.media.startIcon'),
+          bookWidth: 100,
+          bookHeight: 140,
+          radius: DesignSystem.BorderRadius.md
+        })
+        
+        if (book.readProgress > 0) {
+          Column() {
+            Row() {
+              Text(`${book.readProgress}%`)
+                .fontSize(8)
+                .fontColor('#FFFFFF')
+                .fontWeight(DesignSystem.Typography.weight.bold)
+            }
+            .padding({
+              left: DesignSystem.Spacing.xs,
+              right: DesignSystem.Spacing.xs,
+              top: 2,
+              bottom: 2
+            })
+            .borderRadius(DesignSystem.BorderRadius.sm)
+            .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+          }
+          .alignItems(HorizontalAlign.End)
+          .width('100%')
+        }
+      }
+      .alignContent(Alignment.TopEnd)
+
+      Text(book.name)
+        .fontSize(DesignSystem.Typography.size.sm)
+        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+        .fontWeight(DesignSystem.Typography.weight.medium)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .margin({ top: DesignSystem.Spacing.sm })
+        .textAlign(TextAlign.Start)
+
+      if (book.author) {
+        Text(book.author)
+          .fontSize(DesignSystem.Typography.size.xs)
+          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+          .textAlign(TextAlign.Start)
+      }
+    }
+    .width('100%')
+    .padding(DesignSystem.Spacing.sm)
+    .borderRadius(DesignSystem.BorderRadius.lg)
+    .backgroundColor(this.pressedBookId === book.id ?
+      DesignSystem.getActiveColor(this.isLightMode) :
+      DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+    .border({
+      width: 1,
+      color: DesignSystem.getBorderColor(this.isLightMode)
+    })
+    .scale({
+      x: this.pressedBookId === book.id ? 0.95 : 1,
+      y: this.pressedBookId === book.id ? 0.95 : 1
+    })
+    .animation({
+      duration: DesignSystem.AnimationDuration.fast,
+      curve: DesignSystem.AnimationCurve.easeOut
+    })
+    .onClick(() => {
+      NavigationManager.getInstance().navigateTo('BookDetailPage', {
+        bookId: book.id
+      });
+    })
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        this.pressedBookId = book.id;
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.pressedBookId = '';
+      }
+    })
   }
 }

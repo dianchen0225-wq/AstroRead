@@ -1,51 +1,91 @@
-/**
- * Copyright (c) 2025 Huawei Device Co., Ltd.
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
+import { NavigationManager } from '../common/NavigationManager';
+
+interface GradientColor {
+  color: string;
+  position: number;
+}
+
+interface MenuItem {
+  id: string;
+  title: ResourceStr;
+  desc: ResourceStr;
+  icon: string;
+  gradientColors: Array<[string, number]>;
+  gradientStart: string;
+  route: string;
+}
 
 @ComponentV2
 export struct HomePage {
   @Local isLightMode: boolean = true;
-  @Local buttonPressedMap: Map<string, boolean> = new Map<string, boolean>();
+  @Local pressedItemId: string = '';
   @Param safeAreaTop: number = 0;
   
-  private isComponentActive: boolean = false;
+  private menuItems: MenuItem[] = [
+    {
+      id: 'bookshelf',
+      title: $r('app.string.my_bookshelf'),
+      desc: $r('app.string.my_bookshelf_desc'),
+      icon: '📚',
+      gradientColors: [{ color: '#667eea', position: 0 }, { color: '#764ba2', position: 1 }],
+      gradientStart: '#667eea',
+      route: 'BookshelfPage'
+    },
+    {
+      id: 'search',
+      title: $r('app.string.search_books'),
+      desc: $r('app.string.search_books_desc'),
+      icon: '🔍',
+      gradientColors: [{ color: '#f093fb', position: 0 }, { color: '#f5576c', position: 1 }],
+      gradientStart: '#f093fb',
+      route: 'SearchPage'
+    },
+    {
+      id: 'source',
+      title: $r('app.string.source_management'),
+      desc: $r('app.string.source_management_desc'),
+      icon: '📖',
+      gradientColors: [{ color: '#4facfe', position: 0 }, { color: '#00f2fe', position: 1 }],
+      gradientStart: '#4facfe',
+      route: 'SourcePage'
+    },
+    {
+      id: 'settings',
+      title: $r('app.string.settings'),
+      desc: $r('app.string.settings_desc'),
+      icon: '⚙️',
+      gradientColors: [{ color: '#43e97b', position: 0 }, { color: '#38f9d7', position: 1 }],
+      gradientStart: '#43e97b',
+      route: 'SettingsPage'
+    }
+  ];
+  
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
 
   aboutToAppear(): void {
-    this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
   }
 
   aboutToDisappear(): void {
-    this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
-    this.buttonPressedMap.clear();
   }
 
   build() {
     Column() {
       this.buildHeader()
-
+      
       this.buildAppTitle()
-
-      this.buildCoreSection()
+      
+      this.buildMenuSection()
+      
+      Blank()
+      
+      this.buildFooter()
     }
     .width('100%')
     .height('100%')
@@ -56,78 +96,71 @@ export struct HomePage {
   buildHeader() {
     Row() {
       this.buildThemeToggle()
-
+      
       Blank()
-
-      this.buildHeaderRight()
+      
+      this.buildVersionBadge()
     }
     .width('100%')
     .padding({
-      left: 16,
-      right: 16,
-      top: this.safeAreaTop + 12,
-      bottom: 8
+      left: DesignSystem.Spacing.lg,
+      right: DesignSystem.Spacing.lg,
+      top: this.safeAreaTop + DesignSystem.Spacing.md,
+      bottom: DesignSystem.Spacing.sm
     })
   }
 
   @Builder
   buildThemeToggle() {
     Row() {
-      Text('⚙️')
-        .fontSize(18)
-        .margin({ right: 8 })
-
+      Text(this.isLightMode ? '🌙' : '☀️')
+        .fontSize(DesignSystem.IconSize.md)
+        .margin({ right: DesignSystem.Spacing.sm })
+      
       Text(this.isLightMode ? $r('app.string.dark_mode') : $r('app.string.light_mode'))
-        .fontSize(14)
+        .fontSize(DesignSystem.Typography.size.sm)
         .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-        .fontWeight(500)
-
-      this.buildToggleSwitch()
+        .fontWeight(DesignSystem.Typography.weight.medium)
     }
-    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-    .borderRadius(8)
+    .padding({
+      left: DesignSystem.Spacing.md,
+      right: DesignSystem.Spacing.md,
+      top: DesignSystem.Spacing.sm,
+      bottom: DesignSystem.Spacing.sm
+    })
+    .borderRadius(DesignSystem.BorderRadius.lg)
     .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-    .border({ width: 1, color: DesignSystem.getBorderColor(this.isLightMode) })
+    .border({
+      width: 1,
+      color: DesignSystem.getBorderColor(this.isLightMode)
+    })
+    .shadow({
+      radius: 4,
+      color: this.isLightMode ? 'rgba(0,0,0,0.03)' : 'rgba(0,0,0,0.2)',
+      offsetX: 0,
+      offsetY: 2
+    })
     .onClick(() => {
       themeManager.toggleTheme();
     })
   }
 
   @Builder
-  buildToggleSwitch() {
+  buildVersionBadge() {
     Row() {
-      Row()
-        .width(6)
-        .height(6)
-        .borderRadius(3)
-        .backgroundColor(this.isLightMode ? DesignSystem.getPrimaryColor(this.isLightMode) : DesignSystem.getSecondaryTextColor(this.isLightMode))
-
-      Row()
-        .width(6)
-        .height(6)
-        .borderRadius(3)
-        .backgroundColor(!this.isLightMode ? DesignSystem.getPrimaryColor(this.isLightMode) : DesignSystem.getSecondaryTextColor(this.isLightMode))
+      Text('v1.0')
+        .fontSize(DesignSystem.Typography.size.xs)
+        .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+        .fontWeight(DesignSystem.Typography.weight.medium)
     }
-    .width(24)
-    .height(12)
-    .borderRadius(6)
-    .backgroundColor(DesignSystem.getBorderColor(this.isLightMode))
-    .justifyContent(FlexAlign.SpaceEvenly)
-    .margin({ left: 8 })
-  }
-
-  @Builder
-  buildHeaderRight() {
-    Row() {
-      Text($r('app.string.core_entrance'))
-        .fontSize(12)
-        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-        .fontWeight(400)
-    }
-    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-    .borderRadius(8)
+    .padding({
+      left: DesignSystem.Spacing.sm,
+      right: DesignSystem.Spacing.sm,
+      top: DesignSystem.Spacing.xs,
+      bottom: DesignSystem.Spacing.xs
+    })
+    .borderRadius(DesignSystem.BorderRadius.md)
     .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-    .border({ width: 1, color: DesignSystem.getBorderColor(this.isLightMode) })
   }
 
   @Builder
@@ -136,128 +169,162 @@ export struct HomePage {
       Text($r('app.string.app_name'))
         .width('100%')
         .textAlign(TextAlign.Center)
-        .fontSize(26)
+        .fontSize(DesignSystem.Typography.size.xxxl)
         .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-        .fontWeight(700)
-        .letterSpacing(3)
+        .fontWeight(DesignSystem.Typography.weight.bold)
+        .letterSpacing(4)
+        .textShadow({
+          radius: 8,
+          color: this.isLightMode ? 'rgba(139, 105, 20, 0.2)' : 'rgba(212, 180, 131, 0.3)',
+          offsetX: 0,
+          offsetY: 2
+        })
+      
+      Text('畅享阅读时光')
+        .fontSize(DesignSystem.Typography.size.sm)
+        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .margin({ top: DesignSystem.Spacing.sm })
+        .letterSpacing(2)
     }
     .width('100%')
-    .padding({ top: 12, bottom: 20 })
+    .padding({
+      top: DesignSystem.Spacing.xl,
+      bottom: DesignSystem.Spacing.xxl
+    })
   }
 
   @Builder
-  buildCoreSection() {
+  buildMenuSection() {
     Column() {
-      Text($r('app.string.core_display'))
-        .width('100%')
-        .fontSize(16)
-        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-        .fontWeight(600)
-        .margin({ bottom: 16 })
-
-      this.buildButtonGrid()
+      Row() {
+        Text($r('app.string.core_display'))
+          .fontSize(DesignSystem.Typography.size.base)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+      }
+      .width('100%')
+      .margin({ bottom: DesignSystem.Spacing.md })
+      
+      this.buildMenuGrid()
     }
     .width('100%')
-    .margin(10)
-    .padding({ left: 15, right: 15 })
+    .padding({
+      left: DesignSystem.Spacing.lg,
+      right: DesignSystem.Spacing.lg
+    })
   }
 
   @Builder
-  buildButtonGrid() {
-    Column({ space: 8 }) {
-      this.buildCoreButton(
-        $r('app.string.my_bookshelf'),
-        $r('app.string.my_bookshelf_desc'),
-        '📖',
-        '1'
-      )
-
-      this.buildCoreButton(
-        $r('app.string.search_books'),
-        $r('app.string.search_books_desc'),
-        '🔍',
-        '2'
-      )
-
-      this.buildCoreButton(
-        $r('app.string.source_management'),
-        $r('app.string.source_management_desc'),
-        '📚',
-        '3'
-      )
-
-      this.buildCoreButton(
-        $r('app.string.settings'),
-        $r('app.string.settings_desc'),
-        '⚙️',
-        '4'
-      )
+  buildMenuGrid() {
+    Column({ space: DesignSystem.Spacing.md }) {
+      ForEach(this.menuItems, (item: MenuItem) => {
+        this.buildMenuItem(item)
+      })
     }
     .width('100%')
   }
 
   @Builder
-  buildCoreButton(title: ResourceStr, desc: ResourceStr, icon: string, key: string) {
+  buildMenuItem(item: MenuItem) {
     Row() {
       Row() {
-        Text(icon)
-          .fontSize(18)
+        Text(item.icon)
+          .fontSize(DesignSystem.IconSize.lg)
       }
-      .width(40)
-      .height(40)
-      .borderRadius(20)
-      .backgroundColor(DesignSystem.getBorderColor(this.isLightMode))
+      .width(48)
+      .height(48)
+      .borderRadius(DesignSystem.BorderRadius.lg)
+      .linearGradient({
+        angle: 135,
+        colors: item.gradientColors
+      })
       .justifyContent(FlexAlign.Center)
-      .margin({ right: 15 })
-
+      .shadow({
+        radius: 8,
+        color: `${item.gradientStart}40`,
+        offsetX: 0,
+        offsetY: 4
+      })
+      .margin({ right: DesignSystem.Spacing.md })
+      
       Column() {
-        Text(title)
-          .fontSize(16)
+        Text(item.title)
+          .fontSize(DesignSystem.Typography.size.base)
           .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(500)
-          .lineHeight(20)
-
-        Text(desc)
-          .fontSize(12)
+          .fontWeight(DesignSystem.Typography.weight.medium)
+          .lineHeight(22)
+        
+        Text(item.desc)
+          .fontSize(DesignSystem.Typography.size.xs)
           .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          .lineHeight(16)
-          .margin({ top: 4 })
+          .lineHeight(18)
+          .margin({ top: DesignSystem.Spacing.xs })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
-
-      Text('›')
-        .fontSize(24)
-        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-        .margin({ left: 10 })
+      
+      Row() {
+        Text('›')
+          .fontSize(DesignSystem.Typography.size.xl)
+          .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+      }
+      .width(32)
+      .height(32)
+      .borderRadius(DesignSystem.BorderRadius.md)
+      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+      .justifyContent(FlexAlign.Center)
     }
     .width('100%')
-    .height(64)
-    .padding({ top: 12, bottom: 12, left: 15, right: 15 })
-    .borderRadius(8)
-    .backgroundColor(this.buttonPressedMap.get(key) ? 
-      DesignSystem.getBorderColor(this.isLightMode) : 
+    .height(72)
+    .padding({
+      left: DesignSystem.Spacing.md,
+      right: DesignSystem.Spacing.md,
+      top: DesignSystem.Spacing.sm,
+      bottom: DesignSystem.Spacing.sm
+    })
+    .borderRadius(DesignSystem.BorderRadius.xl)
+    .backgroundColor(this.pressedItemId === item.id ?
+      DesignSystem.getActiveColor(this.isLightMode) :
       DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
     .border({
       width: 1,
       color: DesignSystem.getBorderColor(this.isLightMode)
     })
-    .gesture(
-      LongPressGesture({ repeat: false })
-        .onAction(() => {
-          this.buttonPressedMap.set(key, true);
-        })
-    )
+    .shadow({
+      radius: this.pressedItemId === item.id ? 2 : 4,
+      color: this.isLightMode ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.2)',
+      offsetX: 0,
+      offsetY: this.pressedItemId === item.id ? 1 : 2
+    })
+    .scale({
+      x: this.pressedItemId === item.id ? 0.98 : 1,
+      y: this.pressedItemId === item.id ? 0.98 : 1
+    })
+    .opacity(this.pressedItemId === item.id ? 0.9 : 1)
+    .animation({
+      duration: DesignSystem.AnimationDuration.fast,
+      curve: DesignSystem.AnimationCurve.easeOut
+    })
     .onClick(() => {
-      this.buttonPressedMap.set(key, true);
-      setTimeout(() => {
-        this.buttonPressedMap.set(key, false);
-      }, 150);
+      NavigationManager.getInstance().navigateTo(item.route);
     })
     .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-        this.buttonPressedMap.set(key, false);
+      if (event.type === TouchType.Down) {
+        this.pressedItemId = item.id;
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.pressedItemId = '';
       }
     })
+  }
+
+  @Builder
+  buildFooter() {
+    Column() {
+      Text('Made with ❤️ for readers')
+        .fontSize(DesignSystem.Typography.size.xs)
+        .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+    }
+    .width('100%')
+    .padding(DesignSystem.Spacing.lg)
   }
 }

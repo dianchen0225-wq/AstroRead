@@ -3,6 +3,110 @@
  * 提供统一的视觉、间距、颜色、字体规范
  */
 
+// 接口定义 - 必须在使用前定义
+export interface CardStyle {
+  backgroundColor: string;
+  borderRadius: number;
+  borderWidth: number;
+  borderColor: string;
+  shadow: string;
+  padding: number;
+}
+
+export interface PaddingConfig {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+export interface ButtonStyle {
+  backgroundColor: string;
+  textColor: string;
+  borderRadius: number;
+  padding: PaddingConfig;
+  fontSize: number;
+  fontWeight: number;
+}
+
+export interface InputStyle {
+  backgroundColor: string;
+  textColor: string;
+  placeholderColor: string;
+  borderColor: string;
+  focusBorderColor: string;
+  borderRadius: number;
+  borderWidth: number;
+  padding: PaddingConfig;
+  fontSize: number;
+}
+
+export interface ColorVariant {
+  light: string;
+  dark: string;
+}
+
+export interface StatusColorsConfig {
+  success: ColorVariant;
+  warning: ColorVariant;
+  error: ColorVariant;
+  info: ColorVariant;
+}
+
+export interface ShadowVariant {
+  light: string;
+  dark: string;
+}
+
+export interface ShadowsConfig {
+  sm: ShadowVariant;
+  md: ShadowVariant;
+  lg: ShadowVariant;
+  xl: ShadowVariant;
+}
+
+export interface AnimationDurationConfig {
+  instant: number;
+  fast: number;
+  normal: number;
+  slow: number;
+  slower: number;
+}
+
+export interface AnimationCurveConfig {
+  easeIn: string;
+  easeOut: string;
+  easeInOut: string;
+  linear: string;
+  spring: string;
+}
+
+export interface ZIndexConfig {
+  base: number;
+  dropdown: number;
+  sticky: number;
+  modal: number;
+  popover: number;
+  toast: number;
+  tooltip: number;
+}
+
+export interface AccessibilityConfig {
+  minTouchTarget: number;
+  minContrastRatio: number;
+  focusRingWidth: number;
+  focusRingOffset: number;
+}
+
+export interface IconSizeConfig {
+  xs: number;
+  sm: number;
+  md: number;
+  lg: number;
+  xl: number;
+  xxl: number;
+}
+
 // 颜色主题类
 class ColorTheme {
   light: string = '';
@@ -380,5 +484,162 @@ export class DesignSystem {
 
   static getFocusColor(isLightMode: boolean): string {
     return isLightMode ? DesignSystem.Colors.state.focus.light : DesignSystem.Colors.state.focus.dark;
+  }
+
+  // 状态颜色
+  static readonly StatusColors: StatusColorsConfig = {
+    success: { light: '#4CAF50', dark: '#66BB6A' } as ColorVariant,
+    warning: { light: '#FF9800', dark: '#FFB74D' } as ColorVariant,
+    error: { light: '#F44336', dark: '#EF5350' } as ColorVariant,
+    info: { light: '#2196F3', dark: '#42A5F5' } as ColorVariant
+  };
+
+  static getSuccessColor(isLightMode: boolean): string {
+    return isLightMode ? DesignSystem.StatusColors.success.light : DesignSystem.StatusColors.success.dark;
+  }
+
+  static getWarningColor(isLightMode: boolean): string {
+    return isLightMode ? DesignSystem.StatusColors.warning.light : DesignSystem.StatusColors.warning.dark;
+  }
+
+  static getErrorColor(isLightMode: boolean): string {
+    return isLightMode ? DesignSystem.StatusColors.error.light : DesignSystem.StatusColors.error.dark;
+  }
+
+  static getInfoColor(isLightMode: boolean): string {
+    return isLightMode ? DesignSystem.StatusColors.info.light : DesignSystem.StatusColors.info.dark;
+  }
+
+  // 阴影系统
+  static readonly Shadows: ShadowsConfig = {
+    sm: { light: '0 1px 2px rgba(0, 0, 0, 0.05)', dark: '0 1px 2px rgba(0, 0, 0, 0.3)' } as ShadowVariant,
+    md: { light: '0 4px 6px rgba(0, 0, 0, 0.07)', dark: '0 4px 6px rgba(0, 0, 0, 0.4)' } as ShadowVariant,
+    lg: { light: '0 10px 15px rgba(0, 0, 0, 0.1)', dark: '0 10px 15px rgba(0, 0, 0, 0.5)' } as ShadowVariant,
+    xl: { light: '0 20px 25px rgba(0, 0, 0, 0.15)', dark: '0 20px 25px rgba(0, 0, 0, 0.6)' } as ShadowVariant
+  };
+
+  // 动画时长
+  static readonly AnimationDuration: AnimationDurationConfig = {
+    instant: 0,
+    fast: 100,
+    normal: 200,
+    slow: 300,
+    slower: 500
+  };
+
+  // 动画曲线
+  static readonly AnimationCurve: AnimationCurveConfig = {
+    easeIn: 'ease-in',
+    easeOut: 'ease-out',
+    easeInOut: 'ease-in-out',
+    linear: 'linear',
+    spring: 'spring(1, 100, 10, 0)'
+  };
+
+  // Z-Index层级
+  static readonly ZIndex: ZIndexConfig = {
+    base: 0,
+    dropdown: 100,
+    sticky: 200,
+    modal: 300,
+    popover: 400,
+    toast: 500,
+    tooltip: 600
+  };
+
+  // 无障碍访问 - 最小触摸目标尺寸
+  static readonly Accessibility: AccessibilityConfig = {
+    minTouchTarget: 44,
+    minContrastRatio: 4.5,
+    focusRingWidth: 2,
+    focusRingOffset: 2
+  };
+
+  // 图标尺寸
+  static readonly IconSize: IconSizeConfig = {
+    xs: 12,
+    sm: 16,
+    md: 20,
+    lg: 24,
+    xl: 32,
+    xxl: 48
+  };
+
+  // 卡片样式
+  static getCardStyle(isLightMode: boolean): CardStyle {
+    return {
+      backgroundColor: DesignSystem.getSecondaryBackgroundColor(isLightMode),
+      borderRadius: DesignSystem.BorderRadius.lg,
+      borderWidth: 1,
+      borderColor: DesignSystem.getBorderColor(isLightMode),
+      shadow: isLightMode ? DesignSystem.Shadows.sm.light : DesignSystem.Shadows.sm.dark,
+      padding: DesignSystem.Spacing.lg
+    };
+  }
+
+  // 按钮样式
+  static getButtonStyle(isLightMode: boolean, variant: 'primary' | 'secondary' | 'ghost' = 'primary'): ButtonStyle {
+    const padding: PaddingConfig = {
+      left: DesignSystem.Spacing.lg,
+      right: DesignSystem.Spacing.lg,
+      top: DesignSystem.Spacing.sm,
+      bottom: DesignSystem.Spacing.sm
+    };
+    
+    switch (variant) {
+      case 'primary':
+        const primaryStyle: ButtonStyle = {
+          backgroundColor: DesignSystem.getPrimaryColor(isLightMode),
+          textColor: '#FFFFFF',
+          borderRadius: DesignSystem.BorderRadius.md,
+          padding: padding,
+          fontSize: DesignSystem.Typography.size.sm,
+          fontWeight: DesignSystem.Typography.weight.medium
+        };
+        return primaryStyle;
+      case 'secondary':
+        const secondaryStyle: ButtonStyle = {
+          backgroundColor: DesignSystem.getSecondaryBackgroundColor(isLightMode),
+          textColor: DesignSystem.getPrimaryTextColor(isLightMode),
+          borderRadius: DesignSystem.BorderRadius.md,
+          padding: padding,
+          fontSize: DesignSystem.Typography.size.sm,
+          fontWeight: DesignSystem.Typography.weight.medium
+        };
+        return secondaryStyle;
+      case 'ghost':
+        const ghostStyle: ButtonStyle = {
+          backgroundColor: 'transparent',
+          textColor: DesignSystem.getPrimaryColor(isLightMode),
+          borderRadius: DesignSystem.BorderRadius.md,
+          padding: padding,
+          fontSize: DesignSystem.Typography.size.sm,
+          fontWeight: DesignSystem.Typography.weight.medium
+        };
+        return ghostStyle;
+    }
+  }
+
+  // 输入框样式
+  static getInputStyle(isLightMode: boolean): InputStyle {
+    const padding: PaddingConfig = {
+      left: DesignSystem.Spacing.md,
+      right: DesignSystem.Spacing.md,
+      top: DesignSystem.Spacing.sm,
+      bottom: DesignSystem.Spacing.sm
+    };
+    
+    const inputStyle: InputStyle = {
+      backgroundColor: DesignSystem.getTertiaryBackgroundColor(isLightMode),
+      textColor: DesignSystem.getPrimaryTextColor(isLightMode),
+      placeholderColor: DesignSystem.getTertiaryTextColor(isLightMode),
+      borderColor: DesignSystem.getBorderColor(isLightMode),
+      focusBorderColor: DesignSystem.getPrimaryColor(isLightMode),
+      borderRadius: DesignSystem.BorderRadius.md,
+      borderWidth: 1,
+      padding: padding,
+      fontSize: DesignSystem.Typography.size.base
+    };
+    return inputStyle;
   }
 }

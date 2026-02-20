@@ -8,14 +8,8 @@ import astroReadJSRuntime, { SearchContext } from './AstroReadJSRuntime';
 import { Logger } from './Logger';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { RequestEnhancer, RequestLog } from './RequestEnhancer';
-
-
-interface RetryConfig {
-  maxRetries: number;
-  baseDelay: number;
-  maxDelay: number;
-  retryableStatusCodes: number[];
-}
+import { util } from '@kit.ArkTS';
+import { networkConfigManager, RetryConfig, TimeoutConfig } from './NetworkConfig';
 
 interface NetworkSecurityOptions {
   skipSSLVerification: boolean;
@@ -28,13 +22,6 @@ interface UrlConfig {
   body?: string;
   headers: HttpHeaderMap;
 }
-
-const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  maxRetries: 3,
-  baseDelay: 1000,
-  maxDelay: 10000,
-  retryableStatusCodes: [408, 429, 500, 502, 503, 504]
-};
 
 const DEFAULT_SECURITY_OPTIONS: NetworkSecurityOptions = {
   skipSSLVerification: true,
@@ -100,34 +87,42 @@ export class NetworkManager {
     return new Promise<void>(resolve => setTimeout(resolve, ms));
   }
 
-  private isRetryableError(error: Error, statusCode?: number, config: RetryConfig = DEFAULT_RETRY_CONFIG): boolean {
-    if (statusCode && config.retryableStatusCodes.includes(statusCode)) {
-      return true;
-    }
+  private isRetryableError(error: Error, statusCode?: number, config?: RetryConfig): boolean {
+    const retryConfig = config ?? networkConfigManager.getRetryConfig();
+    const errorType = this.getErrorType(error);
 
-    const errorMessage = error.message.toLowerCase();
-    return errorMessage.includes('timeout') ||
-      errorMessage.includes('network') ||
-      errorMessage.includes('connection') ||
-      errorMessage.includes('econnreset') ||
-      errorMessage.includes('econnrefused');
+    return networkConfigManager.isRetryableError(errorType, statusCode);
+  }
+
+  private getErrorType(error: Error): string {
+    const message = error.message.toLowerCase();
+    if (message.includes('timeout')) {
+      return 'timeout';
+    } else if (message.includes('network') || message.includes('connection') ||
+      message.includes('econnreset') || message.includes('econnrefused')) {
+      return 'network';
+    } else if (message.includes('dns') || message.includes('enotfound')) {
+      return 'dns';
+    }
+    return 'unknown';
   }
 
   async requestWithRetry<T>(
     requestFn: () => Promise<T>,
-    config: RetryConfig = DEFAULT_RETRY_CONFIG
+    config?: RetryConfig
   ): Promise<T> {
+    const retryConfig = config ?? networkConfigManager.getRetryConfig();
     let lastError: Error = new Error('Unknown error');
 
-    for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
       try {
         return await requestFn();
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        if (attempt < config.maxRetries && this.isRetryableError(lastError, undefined, config)) {
-          const delay = this.calculateBackoffDelay(attempt, config.baseDelay, config.maxDelay);
-          Logger.warn('NetworkManager', `请求失败，${delay}ms后重试 (${attempt + 1}/${config.maxRetries}): ${lastError.message}`);
+        if (attempt < retryConfig.maxRetries && this.isRetryableError(lastError, undefined, retryConfig)) {
+          const delay = this.calculateBackoffDelay(attempt, retryConfig.baseDelay, retryConfig.maxDelay);
+          Logger.warn('NetworkManager', `请求失败，${delay}ms后重试 (${attempt + 1}/${retryConfig.maxRetries}): ${lastError.message}`);
           await this.sleep(delay);
         } else {
           break;
@@ -208,12 +203,14 @@ export class NetworkManager {
         requestLog.requestHeaders = requestHeaders;
         requestLog.retryCount = retryCount;
 
+        const timeoutConfig = networkConfigManager.getTimeoutConfig();
+
         const requestOptions: http.HttpRequestOptions = {
           method: http.RequestMethod.GET,
           header: this.mapToRecord(requestHeaders),
-          connectTimeout: 60000,
-          readTimeout: 60000,
-          expectDataType: http.HttpDataType.STRING
+          connectTimeout: timeoutConfig.connectTimeout,
+          readTimeout: timeoutConfig.readTimeout,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER
         };
 
         const response = await httpRequest.request(url, requestOptions);
@@ -223,7 +220,8 @@ export class NetworkManager {
         requestLog.responseTime = responseTime;
 
         if (response.responseCode === 200 || response.responseCode === 202) {
-          const responseText = response.result.toString();
+          const arrayBuffer = response.result as ArrayBuffer;
+          const responseText = this.decodeResponse(arrayBuffer, response.header);
           requestLog.responseSize = responseText.length;
 
           if (this.isAntiCrawlingResponse(responseText)) {
@@ -303,7 +301,7 @@ export class NetworkManager {
       '人机验证',
       '安全验证'
     ];
-    
+
     const lowerHtml = html.toLowerCase();
     for (const indicator of antiCrawlingIndicators) {
       if (lowerHtml.includes(indicator.toLowerCase())) {
@@ -311,6 +309,134 @@ export class NetworkManager {
       }
     }
     return false;
+  }
+
+  /**
+   * 解码响应数据，自动检测编码
+   */
+  private decodeResponse(arrayBuffer: ArrayBuffer, headers: object): string {
+    const uint8Data = new Uint8Array(arrayBuffer);
+
+    const charsetFromHeader = this.detectCharsetFromHeader(headers);
+    if (charsetFromHeader) {
+      try {
+        const decoder = util.TextDecoder.create(charsetFromHeader, { ignoreBOM: true });
+        const text = decoder.decodeToString(uint8Data);
+        if (this.isValidDecodedContent(text)) {
+          Logger.debug('NetworkManager', `使用响应头编码: ${charsetFromHeader}`);
+          return text;
+        }
+      } catch (e) {
+        Logger.warn('NetworkManager', `响应头编码 ${charsetFromHeader} 解码失败，尝试其他编码`);
+      }
+    }
+
+    const charsetFromContent = this.detectCharsetFromContent(uint8Data);
+    if (charsetFromContent && charsetFromContent !== charsetFromHeader) {
+      try {
+        const decoder = util.TextDecoder.create(charsetFromContent, { ignoreBOM: true });
+        const text = decoder.decodeToString(uint8Data);
+        if (this.isValidDecodedContent(text)) {
+          Logger.debug('NetworkManager', `使用内容检测编码: ${charsetFromContent}`);
+          return text;
+        }
+      } catch (e) {
+        Logger.warn('NetworkManager', `内容检测编码 ${charsetFromContent} 解码失败`);
+      }
+    }
+
+    const encodings: string[] = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5'];
+    for (const encoding of encodings) {
+      if (encoding === charsetFromHeader || encoding === charsetFromContent) {
+        continue;
+      }
+      try {
+        const decoder = util.TextDecoder.create(encoding, { ignoreBOM: true });
+        const text = decoder.decodeToString(uint8Data);
+        if (this.isValidDecodedContent(text)) {
+          Logger.debug('NetworkManager', `使用自动检测编码: ${encoding}`);
+          return text;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    const defaultDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+    return defaultDecoder.decodeToString(uint8Data);
+  }
+
+  /**
+   * 从响应头检测编码
+   */
+  private detectCharsetFromHeader(headers: object): string | null {
+    const contentType = this.getHeaderValue(headers, 'Content-Type');
+    if (!contentType) {
+      return null;
+    }
+
+    const charsetMatch = contentType.match(/charset=["']?([^;"'\s]+)["']?/i);
+    if (charsetMatch) {
+      let charset = charsetMatch[1].toLowerCase();
+      charset = this.normalizeCharset(charset);
+      return charset;
+    }
+    return null;
+  }
+
+  /**
+   * 从内容检测编码（检查 meta 标签）
+   */
+  private detectCharsetFromContent(uint8Data: Uint8Array): string | null {
+    try {
+      const asciiDecoder = util.TextDecoder.create('ascii', { ignoreBOM: true });
+      const preview = asciiDecoder.decodeToString(uint8Data.slice(0, 1024));
+
+      const metaCharsetMatch = preview.match(/<meta[^>]+charset=["']?([^"'\s>]+)["']?/i);
+      if (metaCharsetMatch) {
+        let charset = metaCharsetMatch[1].toLowerCase();
+        charset = this.normalizeCharset(charset);
+        return charset;
+      }
+
+      const contentTypeMatch = preview.match(/<meta[^>]+content=["'][^"']*charset=([^"'\s;]+)/i);
+      if (contentTypeMatch) {
+        let charset = contentTypeMatch[1].toLowerCase();
+        charset = this.normalizeCharset(charset);
+        return charset;
+      }
+    } catch (e) {
+      // 忽略错误
+    }
+    return null;
+  }
+
+  /**
+   * 标准化编码名称
+   */
+  private normalizeCharset(charset: string): string {
+    const charsetMap: Record<string, string> = {
+      'utf8': 'utf-8',
+      'gb2312': 'gbk',
+      'gb_2312': 'gbk',
+      'gb231280': 'gbk',
+      'x-gbk': 'gbk',
+      'iso-8859-1': 'latin1',
+      'iso8859-1': 'latin1'
+    };
+
+    const normalized = charset.toLowerCase().trim();
+    return charsetMap[normalized] || normalized;
+  }
+
+  /**
+   * 检查解码后的内容是否有效（无乱码）
+   */
+  private isValidDecodedContent(content: string): boolean {
+    const replacementChar = '\uFFFD';
+    const replacementCount = (content.match(new RegExp(replacementChar, 'g')) || []).length;
+    const ratio = replacementCount / content.length;
+    return ratio < 0.01;
   }
 
   private getHeaderValue(headers: object, key: string): string | undefined {
@@ -403,12 +529,15 @@ export class NetworkManager {
         requestLog.requestHeaders = mergedHeaders;
         requestLog.retryCount = retryCount;
 
+        const timeoutConfig = networkConfigManager.getTimeoutConfig();
+
         const requestOptions: http.HttpRequestOptions = {
           method: http.RequestMethod.POST,
           header: this.mapToRecord(mergedHeaders),
           extraData: data,
-          connectTimeout: 30000,
-          readTimeout: 30000
+          connectTimeout: timeoutConfig.connectTimeout,
+          readTimeout: timeoutConfig.readTimeout,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER
         };
 
         const response = await httpRequest.request(url, requestOptions);
@@ -418,7 +547,8 @@ export class NetworkManager {
         requestLog.responseTime = responseTime;
 
         if (response.responseCode === 200) {
-          const responseText = response.result.toString();
+          const arrayBuffer = response.result as ArrayBuffer;
+          const responseText = this.decodeResponse(arrayBuffer, response.header);
           requestLog.responseSize = responseText.length;
 
           if (maxResponseSize && responseText.length > maxResponseSize) {
@@ -579,7 +709,7 @@ export class NetworkManager {
       }
 
       Logger.info(TAG, `最终搜索URL: ${finalUrl}, 方法: ${urlConfig.method}`);
-      
+
       let html: string;
       try {
         if (urlConfig.method === 'POST') {
@@ -592,7 +722,7 @@ export class NetworkManager {
         Logger.error(TAG, `网络请求失败: ${netError instanceof Error ? netError.message : String(netError)}`);
         return [];
       }
-      
+
       if (!html || html.length === 0) {
         Logger.warn(TAG, `响应内容为空`);
         return [];
@@ -637,7 +767,7 @@ export class NetworkManager {
 
     try {
       const parsed = JSON.parse(configStr) as Record<string, string | number | boolean | object | null | undefined>;
-      
+
       if (parsed.method && typeof parsed.method === 'string') {
         const method = parsed.method.toUpperCase();
         if (method === 'POST') {

@@ -4,8 +4,11 @@ import {
   PagedSearchResult, 
   SearchPaginationConfig, 
   DEFAULT_PAGINATION_CONFIG,
-  SearchProgress
+  SearchProgress,
+  SearchStopCondition,
+  DEFAULT_STOP_CONDITION
 } from '../models/SearchResult';
+import { BookFoundCallback } from '../utils/BookSourceSearchEngine';
 import { databaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import SearchEnhancer from '../utils/SearchEnhancer';
@@ -234,18 +237,20 @@ export class BookViewModel {
   }
 
   /**
-   * 分页搜索书籍 - 支持分页控制和进度回调
+   * 分页搜索书籍 - 支持渐进式加载和智能停止
    */
   async searchBooksWithPaging(
     keyword: string, 
     bookSources: BookSource[], 
     page: number = 1,
-    progressCallback?: SearchProgressCallback
+    progressCallback?: SearchProgressCallback,
+    bookFoundCallback?: BookFoundCallback,
+    stopCondition?: SearchStopCondition
   ): Promise<PagedSearchResult> {
     const startTime = Date.now();
     
     try {
-      Logger.info('BookViewModel', `开始分页搜索书籍："${keyword}", 第${page}页`);
+      Logger.info('BookViewModel', `开始渐进式搜索书籍："${keyword}", 第${page}页`);
       
       await this.addToSearchHistory(keyword);
       
@@ -255,20 +260,22 @@ export class BookViewModel {
           key: keyword,
           page: page,
           pageSize: this.paginationConfig.pageSize,
-          maxResultsPerSource: this.paginationConfig.maxResultsPerSource
+          maxResultsPerSource: this.paginationConfig.maxResultsPerSource,
+          stopCondition: stopCondition || DEFAULT_STOP_CONDITION
         },
-        progressCallback
+        progressCallback,
+        bookFoundCallback
       );
       
       const duration = Date.now() - startTime;
       Logger.info('BookViewModel', 
-        `分页搜索完成，共${result.totalCount}本书，当前第${result.currentPage}/${result.totalPages}页，耗时${duration}ms`
+        `渐进式搜索完成，共${result.totalCount}本书，当前第${result.currentPage}/${result.totalPages}页，耗时${duration}ms`
       );
       
       return result;
       
     } catch (error) {
-      Logger.error('BookViewModel', `分页搜索书籍失败：${error}`);
+      Logger.error('BookViewModel', `渐进式搜索书籍失败：${error}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
   }

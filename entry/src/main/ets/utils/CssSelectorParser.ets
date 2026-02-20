@@ -576,7 +576,7 @@ export class CssSelectorParser {
   }
 
   /**
-   * 提取所有文本节点内容（Legado格式的@textNodes）
+   * 提取所有文本节点内容（标准格式的@textNodes）
    * 递归提取HTML中所有文本内容，保留换行
    */
   static extractTextNodes(html: string): string {
@@ -603,7 +603,7 @@ export class CssSelectorParser {
   }
 
   /**
-   * 应用多个替换规则（Legado格式，用|分隔）
+   * 应用多个替换规则（标准格式，用|分隔）
    */
   static applyReplacePatterns(text: string, patterns: string[]): string {
     if (!text || patterns.length === 0) {

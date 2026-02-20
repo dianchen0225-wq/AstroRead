@@ -11,7 +11,9 @@ import {
   SearchPaginationConfig, 
   DEFAULT_PAGINATION_CONFIG,
   SearchResultBuilder,
-  SearchProgress
+  SearchProgress,
+  SearchStopCondition,
+  DEFAULT_STOP_CONDITION
 } from '../models/SearchResult';
 import NetworkAdapter, { NetworkError } from './NetworkAdapter';
 import { HTMLParser } from './HTMLParser';
@@ -37,9 +39,11 @@ export interface SearchOptions {
   interval?: number;
   pageSize?: number;
   maxResultsPerSource?: number;
+  stopCondition?: SearchStopCondition;
 }
 
 export type SearchProgressCallback = (progress: SearchProgress) => void;
+export type BookFoundCallback = (books: Book[], progress: SearchProgress) => void;
 
 interface UrlConfig {
   method: 'GET' | 'POST';
@@ -87,6 +91,23 @@ export class BookSourceSearchEngine {
     return BookSourceSearchEngine.instance;
   }
 
+  /**
+   * 复制 SearchProgress 对象（ArkTS 不支持 spread 操作符）
+   */
+  private cloneSearchProgress(progress: SearchProgress): SearchProgress {
+    const clone: SearchProgress = {
+      totalSources: progress.totalSources,
+      completedSources: progress.completedSources,
+      currentSource: progress.currentSource,
+      foundBooks: progress.foundBooks,
+      isComplete: progress.isComplete
+    };
+    if (progress.newBooks !== undefined) {
+      clone.newBooks = progress.newBooks;
+    }
+    return clone;
+  }
+
   cancelSearch(): void {
     this.isCancelled = true;
     this.clearAllTimers();
@@ -101,18 +122,20 @@ export class BookSourceSearchEngine {
   }
 
   /**
-   * 分页搜索 - 支持多书源并发搜索并返回分页结果
+   * 分页搜索 - 支持渐进式加载和智能停止
    */
   async searchWithPaging(
     sources: BookSource[],
     options: SearchOptions,
-    progressCallback?: SearchProgressCallback
+    progressCallback?: SearchProgressCallback,
+    bookFoundCallback?: BookFoundCallback
   ): Promise<PagedSearchResult> {
     const searchKey = options.key;
     const displayPage = options.page || 1;
     const concurrent = options.concurrent || this.config.maxConcurrent;
     const pageSize = options.pageSize || this.paginationConfig.pageSize;
     const maxPerSource = options.maxResultsPerSource || this.paginationConfig.maxResultsPerSource;
+    const stopCondition = options.stopCondition || DEFAULT_STOP_CONDITION;
 
     const config: SearchPaginationConfig = {
       pageSize: pageSize,
@@ -140,18 +163,22 @@ export class BookSourceSearchEngine {
       return scoreB - scoreA;
     });
 
-    Logger.info(this.TAG, `开始分页搜索: "${searchKey}", 书源数: ${sortedSources.length}, 每页: ${pageSize}`);
+    Logger.info(this.TAG, `开始渐进式搜索: "${searchKey}", 书源数: ${sortedSources.length}, 每页: ${pageSize}`);
 
     const progress: SearchProgress = {
       totalSources: sortedSources.length,
       completedSources: 0,
       currentSource: '',
       foundBooks: 0,
-      isComplete: false
+      isComplete: false,
+      newBooks: []
     };
 
+    const startTime = Date.now();
+    let shouldStop = false;
     let lastProgressUpdate = 0;
     const THROTTLE_MS = 200;
+
     const throttledProgressCallback = progressCallback ? (p: SearchProgress) => {
       const now = Date.now();
       if (now - lastProgressUpdate >= THROTTLE_MS || p.isComplete) {
@@ -160,85 +187,136 @@ export class BookSourceSearchEngine {
       }
     } : undefined;
 
-    const executing: Promise<void>[] = [];
-    const mutex = this.createMutex();
+    const checkStopCondition = (): boolean => {
+      const elapsed = Date.now() - startTime;
+      const totalBooks = resultBuilder.getTotalCount();
+      const successSources = progress.completedSources;
 
-    for (let i = 0; i < sortedSources.length; i++) {
-      const source = sortedSources[i];
-
-      if (executing.length >= concurrent) {
-        await Promise.race(executing);
+      if (totalBooks >= stopCondition.maxBooks) {
+        Logger.info(this.TAG, `智能停止: 已找到${totalBooks}本书，达到最大数量${stopCondition.maxBooks}`);
+        return true;
       }
 
-      await this.checkRateLimit(source.url);
+      if (elapsed >= stopCondition.maxTime) {
+        Logger.info(this.TAG, `智能停止: 搜索时间${elapsed}ms超过阈值${stopCondition.maxTime}ms`);
+        return true;
+      }
 
-      const promise = this.searchSingleSource(source, searchKey, 1)
-        .then((result: SearchResult) => {
-          resultBuilder.addSourceResult(
-            source.id,
-            source.name,
-            result.books,
-            result.success,
-            result.error,
-            result.responseTime
-          );
-          
-          if (result.success) {
-            sourceHealthManager.recordSuccess(source.id, source.name, source.url, result.responseTime);
-          } else {
-            const networkError = this.parseNetworkError(result.error || '');
+      if (successSources >= stopCondition.minSources && totalBooks > 0) {
+        Logger.info(this.TAG, `智能停止: 已搜索${successSources}个书源，找到${totalBooks}本书`);
+        return true;
+      }
+
+      return false;
+    };
+
+    const executing: Promise<void>[] = [];
+    const pendingSources: BookSource[] = sortedSources.slice();
+
+    while (pendingSources.length > 0 && !shouldStop) {
+      while (executing.length < concurrent && pendingSources.length > 0 && !shouldStop) {
+        const source = pendingSources.shift()!;
+        
+        await this.checkRateLimit(source.url);
+
+        const promise = this.searchSingleSource(source, searchKey, 1)
+          .then((result: SearchResult) => {
+            if (shouldStop) return;
+
+            const newBooks = resultBuilder.addSourceResult(
+              source.id,
+              source.name,
+              result.books,
+              result.success,
+              result.error,
+              result.responseTime
+            );
+            
+            if (result.success) {
+              sourceHealthManager.recordSuccess(source.id, source.name, source.url, result.responseTime);
+            } else {
+              const networkError = this.parseNetworkError(result.error || '');
+              sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
+            }
+
+            progress.completedSources++;
+            progress.currentSource = source.name;
+            progress.foundBooks = resultBuilder.getTotalCount();
+            progress.newBooks = newBooks;
+
+            if (bookFoundCallback && newBooks.length > 0) {
+              bookFoundCallback(newBooks, this.cloneSearchProgress(progress));
+            }
+
+            if (throttledProgressCallback) {
+              throttledProgressCallback(this.cloneSearchProgress(progress));
+            }
+
+            if (checkStopCondition()) {
+              shouldStop = true;
+              progress.isComplete = true;
+              if (throttledProgressCallback) {
+                throttledProgressCallback(this.cloneSearchProgress(progress));
+              }
+            }
+          })
+          .catch((error: Error) => {
+            if (shouldStop) return;
+            
+            Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
+            
+            const networkError = this.parseNetworkError(error.message);
             sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
-          }
+            
+            resultBuilder.addSourceResult(
+              source.id,
+              source.name,
+              [],
+              false,
+              String(error),
+              0
+            );
 
-          if (throttledProgressCallback) {
             progress.completedSources++;
             progress.currentSource = source.name;
             progress.foundBooks = resultBuilder.getTotalCount();
-            progress.isComplete = progress.completedSources >= progress.totalSources;
-            throttledProgressCallback(progress);
-          }
-        })
-        .catch((error: Error) => {
-          Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
-          
-          const networkError = this.parseNetworkError(error.message);
-          sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
-          
-          resultBuilder.addSourceResult(
-            source.id,
-            source.name,
-            [],
-            false,
-            String(error),
-            0
-          );
 
-          if (throttledProgressCallback) {
-            progress.completedSources++;
-            progress.currentSource = source.name;
-            progress.foundBooks = resultBuilder.getTotalCount();
-            progress.isComplete = progress.completedSources >= progress.totalSources;
-            throttledProgressCallback(progress);
-          }
-        })
-        .finally(() => {
-          const index = executing.indexOf(promise);
-          if (index > -1) {
-            executing.splice(index, 1);
-          }
-        });
+            if (throttledProgressCallback) {
+              throttledProgressCallback(this.cloneSearchProgress(progress));
+            }
+          })
+          .finally(() => {
+            const index = executing.indexOf(promise);
+            if (index > -1) {
+              executing.splice(index, 1);
+            }
+          });
 
-      executing.push(promise);
+        executing.push(promise);
+      }
+
+      if (executing.length > 0 && !shouldStop) {
+        await Promise.race(executing);
+      }
     }
 
-    await Promise.all(executing);
+    if (executing.length > 0) {
+      await Promise.all(executing);
+    }
+
+    progress.isComplete = true;
+    progress.foundBooks = resultBuilder.getTotalCount();
+    if (throttledProgressCallback) {
+      throttledProgressCallback(this.cloneSearchProgress(progress));
+    }
 
     const pagedResult = resultBuilder.build(displayPage);
 
     Logger.info(this.TAG, 
-      `分页搜索完成: 共${pagedResult.totalCount}本书, ` +
+      `渐进式搜索完成: 共${pagedResult.totalCount}本书, ` +
       `第${pagedResult.currentPage}/${pagedResult.totalPages}页, ` +
-      `成功书源: ${pagedResult.sourceStats.filter((s: SourceSearchStats) => s.success).length}/${enabledSources.length}`
+      `成功书源: ${pagedResult.sourceStats.filter((s: SourceSearchStats) => s.success).length}/${enabledSources.length}` +
+      `${shouldStop ? ' (智能停止)' : ''}`
     );
 
     return pagedResult;
