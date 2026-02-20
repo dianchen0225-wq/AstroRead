@@ -27,22 +27,15 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-let taskPoolAvailable: boolean = true;
-let taskPoolCheckTime: number = 0;
-const TASKPOOL_CHECK_INTERVAL = 60000;
+let taskPoolAvailable: boolean = false;
+let taskPoolDisabled: boolean = true;
 
 function isTaskPoolAvailable(): boolean {
-  const now = Date.now();
-  if (now - taskPoolCheckTime > TASKPOOL_CHECK_INTERVAL) {
-    taskPoolCheckTime = now;
-    return taskPoolAvailable;
-  }
-  return taskPoolAvailable;
+  return taskPoolAvailable && !taskPoolDisabled;
 }
 
 function markTaskPoolUnavailable(): void {
   taskPoolAvailable = false;
-  taskPoolCheckTime = Date.now();
   Logger.warn(TAG, 'TaskPool 不可用，已切换到同步解析模式');
 }
 
