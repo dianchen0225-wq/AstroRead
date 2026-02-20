@@ -27,7 +27,7 @@ import { DesignSystem } from '../common/DesignSystem';
 import { Logger } from '../utils/Logger';
 import { NetworkManager } from '../utils/NetworkManager';
 import { SourceImportTaskPool } from '../utils/SourceImportTaskPool';
-import { promptAction } from '@kit.ArkUI';
+import { showToast } from '../utils/ToastUtils';
 
 export interface SourceItemData {
   name: string;
@@ -237,25 +237,21 @@ export struct SourcePage {
   showDeleteDisabledConfirm(): void {
     this.disabledSourceCount = this.allSourceList.filter((s: SourceItemData) => !s.enabled).length;
     if (this.disabledSourceCount === 0) {
-      try {
-        promptAction.showToast({
-          message: '没有禁用的书源',
-          duration: 2000
-        });
-      } catch (error) {
-        Logger.error('SourcePage', `显示提示失败: ${error}`);
-      }
+      showToast({
+        message: '没有禁用的书源',
+        duration: 2000
+      });
       return;
     }
     this.showDeleteConfirm = true;
   }
-  
+
   async deleteDisabledSources(): Promise<void> {
     if (this.isDeletingDisabled) return;
-    
+
     this.isDeletingDisabled = true;
     this.showDeleteConfirm = false;
-    
+
     try {
       const disabledIds: string[] = [];
       for (const item of this.allSourceList) {
@@ -263,52 +259,36 @@ export struct SourcePage {
           disabledIds.push(item.id);
         }
       }
-      
+
       if (disabledIds.length === 0) {
-        try {
-          promptAction.showToast({
-            message: '没有禁用的书源',
-            duration: 2000
-          });
-        } catch (error) {
-          Logger.error('SourcePage', `显示提示失败: ${error}`);
-        }
+        showToast({
+          message: '没有禁用的书源',
+          duration: 2000
+        });
         return;
       }
-      
+
       const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
       const result: DeleteResult = await bookSourceViewModel.batchDeleteBookSources(disabledIds);
-      
+
       if (result.success) {
-        try {
-          promptAction.showToast({
-            message: `成功删除 ${result.count || disabledIds.length} 个禁用书源`,
-            duration: 2000
-          });
-        } catch (error) {
-          Logger.error('SourcePage', `显示提示失败: ${error}`);
-        }
+        showToast({
+          message: `成功删除 ${result.count || disabledIds.length} 个禁用书源`,
+          duration: 2000
+        });
         await this.loadSources();
       } else {
-        try {
-          promptAction.showToast({
-            message: result.message || '删除失败',
-            duration: 2000
-          });
-        } catch (error) {
-          Logger.error('SourcePage', `显示提示失败: ${error}`);
-        }
+        showToast({
+          message: result.message || '删除失败',
+          duration: 2000
+        });
       }
     } catch (error) {
       Logger.error('SourcePage', `删除禁用书源失败: ${error}`);
-      try {
-        promptAction.showToast({
-          message: '删除失败',
-          duration: 2000
-        });
-      } catch (showError) {
-        Logger.error('SourcePage', `显示提示失败: ${showError}`);
-      }
+      showToast({
+        message: '删除失败',
+        duration: 2000
+      });
     } finally {
       this.isDeletingDisabled = false;
     }

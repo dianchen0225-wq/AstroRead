@@ -133,9 +133,13 @@ export class BookSourceRepository {
   async getBookSourcesPaged(page: number, pageSize: number): Promise<PagedBookSourcesResult> {
     const offset = (page - 1) * pageSize;
     const predicates = new relationalStore.RdbPredicates('book_source');
-    predicates.orderByAsc('sort');
-    predicates.limitAs(pageSize);
-    predicates.offsetAs(offset);
+    try {
+      predicates.orderByAsc('sort');
+      predicates.limitAs(pageSize);
+      predicates.offsetAs(offset);
+    } catch (error) {
+      Logger.error(BookSourceRepository.TAG, `设置分页查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
     let resultSet: relationalStore.ResultSet | null = null;
     let totalResultSet: relationalStore.ResultSet | null = null;

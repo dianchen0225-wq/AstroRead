@@ -1,6 +1,7 @@
 /**
  * AsyncCssSelectorParser - 异步 CSS 选择器解析器
  * 使用 TaskPool 将解析任务移至子线程，避免主线程阻塞
+ * 当 TaskPool 不可用时，自动降级到同步解析
  */
 
 import taskpool from '@ohos.taskpool';
@@ -8,9 +9,6 @@ import { Logger } from './Logger';
 
 const TAG = 'AsyncCssSelectorParser';
 
-/**
- * 解析任务参数
- */
 interface ParseTaskParams {
   html: string;
   selector: string;
@@ -18,9 +16,6 @@ interface ParseTaskParams {
   attribute?: string;
 }
 
-/**
- * 解析任务结果
- */
 interface ParseTaskResult {
   elements: string[];
   value: string;
@@ -28,11 +23,27 @@ interface ParseTaskResult {
   error?: string;
 }
 
-/**
- * 转义正则表达式特殊字符
- */
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+let taskPoolAvailable: boolean = true;
+let taskPoolCheckTime: number = 0;
+const TASKPOOL_CHECK_INTERVAL = 60000;
+
+function isTaskPoolAvailable(): boolean {
+  const now = Date.now();
+  if (now - taskPoolCheckTime > TASKPOOL_CHECK_INTERVAL) {
+    taskPoolCheckTime = now;
+    return taskPoolAvailable;
+  }
+  return taskPoolAvailable;
+}
+
+function markTaskPoolUnavailable(): void {
+  taskPoolAvailable = false;
+  taskPoolCheckTime = Date.now();
+  Logger.warn(TAG, 'TaskPool 不可用，已切换到同步解析模式');
 }
 
 /**
@@ -285,6 +296,7 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
 /**
  * 异步 CSS 选择器解析器
  * 使用 TaskPool 将解析任务移至子线程
+ * 当 TaskPool 不可用时，自动降级到同步解析
  */
 export class AsyncCssSelectorParser {
   private static instance: AsyncCssSelectorParser | null = null;
@@ -298,15 +310,198 @@ export class AsyncCssSelectorParser {
     return AsyncCssSelectorParser.instance;
   }
 
-  /**
-   * 异步选择元素
-   * @param html HTML 内容
-   * @param selector CSS 选择器
-   * @returns 匹配的元素数组
-   */
+  private decodeHtmlEntities(text: string): string {
+    if (!text) return '';
+
+    const entities: Record<string, string> = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#39;': "'",
+      '&nbsp;': ' ',
+      '&hellip;': '\u2026',
+      '&mdash;': '\u2014',
+      '&ndash;': '\u2013',
+      '&ldquo;': '"',
+      '&rdquo;': '"',
+      '&lsquo;': '\u2018',
+      '&rsquo;': '\u2019',
+    };
+
+    let result = text;
+    const entityKeys = Object.keys(entities);
+    for (const entity of entityKeys) {
+      result = result.split(entity).join(entities[entity]);
+    }
+
+    result = result.replace(/&#(\d+);/g, (_match: string, dec: string) => {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+
+    result = result.replace(/&#x([0-9a-fA-F]+);/g, (_match: string, hex: string) => {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+
+    return result;
+  }
+
+  private selectElementsSync(html: string, selector: string): string[] {
+    const elements: string[] = [];
+
+    if (!html || !selector) {
+      return elements;
+    }
+
+    let processedSelector = selector.trim();
+
+    if (processedSelector.startsWith('@js:') || processedSelector.startsWith('<js>')) {
+      return elements;
+    }
+
+    if (processedSelector.startsWith('@css:')) {
+      processedSelector = processedSelector.substring(5).trim();
+    }
+
+    if (processedSelector.includes('||')) {
+      const orSelectors = processedSelector.split('||').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+      
+      for (const orSelector of orSelectors) {
+        const result = this.selectElementsSync(html, orSelector);
+        if (result.length > 0) {
+          return result;
+        }
+      }
+      return elements;
+    }
+
+    let skipFirst = 0;
+
+    if (processedSelector.startsWith('class.')) {
+      processedSelector = '.' + processedSelector.substring(6);
+    }
+
+    if (processedSelector.startsWith('tag.')) {
+      processedSelector = processedSelector.substring(4);
+    }
+
+    if (processedSelector.startsWith('id.')) {
+      processedSelector = '#' + processedSelector.substring(3);
+    }
+
+    if (processedSelector.startsWith('//') || processedSelector.startsWith('./')) {
+      const xpathMatch = processedSelector.match(/\/\/([a-zA-Z][a-zA-Z0-9]*)/);
+      if (xpathMatch) {
+        processedSelector = xpathMatch[1];
+      } else {
+        return elements;
+      }
+    }
+
+    const skipMatch = processedSelector.match(/!(\d+)$/);
+    if (skipMatch) {
+      skipFirst = parseInt(skipMatch[1], 10);
+      processedSelector = processedSelector.substring(0, processedSelector.lastIndexOf('!'));
+    }
+
+    let index = -1;
+    const indexMatch = processedSelector.match(/\.(\d+)$/);
+    if (indexMatch) {
+      index = parseInt(indexMatch[1], 10);
+      processedSelector = processedSelector.substring(0, processedSelector.lastIndexOf('.'));
+    }
+
+    if (processedSelector.includes('@')) {
+      const atIndex = processedSelector.indexOf('@');
+      const parentSelector = processedSelector.substring(0, atIndex).trim();
+      const childSelector = processedSelector.substring(atIndex + 1).trim();
+
+      const parentElements = this.selectElementsSync(html, parentSelector);
+      for (const parentHtml of parentElements) {
+        const childElements = this.selectElementsSync(parentHtml, childSelector);
+        elements.push(...childElements);
+      }
+
+      if (skipFirst > 0 && elements.length > skipFirst) {
+        return elements.slice(skipFirst);
+      }
+      if (index >= 0 && index < elements.length) {
+        return [elements[index]];
+      }
+      return elements;
+    }
+
+    if (processedSelector.startsWith('.')) {
+      const className = processedSelector.substring(1).split(/[.\s#\[]/)[0];
+      const regex = new RegExp(
+        `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["'][^"']*\\b${escapeRegex(className)}\\b[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`,
+        'gi'
+      );
+      const matches = html.matchAll(regex);
+      for (const match of matches) {
+        elements.push(match[0]);
+      }
+    } else if (processedSelector.startsWith('#')) {
+      const id = processedSelector.substring(1).split(/[.\s#\[]/)[0];
+      const regex = new RegExp(
+        `<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${escapeRegex(id)}["'][^>]*>([\\s\\S]*?)(?:<\\/\\1>|(?=<[a-zA-Z]|$))`,
+        'i'
+      );
+      const match = regex.exec(html);
+      if (match) {
+        elements.push(match[0]);
+      }
+    } else {
+      const tagName = processedSelector.split(/[.\s#\[]/)[0];
+      if (tagName) {
+        const regex = new RegExp(
+          `<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`,
+          'gi'
+        );
+        const matches = html.matchAll(regex);
+        for (const match of matches) {
+          elements.push(match[0]);
+        }
+      }
+    }
+
+    if (index >= 0 && index < elements.length) {
+      return [elements[index]];
+    }
+
+    if (skipFirst > 0 && elements.length > skipFirst) {
+      return elements.slice(skipFirst);
+    }
+
+    return elements;
+  }
+
+  private extractValueSync(html: string, selector: string, attribute?: string): string {
+    const elements = this.selectElementsSync(html, selector);
+
+    if (elements.length === 0) {
+      return '';
+    }
+
+    const element = elements[0];
+
+    if (attribute) {
+      const attrRegex = new RegExp(`${escapeRegex(attribute)}=["']([^"']*)["']`, 'i');
+      const match = element.match(attrRegex);
+      return match ? this.decodeHtmlEntities(match[1]) : '';
+    } else {
+      const textMatch = element.match(/>([^<]*)</);
+      return textMatch ? this.decodeHtmlEntities(textMatch[1].trim()) : '';
+    }
+  }
+
   async selectElements(html: string, selector: string): Promise<string[]> {
     if (!html || !selector) {
       return [];
+    }
+
+    if (!isTaskPoolAvailable()) {
+      return this.selectElementsSync(html, selector);
     }
 
     try {
@@ -320,27 +515,25 @@ export class AsyncCssSelectorParser {
 
       if (!result.success) {
         Logger.warn(TAG, `解析失败: ${result.error}`);
-        return [];
+        return this.selectElementsSync(html, selector);
       }
 
       return result.elements;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      Logger.error(TAG, `任务执行失败: ${errorMsg}`);
-      return [];
+      Logger.error(TAG, `TaskPool任务执行失败: ${errorMsg}，降级到同步解析`);
+      markTaskPoolUnavailable();
+      return this.selectElementsSync(html, selector);
     }
   }
 
-  /**
-   * 异步提取属性值
-   * @param html HTML 内容
-   * @param selector CSS 选择器
-   * @param attribute 要提取的属性名（可选，不提供则提取文本内容）
-   * @returns 提取的值
-   */
   async extractValue(html: string, selector: string, attribute?: string): Promise<string> {
     if (!html || !selector) {
       return '';
+    }
+
+    if (!isTaskPoolAvailable()) {
+      return this.extractValueSync(html, selector, attribute);
     }
 
     try {
@@ -355,29 +548,27 @@ export class AsyncCssSelectorParser {
 
       if (!result.success) {
         Logger.warn(TAG, `提取失败: ${result.error}`);
-        return '';
+        return this.extractValueSync(html, selector, attribute);
       }
 
       return result.value;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      Logger.error(TAG, `任务执行失败: ${errorMsg}`);
-      return '';
+      Logger.error(TAG, `TaskPool任务执行失败: ${errorMsg}，降级到同步解析`);
+      markTaskPoolUnavailable();
+      return this.extractValueSync(html, selector, attribute);
     }
   }
 
-  /**
-   * 批量异步解析（用于解析多个书籍）
-   * @param items 要解析的 HTML 片段数组
-   * @param selector CSS 选择器
-   * @returns 解析结果数组
-   */
   async batchSelect(items: string[], selector: string): Promise<string[][]> {
     if (!items.length || !selector) {
       return [];
     }
 
-    // 创建任务组
+    if (!isTaskPoolAvailable()) {
+      return items.map(item => this.selectElementsSync(item, selector));
+    }
+
     const taskGroup = new taskpool.TaskGroup();
     for (const item of items) {
       const task = new taskpool.Task(parseInWorker, {
@@ -385,7 +576,12 @@ export class AsyncCssSelectorParser {
         selector,
         operation: 'select'
       } as ParseTaskParams);
-      taskGroup.addTask(task);
+      try {
+        taskGroup.addTask(task);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        Logger.error(TAG, `添加任务失败: ${errorMsg}`);
+      }
     }
 
     try {
@@ -393,8 +589,9 @@ export class AsyncCssSelectorParser {
       return results.map(r => r.success ? r.elements : []);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      Logger.error(TAG, `批量解析失败: ${errorMsg}`);
-      return items.map(() => []);
+      Logger.error(TAG, `TaskPool批量解析失败: ${errorMsg}，降级到同步解析`);
+      markTaskPoolUnavailable();
+      return items.map(item => this.selectElementsSync(item, selector));
     }
   }
 }

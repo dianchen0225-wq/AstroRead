@@ -8,6 +8,17 @@ import { ParsedChapterItem } from '../utils/ContentParser';
 import { Logger } from '../utils/Logger';
 import common from '@ohos.app.ability.common';
 
+export interface PagedChaptersResult {
+  chapters: Chapter[];
+  totalCount: number;
+  currentPage: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
+const DEFAULT_PAGE_SIZE = 100;
+const MAX_CHAPTERS_PER_SAVE = 500;
+
 /**
  * 章节视图模型
  */
@@ -35,6 +46,48 @@ export class ChapterViewModel {
   }
 
   /**
+   * 分页获取章节列表
+   */
+  async getChaptersPaged(
+    bookId: string,
+    page: number = 1,
+    pageSize: number = DEFAULT_PAGE_SIZE
+  ): Promise<PagedChaptersResult> {
+    const startTime = Date.now();
+    
+    try {
+      const allChapters = await this.getChaptersByBookId(bookId);
+      const totalCount = allChapters.length;
+      
+      const startIndex = (page - 1) * pageSize;
+      const endIndex = Math.min(startIndex + pageSize, totalCount);
+      
+      const chapters = allChapters.slice(startIndex, endIndex);
+      const hasMore = endIndex < totalCount;
+      
+      const elapsed = Date.now() - startTime;
+      Logger.info(ChapterViewModel.TAG, `分页获取章节: 页${page}, 每页${pageSize}, 总数${totalCount}, 耗时${elapsed}ms`);
+      
+      return {
+        chapters: chapters,
+        totalCount: totalCount,
+        currentPage: page,
+        pageSize: pageSize,
+        hasMore: hasMore
+      };
+    } catch (error) {
+      Logger.error(ChapterViewModel.TAG, `分页获取章节失败: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        chapters: [],
+        totalCount: 0,
+        currentPage: page,
+        pageSize: pageSize,
+        hasMore: false
+      };
+    }
+  }
+
+  /**
    * 根据书籍ID获取章节列表（内部方法）
    */
   private async getChaptersByBookId(bookId: string): Promise<Chapter[]> {
@@ -54,6 +107,8 @@ export class ChapterViewModel {
    * 从网络获取章节列表并保存
    */
   async fetchAndSaveChapters(bookId: string, bookSource: BookSource, bookUrl: string): Promise<Chapter[]> {
+    const startTime = Date.now();
+    
     try {
       Logger.info(ChapterViewModel.TAG, `开始获取章节，书源: ${bookSource.name}, URL: ${bookUrl}`);
       const chapterList: ParsedChapterItem[] = await this.getChapterList(bookSource, bookUrl);
@@ -71,13 +126,39 @@ export class ChapterViewModel {
         return chapter;
       });
 
-      await this.batchUpsertChapters(chapters);
-      Logger.info(ChapterViewModel.TAG, `成功保存 ${chapters.length} 个章节`);
+      // 分批保存大量章节
+      await this.batchSaveChaptersInBatches(chapters);
+      
+      const elapsed = Date.now() - startTime;
+      Logger.info(ChapterViewModel.TAG, `成功保存 ${chapters.length} 个章节, 总耗时: ${elapsed}ms`);
       
       return chapters;
     } catch (error) {
       Logger.error(ChapterViewModel.TAG, `获取章节列表失败: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to fetch chapters: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * 分批保存章节（避免一次性保存过多数据）
+   */
+  private async batchSaveChaptersInBatches(chapters: Chapter[]): Promise<void> {
+    if (chapters.length === 0) return;
+
+    const totalBatches = Math.ceil(chapters.length / MAX_CHAPTERS_PER_SAVE);
+    Logger.info(ChapterViewModel.TAG, `分${totalBatches}批保存 ${chapters.length} 个章节`);
+
+    for (let i = 0; i < chapters.length; i += MAX_CHAPTERS_PER_SAVE) {
+      const batch = chapters.slice(i, i + MAX_CHAPTERS_PER_SAVE);
+      const batchNum = Math.floor(i / MAX_CHAPTERS_PER_SAVE) + 1;
+      
+      Logger.debug(ChapterViewModel.TAG, `保存第${batchNum}/${totalBatches}批, ${batch.length}个章节`);
+      await this.batchUpsertChapters(batch);
+      
+      // 让出主线程
+      if (i + MAX_CHAPTERS_PER_SAVE < chapters.length) {
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+      }
     }
   }
 

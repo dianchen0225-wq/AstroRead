@@ -10,6 +10,8 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { RequestEnhancer, RequestLog } from './RequestEnhancer';
 import { util } from '@kit.ArkTS';
 import { networkConfigManager, RetryConfig, TimeoutConfig } from './NetworkConfig';
+import { AsyncChapterParser } from './AsyncChapterParser';
+import { AsyncContentParser } from './AsyncContentParser';
 
 interface NetworkSecurityOptions {
   skipSSLVerification: boolean;
@@ -362,8 +364,13 @@ export class NetworkManager {
       }
     }
 
-    const defaultDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
-    return defaultDecoder.decodeToString(uint8Data);
+    try {
+      const defaultDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+      return defaultDecoder.decodeToString(uint8Data);
+    } catch (error) {
+      Logger.error('NetworkManager', `默认编码解码失败: ${error instanceof Error ? error.message : String(error)}`);
+      return '';
+    }
   }
 
   /**
@@ -859,7 +866,22 @@ export class NetworkManager {
 
       const html = await this.get(fullUrl, headers);
 
-      const chapters: ParsedChapterItem[] = ContentParser.parseChapterList(html, bookSource);
+      // 使用异步解析器避免主线程阻塞
+      const chapterRule = bookSource.chapterRule;
+      if (!chapterRule) {
+        Logger.error('NetworkManager', `书源未配置章节规则: ${bookSource.name}`);
+        return [];
+      }
+
+      const asyncParser = AsyncChapterParser.getInstance();
+      const chapters: ParsedChapterItem[] = await asyncParser.parseChapterList(
+        html,
+        chapterRule.chapterList,
+        chapterRule.chapterName || '',
+        chapterRule.chapterUrl || '',
+        fullUrl
+      );
+
       Logger.info('NetworkManager', `Found ${chapters.length} chapters`);
 
       const uniqueChapters: ParsedChapterItem[] = [];
@@ -911,7 +933,20 @@ export class NetworkManager {
       Logger.info(TAG, `获取到HTML内容，长度: ${html.length} 字符`);
       Logger.debug(TAG, `HTML前500字符: ${html.substring(0, 500)}`);
 
-      const content = ContentParser.parseChapterContent(html, bookSource);
+      // 使用异步解析器避免主线程阻塞
+      const contentRule = bookSource.contentRule;
+      if (!contentRule || !contentRule.content) {
+        Logger.error(TAG, `书源未配置内容规则: ${bookSource.name}`);
+        return '本章内容为空';
+      }
+
+      const asyncParser = AsyncContentParser.getInstance();
+      const content = await asyncParser.parseChapterContent(
+        html,
+        contentRule.content,
+        contentRule.replaceRule
+      );
+      
       Logger.info(TAG, `解析后内容长度: ${content.length} 字符`);
       Logger.debug(TAG, `内容前200字符: ${content.substring(0, 200)}`);
 

@@ -23,7 +23,7 @@ import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
-import { promptAction } from '@kit.ArkUI';
+import { showToast } from '../utils/ToastUtils';
 import common from '@ohos.app.ability.common';
 
 @Entry
@@ -141,13 +141,9 @@ struct ReadPage {
     } catch (error) {
       Logger.error('ReadPage', `加载章节内容失败: ${error}`);
       if (this.isComponentActive) {
-        try {
-          promptAction.showToast({
-            message: '加载失败'
-          });
-        } catch (showError) {
-          Logger.error('ReadPage', `显示提示失败: ${showError}`);
-        }
+        showToast({
+          message: '加载失败'
+        });
       }
     } finally {
       if (this.isComponentActive) {
@@ -162,13 +158,9 @@ struct ReadPage {
       this.chapterUrl = this.chapters[this.chapterIndex].url;
       await this.loadChapterContent();
     } else {
-      try {
-        promptAction.showToast({
-          message: '已经是最后一章了'
-        });
-      } catch (showError) {
-        Logger.error('ReadPage', `显示提示失败: ${showError}`);
-      }
+      showToast({
+        message: '已经是最后一章了'
+      });
     }
   }
 
@@ -178,13 +170,9 @@ struct ReadPage {
       this.chapterUrl = this.chapters[this.chapterIndex].url;
       await this.loadChapterContent();
     } else {
-      try {
-        promptAction.showToast({
-          message: '已经是第一章了'
-        });
-      } catch (showError) {
-        Logger.error('ReadPage', `显示提示失败: ${showError}`);
-      }
+      showToast({
+        message: '已经是第一章了'
+      });
     }
   }
 
