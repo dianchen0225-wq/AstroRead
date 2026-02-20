@@ -66,7 +66,7 @@ export interface DegradationResult {
   success: boolean;
   strategy: DegradationStrategy;
   message: string;
-  data?: unknown;
+  data?: string | number | boolean | object | null;
   shouldRetry: boolean;
   retryDelay?: number;
 }
@@ -79,6 +79,90 @@ export interface ErrorHandler {
   handle(error: Error, context?: ErrorContext): Promise<DegradationResult>;
 }
 
+class NetworkErrorHandler implements ErrorHandler {
+  private service: ErrorHandlingService;
+
+  constructor(service: ErrorHandlingService) {
+    this.service = service;
+  }
+
+  canHandle(error: Error): boolean {
+    const msg = error.message.toLowerCase();
+    return msg.includes('network') || msg.includes('connection') ||
+      msg.includes('econnreset') || msg.includes('econnrefused');
+  }
+
+  async handle(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+    return this.service.handleNetworkError(error, context);
+  }
+}
+
+class TimeoutErrorHandler implements ErrorHandler {
+  private service: ErrorHandlingService;
+
+  constructor(service: ErrorHandlingService) {
+    this.service = service;
+  }
+
+  canHandle(error: Error): boolean {
+    return error.message.toLowerCase().includes('timeout');
+  }
+
+  async handle(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+    return this.service.handleTimeoutError(error, context);
+  }
+}
+
+class ParseErrorHandler implements ErrorHandler {
+  private service: ErrorHandlingService;
+
+  constructor(service: ErrorHandlingService) {
+    this.service = service;
+  }
+
+  canHandle(error: Error): boolean {
+    const msg = error.message.toLowerCase();
+    return msg.includes('parse') || msg.includes('json') || msg.includes('syntax');
+  }
+
+  async handle(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+    return this.service.handleParseError(error, context);
+  }
+}
+
+class ServerErrorHandler implements ErrorHandler {
+  private service: ErrorHandlingService;
+
+  constructor(service: ErrorHandlingService) {
+    this.service = service;
+  }
+
+  canHandle(error: Error): boolean {
+    const msg = error.message.toLowerCase();
+    return msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504');
+  }
+
+  async handle(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+    return this.service.handleServerError(error, context);
+  }
+}
+
+class NotFoundErrorHandler implements ErrorHandler {
+  private service: ErrorHandlingService;
+
+  constructor(service: ErrorHandlingService) {
+    this.service = service;
+  }
+
+  canHandle(error: Error): boolean {
+    return error.message.toLowerCase().includes('404');
+  }
+
+  async handle(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+    return this.service.handleNotFoundError(error, context);
+  }
+}
+
 /**
  * 错误上下文
  */
@@ -88,7 +172,7 @@ export interface ErrorContext {
   operation: string;
   retryCount: number;
   maxRetries: number;
-  additionalData?: Map<string, unknown>;
+  additionalData?: Map<string, string | number | boolean | object | null>;
 }
 
 /**
@@ -117,64 +201,11 @@ export class ErrorHandlingService {
    * 注册默认错误处理器
    */
   private registerDefaultHandlers(): void {
-    // 网络错误处理器
-    const networkHandler: ErrorHandler = {
-      canHandle: (error: Error): boolean => {
-        const msg = error.message.toLowerCase();
-        return msg.includes('network') || msg.includes('connection') ||
-          msg.includes('econnreset') || msg.includes('econnrefused');
-      },
-      handle: async (error: Error, context?: ErrorContext): Promise<DegradationResult> => {
-        return this.handleNetworkError(error, context);
-      }
-    };
-    this.registerHandler(ErrorType.NETWORK, networkHandler);
-
-    // 超时错误处理器
-    const timeoutHandler: ErrorHandler = {
-      canHandle: (error: Error): boolean => {
-        return error.message.toLowerCase().includes('timeout');
-      },
-      handle: async (error: Error, context?: ErrorContext): Promise<DegradationResult> => {
-        return this.handleTimeoutError(error, context);
-      }
-    };
-    this.registerHandler(ErrorType.TIMEOUT, timeoutHandler);
-
-    // 解析错误处理器
-    const parseHandler: ErrorHandler = {
-      canHandle: (error: Error): boolean => {
-        const msg = error.message.toLowerCase();
-        return msg.includes('parse') || msg.includes('json') || msg.includes('syntax');
-      },
-      handle: async (error: Error, context?: ErrorContext): Promise<DegradationResult> => {
-        return this.handleParseError(error, context);
-      }
-    };
-    this.registerHandler(ErrorType.PARSE, parseHandler);
-
-    // 服务器错误处理器
-    const serverHandler: ErrorHandler = {
-      canHandle: (error: Error): boolean => {
-        const msg = error.message.toLowerCase();
-        return msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504');
-      },
-      handle: async (error: Error, context?: ErrorContext): Promise<DegradationResult> => {
-        return this.handleServerError(error, context);
-      }
-    };
-    this.registerHandler(ErrorType.SERVER, serverHandler);
-
-    // 未找到错误处理器
-    const notFoundHandler: ErrorHandler = {
-      canHandle: (error: Error): boolean => {
-        return error.message.toLowerCase().includes('404');
-      },
-      handle: async (error: Error, context?: ErrorContext): Promise<DegradationResult> => {
-        return this.handleNotFoundError(error, context);
-      }
-    };
-    this.registerHandler(ErrorType.NOT_FOUND, notFoundHandler);
+    this.registerHandler(ErrorType.NETWORK, new NetworkErrorHandler(this));
+    this.registerHandler(ErrorType.TIMEOUT, new TimeoutErrorHandler(this));
+    this.registerHandler(ErrorType.PARSE, new ParseErrorHandler(this));
+    this.registerHandler(ErrorType.SERVER, new ServerErrorHandler(this));
+    this.registerHandler(ErrorType.NOT_FOUND, new NotFoundErrorHandler(this));
   }
 
   /**
@@ -313,7 +344,7 @@ export class ErrorHandlingService {
   /**
    * 处理网络错误
    */
-  private async handleNetworkError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+  async handleNetworkError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
     // 记录书源失败
     if (context?.sourceId) {
       smartSourceSelector.recordFailure(context.sourceId, error.message);
@@ -342,7 +373,7 @@ export class ErrorHandlingService {
   /**
    * 处理超时错误
    */
-  private async handleTimeoutError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+  async handleTimeoutError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
     // 记录书源失败
     if (context?.sourceId) {
       smartSourceSelector.recordFailure(context.sourceId, '请求超时');
@@ -371,7 +402,7 @@ export class ErrorHandlingService {
   /**
    * 处理解析错误
    */
-  private async handleParseError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+  async handleParseError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
     // 记录书源失败
     if (context?.sourceId) {
       smartSourceSelector.recordFailure(context.sourceId, '解析错误: ' + error.message);
@@ -389,7 +420,7 @@ export class ErrorHandlingService {
   /**
    * 处理服务器错误
    */
-  private async handleServerError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+  async handleServerError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
     // 记录书源失败
     if (context?.sourceId) {
       smartSourceSelector.recordFailure(context.sourceId, '服务器错误');
@@ -418,7 +449,7 @@ export class ErrorHandlingService {
   /**
    * 处理未找到错误
    */
-  private async handleNotFoundError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
+  async handleNotFoundError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
     // 404错误通常不可恢复
     return {
       success: false,

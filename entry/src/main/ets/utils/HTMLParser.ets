@@ -6,6 +6,8 @@
 import { Logger } from './Logger';
 import { EntityDecoder } from '../core/utils/EntityDecoder';
 import { CssSelectorParser } from './CssSelectorParser';
+import { AsyncCssSelectorParser } from './AsyncCssSelectorParser';
+import { parseCache } from './ParseCache';
 
 export interface ParseResult {
   text: string;
@@ -19,9 +21,10 @@ type JsonArray = Array<JsonValue>;
 export class HTMLParser {
   private static instance: HTMLParser | null = null;
   private readonly TAG = 'HTMLParser';
-  
+
   private readonly regexCache: Map<string, RegExp> = new Map();
   private static readonly MAX_CACHE_SIZE = 100;
+  private asyncCssSelectorParser: AsyncCssSelectorParser = AsyncCssSelectorParser.getInstance();
 
   static getInstance(): HTMLParser {
     if (!HTMLParser.instance) {
@@ -63,6 +66,22 @@ export class HTMLParser {
     }
 
     try {
+      // 处理||或运算符（标准格式：尝试多个规则，返回第一个成功的结果）
+      if (rule.includes('||')) {
+        const orRules = rule.split('||').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+        Logger.debug(this.TAG, `检测到||或运算符，共${orRules.length}个规则`);
+        
+        for (const orRule of orRules) {
+          const result = this.parse(html, orRule);
+          if (result.length > 0) {
+            Logger.info(this.TAG, `||或运算符匹配成功: ${orRule}, 找到${result.length}个元素`);
+            return result;
+          }
+        }
+        Logger.warn(this.TAG, `||或运算符所有规则均未匹配`);
+        return [];
+      }
+
       // 检测规则类型
       if (rule.startsWith('@json:')) {
         Logger.debug(this.TAG, `使用JSON解析: ${rule.substring(6)}`);
@@ -404,6 +423,107 @@ export class HTMLParser {
     } catch (error) {
       return relativeUrl;
     }
+  }
+
+  /**
+   * 异步解析 HTML（避免主线程阻塞）
+   * 使用 TaskPool 将解析任务移至子线程
+   */
+  async parseAsync(html: string, rule: string): Promise<string[]> {
+    if (!html || !rule) {
+      Logger.debug(this.TAG, `异步解析参数为空: html=${html ? '有内容' : '空'}, rule=${rule || '空'}`);
+      return [];
+    }
+
+    try {
+      // 先检查缓存
+      const cached = parseCache.get(html, rule);
+      if (cached) {
+        Logger.debug(this.TAG, `异步解析缓存命中: ${rule}`);
+        return cached;
+      }
+
+      // 处理||或运算符（标准格式：尝试多个规则，返回第一个成功的结果）
+      if (rule.includes('||')) {
+        const orRules = rule.split('||').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+        Logger.debug(this.TAG, `异步检测到||或运算符，共${orRules.length}个规则`);
+        
+        for (const orRule of orRules) {
+          const result = await this.parseAsync(html, orRule);
+          if (result.length > 0) {
+            Logger.info(this.TAG, `异步||或运算符匹配成功: ${orRule}, 找到${result.length}个元素`);
+            parseCache.set(html, rule, result);
+            return result;
+          }
+        }
+        Logger.warn(this.TAG, `异步||或运算符所有规则均未匹配`);
+        return [];
+      }
+
+      // 检测规则类型
+      if (rule.startsWith('@json:')) {
+        Logger.debug(this.TAG, `异步使用JSON解析: ${rule.substring(6)}`);
+        return this.parseJsonPath(html, rule.substring(6));
+      }
+      if (rule.startsWith('##') || rule.startsWith('@regex:')) {
+        const regexRule = rule.startsWith('##') ? rule.substring(2) : rule.substring(7);
+        Logger.debug(this.TAG, `异步使用正则解析: ${regexRule}`);
+        return this.parseRegex(html, regexRule);
+      }
+      if (rule.includes('$.') || rule.startsWith('$[')) {
+        Logger.debug(this.TAG, `异步使用JSONPath解析: ${rule}`);
+        return this.parseJsonPath(html, rule);
+      }
+      if (rule.startsWith('//')) {
+        Logger.debug(this.TAG, `异步使用XPath解析: ${rule}`);
+        // XPath 使用异步 CSS 选择器
+        const elements = await this.asyncCssSelectorParser.selectElements(html, rule);
+        parseCache.set(html, rule, elements);
+        return elements;
+      }
+
+      // 标准格式规则和 CSS 选择器使用异步解析
+      if (rule.startsWith('class.') || rule.startsWith('tag.') || rule.startsWith('@css:') || rule.includes('@') ||
+          rule.startsWith('.') || rule.startsWith('#') || /^[a-zA-Z]/.test(rule)) {
+        Logger.debug(this.TAG, `异步使用CSS选择器解析: ${rule}`);
+        const elements = await this.asyncCssSelectorParser.selectElements(html, rule);
+        parseCache.set(html, rule, elements);
+        return elements;
+      }
+
+      Logger.debug(this.TAG, `异步使用通用解析: ${rule}`);
+      return this.parseGeneric(html, rule);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      Logger.error(this.TAG, `异步解析失败: 规则=${rule}, 错误=${errorMsg}`);
+      return [];
+    }
+  }
+
+  /**
+   * 批量异步解析（用于解析多个书籍）
+   * @param items HTML 片段数组
+   * @param rule 解析规则
+   * @returns 解析结果数组
+   */
+  async batchParseAsync(items: string[], rule: string): Promise<string[][]> {
+    if (!items.length || !rule) {
+      return [];
+    }
+
+    Logger.debug(this.TAG, `批量异步解析: ${items.length} 项, 规则=${rule}`);
+
+    // 使用批量异步解析
+    const results = await this.asyncCssSelectorParser.batchSelect(items, rule);
+
+    // 缓存结果
+    for (let i = 0; i < items.length; i++) {
+      if (results[i] && results[i].length > 0) {
+        parseCache.set(items[i], rule, results[i]);
+      }
+    }
+
+    return results;
   }
 }
 

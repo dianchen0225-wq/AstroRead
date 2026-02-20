@@ -16,7 +16,6 @@ export class CssSelectorParser {
       Logger.debug(CssSelectorParser.TAG, `selectElements - selector: ${selector}, html长度: ${html.length}`);
 
       let processedSelector = selector.trim();
-      let skipFirst = 0;
 
       // 移除@js:前缀
       if (processedSelector.startsWith('@js:') || processedSelector.startsWith('<js>')) {
@@ -28,6 +27,24 @@ export class CssSelectorParser {
       if (processedSelector.startsWith('@css:')) {
         processedSelector = processedSelector.substring(5).trim();
       }
+
+      // 处理||或运算符（标准格式：尝试多个选择器，返回第一个成功的结果）
+      if (processedSelector.includes('||')) {
+        const orSelectors = processedSelector.split('||').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+        Logger.debug(CssSelectorParser.TAG, `检测到||或运算符，共${orSelectors.length}个选择器: ${orSelectors.join(', ')}`);
+        
+        for (const orSelector of orSelectors) {
+          const result = CssSelectorParser.selectElements(html, orSelector);
+          if (result.length > 0) {
+            Logger.info(CssSelectorParser.TAG, `||或运算符匹配成功: ${orSelector}, 找到${result.length}个元素`);
+            return result;
+          }
+        }
+        Logger.warn(CssSelectorParser.TAG, `||或运算符所有选择器均未匹配`);
+        return elements;
+      }
+
+      let skipFirst = 0;
 
       // 处理@class.前缀（标准格式简写）
       if (processedSelector.startsWith('class.')) {

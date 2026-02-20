@@ -3,12 +3,12 @@ import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { BookSource } from '../models/BookSource';
 import { Book, SourceStatus } from '../models/Book';
-import { PagedSearchResult, SearchProgress, SourceSearchStats } from '../models/SearchResult';
+import { PagedSearchResult, SearchProgress } from '../models/SearchResult';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/NetworkManager';
-import { ContentPurifier, purifyIntro } from '../utils/ContentPurifier';
+import { purifyIntro } from '../utils/ContentPurifier';
 import { sourceValidatorService, BatchValidationProgress } from '../utils/SourceValidatorService';
 
 export interface RankColor {
@@ -45,7 +45,6 @@ export struct SearchPage {
 
   private bookSources: BookSource[] = [];
   private isComponentActive: boolean = false;
-  private lastSearchKeyword: string = '';
   private allSearchResults: Book[] = [];
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
@@ -118,25 +117,26 @@ export struct SearchPage {
       id: book.id,
       name: book.name,
       author: book.author,
-      coverUrl: book.coverUrl,
+      cover: book.cover,
       intro: book.intro,
+      kind: book.kind,
+      wordCount: book.wordCount,
       latestChapter: book.latestChapter,
-      lastReadTime: book.lastReadTime,
       bookSourceId: book.bookSourceId,
       bookSourceName: book.bookSourceName,
-      bookSourceUrl: book.bookSourceUrl,
-      tocUrl: book.tocUrl,
-      wordCount: book.wordCount,
-      status: book.status,
-      sourceStatus: status,
+      bookUrl: book.bookUrl,
       lastUpdateTime: book.lastUpdateTime,
-      customCover: book.customCover,
-      customIntro: book.customIntro,
-      sortIndex: book.sortIndex,
-      group: book.group,
-      canUpdate: book.canUpdate,
-      isTop: book.isTop
-    };
+      addTime: book.addTime,
+      readProgress: book.readProgress,
+      lastReadChapter: book.lastReadChapter,
+      lastReadChapterIndex: book.lastReadChapterIndex,
+      lastReadTime: book.lastReadTime,
+      totalChapters: book.totalChapters,
+      currentChapterIndex: book.currentChapterIndex,
+      currentChapterTitle: book.currentChapterTitle,
+      isInShelf: book.isInShelf,
+      sourceStatus: status
+    } as Book;
   }
 
   private cloneBookArray(arr: Book[]): Book[] {
@@ -187,7 +187,7 @@ export struct SearchPage {
         }
       };
 
-      const bookFoundCallback = (newBooks: Book[], progress: SearchProgress): void => {
+      const bookFoundCallback = (newBooks: Book[], _progress: SearchProgress): void => {
         if (this.isComponentActive && page === 1) {
           for (const book of newBooks) {
             const exists = this.searchResults.some(b => 
@@ -219,7 +219,6 @@ export struct SearchPage {
         this.totalPages = result.totalPages;
         this.totalCount = result.totalCount;
         this.hasMore = result.hasMore;
-        this.lastSearchKeyword = this.searchText.trim();
 
         if (result.totalCount === 0) {
           this.errorMessage = '当前启用的书源无匹配结果';
@@ -707,7 +706,7 @@ export struct SearchPage {
   @Builder
   buildResultsList() {
     List({ space: DesignSystem.Spacing.sm }) {
-      ForEach(this.searchResults, (book: Book, index: number) => {
+      ForEach(this.searchResults, (book: Book) => {
         ListItem() {
           this.buildBookItem(book)
         }

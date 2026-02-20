@@ -18,6 +18,8 @@ import {
 import NetworkAdapter, { NetworkError } from './NetworkAdapter';
 import { HTMLParser } from './HTMLParser';
 import { CssSelectorParser } from './CssSelectorParser';
+import { AsyncCssSelectorParser } from './AsyncCssSelectorParser';
+import { parseCache } from './ParseCache';
 import { EnhancedJSEngine } from './EnhancedJSEngine';
 import { Logger } from './Logger';
 import { sourceHealthManager } from './SourceHealthManager';
@@ -65,6 +67,7 @@ export class BookSourceSearchEngine {
   private static instance: BookSourceSearchEngine | null = null;
   private htmlParser: HTMLParser;
   private jsEngine: EnhancedJSEngine;
+  private asyncCssSelectorParser: AsyncCssSelectorParser;
   private requestTimestamps: Map<string, number[]> = new Map();
   private pendingTimers: Set<number> = new Set();
   private isCancelled: boolean = false;
@@ -82,6 +85,7 @@ export class BookSourceSearchEngine {
   private constructor() {
     this.htmlParser = HTMLParser.getInstance();
     this.jsEngine = EnhancedJSEngine.getInstance();
+    this.asyncCssSelectorParser = AsyncCssSelectorParser.getInstance();
   }
 
   static getInstance(): BookSourceSearchEngine {
@@ -630,8 +634,8 @@ export class BookSourceSearchEngine {
 
     Logger.debug(this.TAG, `开始解析: ${source.name}, 列表规则: ${searchRule.bookList}`);
 
-    // 1. 获取书籍列表
-    const bookListHtml = this.htmlParser.parse(html, searchRule.bookList);
+    // 1. 获取书籍列表（使用异步解析避免主线程阻塞）
+    const bookListHtml = await this.htmlParser.parseAsync(html, searchRule.bookList);
 
     if (!bookListHtml || bookListHtml.length === 0) {
       Logger.warn(this.TAG, `解析结果为空: ${source.name}, 列表规则: ${searchRule.bookList}`);
@@ -641,24 +645,34 @@ export class BookSourceSearchEngine {
 
     Logger.info(this.TAG, `解析到 ${bookListHtml.length} 个书籍块: ${source.name}`);
 
-    // 2. 遍历每本书
-    for (let i = 0; i < bookListHtml.length; i++) {
-      const bookHtml = bookListHtml[i];
-      try {
-        const book = await this.parseSingleBook(source, bookHtml, key);
+    // 2. 限制每批次解析的书籍数量，避免一次性处理过多
+    const MAX_BOOKS_PER_BATCH = 5;
+    const totalBooks = Math.min(bookListHtml.length, this.config.maxResultsPerSource);
+
+    for (let i = 0; i < totalBooks; i += MAX_BOOKS_PER_BATCH) {
+      const batch = bookListHtml.slice(i, i + MAX_BOOKS_PER_BATCH);
+      const batchPromises: Promise<Book | null>[] = [];
+
+      for (const bookHtml of batch) {
+        batchPromises.push(this.parseSingleBook(source, bookHtml, key));
+      }
+
+      const batchResults = await Promise.all(batchPromises);
+
+      for (const book of batchResults) {
         if (book && book.name) {
           books.push(book);
           Logger.debug(this.TAG, `解析书籍成功: ${book.name} - ${book.author || '未知作者'}`);
-        } else {
-          Logger.debug(this.TAG, `第 ${i + 1} 个书籍块解析返回空`);
         }
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        Logger.warn(this.TAG, `解析第 ${i + 1} 本书失败: ${errorMsg}`);
+      }
+
+      // 每批次处理后让出主线程，避免阻塞
+      if (i + MAX_BOOKS_PER_BATCH < totalBooks) {
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
       }
     }
 
-    Logger.info(this.TAG, `解析完成: ${source.name}, 成功 ${books.length}/${bookListHtml.length} 本`);
+    Logger.info(this.TAG, `解析完成: ${source.name}, 成功 ${books.length}/${totalBooks} 本`);
     return books;
   }
 
@@ -738,9 +752,78 @@ export class BookSourceSearchEngine {
       return result;
     }
 
-    // 使用 CSS 选择器解析器提取文本内容
-    const text = CssSelectorParser.extractValue(html, rule);
+    // 先检查缓存
+    const cached = parseCache.get(html, rule);
+    if (cached && cached.length > 0) {
+      // 从缓存的元素中提取文本
+      return this.extractTextFromElement(cached[0]);
+    }
+
+    // 使用异步 CSS 选择器解析器提取文本内容（避免主线程阻塞）
+    const text = await this.asyncCssSelectorParser.extractValue(html, rule);
+
+    // 缓存解析结果
+    if (text) {
+      const elements = await this.asyncCssSelectorParser.selectElements(html, rule);
+      if (elements.length > 0) {
+        parseCache.set(html, rule, elements);
+      }
+    }
+
     return text || '';
+  }
+
+  /**
+   * 从元素中提取文本
+   */
+  private extractTextFromElement(element: string): string {
+    if (!element) return '';
+
+    // 提取文本内容
+    const textMatch = element.match(/>([^<]*)</);
+    if (textMatch) {
+      return this.decodeHtmlEntities(textMatch[1].trim());
+    }
+
+    return '';
+  }
+
+  /**
+   * 解码 HTML 实体
+   */
+  private decodeHtmlEntities(text: string): string {
+    const entities: Record<string, string> = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#39;': "'",
+      '&nbsp;': ' ',
+      '&hellip;': '…',
+      '&mdash;': '—',
+      '&ndash;': '–',
+      '&ldquo;': '"',
+      '&rdquo;': '"',
+      '&lsquo;': '\u2018',
+      '&rsquo;': '\u2019',
+    };
+
+    let result = text;
+    const entityKeys = Object.keys(entities);
+    for (const entity of entityKeys) {
+      result = result.split(entity).join(entities[entity]);
+    }
+
+    // 处理数字实体
+    result = result.replace(/&#(\d+);/g, (match: string, dec: string) => {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+
+    result = result.replace(/&#x([0-9a-fA-F]+);/g, (match: string, hex: string) => {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+
+    return result;
   }
 
   /**

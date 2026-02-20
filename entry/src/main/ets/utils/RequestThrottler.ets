@@ -53,20 +53,19 @@ export class RequestThrottler {
   private requestTimestamps: Map<string, number[]> = new Map();
   private readonly TAG = 'RequestThrottler';
 
-  private constructor(config?: Partial<ThrottleConfig>) {
-    this.config = this.mergeConfig(DEFAULT_THROTTLE_CONFIG, config);
+  private constructor(config?: ThrottleConfig) {
+    this.config = config ? this.mergeConfig(DEFAULT_THROTTLE_CONFIG, config) : DEFAULT_THROTTLE_CONFIG;
   }
 
-  static getInstance(config?: Partial<ThrottleConfig>): RequestThrottler {
+  static getInstance(config?: ThrottleConfig): RequestThrottler {
     if (!RequestThrottler.instance) {
       RequestThrottler.instance = new RequestThrottler(config);
     }
     return RequestThrottler.instance;
   }
 
-  private mergeConfig(base: ThrottleConfig, update?: Partial<ThrottleConfig>): ThrottleConfig {
-    if (!update) return base;
-    return {
+  private mergeConfig(base: ThrottleConfig, update: ThrottleConfig): ThrottleConfig {
+    const result: ThrottleConfig = {
       maxRequestsPerSecond: update.maxRequestsPerSecond !== undefined ? update.maxRequestsPerSecond : base.maxRequestsPerSecond,
       maxConcurrentRequests: update.maxConcurrentRequests !== undefined ? update.maxConcurrentRequests : base.maxConcurrentRequests,
       minInterval: update.minInterval !== undefined ? update.minInterval : base.minInterval,
@@ -76,6 +75,7 @@ export class RequestThrottler {
       backoffOnBlock: update.backoffOnBlock !== undefined ? update.backoffOnBlock : base.backoffOnBlock,
       maxBackoffMultiplier: update.maxBackoffMultiplier !== undefined ? update.maxBackoffMultiplier : base.maxBackoffMultiplier
     };
+    return result;
   }
 
   private cloneConfig(config: ThrottleConfig): ThrottleConfig {
@@ -91,7 +91,7 @@ export class RequestThrottler {
     };
   }
 
-  updateConfig(config: Partial<ThrottleConfig>): void {
+  updateConfig(config: ThrottleConfig): void {
     this.config = this.mergeConfig(this.config, config);
     Logger.info(this.TAG, '限流配置已更新');
   }
@@ -319,7 +319,17 @@ export class RequestThrottler {
   getAllDomainStats(): Map<string, DomainStats> {
     const result = new Map<string, DomainStats>();
     this.domainStats.forEach((value, key) => {
-      result.set(key, Object.assign({}, value));
+      const statsCopy: DomainStats = {
+        requestCount: value.requestCount,
+        successCount: value.successCount,
+        failureCount: value.failureCount,
+        blockCount: value.blockCount,
+        lastRequestTime: value.lastRequestTime,
+        avgResponseTime: value.avgResponseTime,
+        currentDelay: value.currentDelay,
+        backoffLevel: value.backoffLevel
+      };
+      result.set(key, statsCopy);
     });
     return result;
   }

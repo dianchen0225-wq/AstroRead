@@ -2,7 +2,7 @@ import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { NavigationManager } from '../common/NavigationManager';
 
-interface GradientColor {
+interface GradientColorItem {
   color: string;
   position: number;
 }
@@ -12,7 +12,7 @@ interface MenuItem {
   title: ResourceStr;
   desc: ResourceStr;
   icon: string;
-  gradientColors: Array<[string, number]>;
+  gradientColors: GradientColorItem[];
   gradientStart: string;
   route: string;
 }
@@ -29,7 +29,7 @@ export struct HomePage {
       title: $r('app.string.my_bookshelf'),
       desc: $r('app.string.my_bookshelf_desc'),
       icon: '📚',
-      gradientColors: [{ color: '#667eea', position: 0 }, { color: '#764ba2', position: 1 }],
+      gradientColors: [{ color: '#667eea', position: 0 } as GradientColorItem, { color: '#764ba2', position: 1 } as GradientColorItem],
       gradientStart: '#667eea',
       route: 'BookshelfPage'
     },
@@ -38,7 +38,7 @@ export struct HomePage {
       title: $r('app.string.search_books'),
       desc: $r('app.string.search_books_desc'),
       icon: '🔍',
-      gradientColors: [{ color: '#f093fb', position: 0 }, { color: '#f5576c', position: 1 }],
+      gradientColors: [{ color: '#f093fb', position: 0 } as GradientColorItem, { color: '#f5576c', position: 1 } as GradientColorItem],
       gradientStart: '#f093fb',
       route: 'SearchPage'
     },
@@ -47,7 +47,7 @@ export struct HomePage {
       title: $r('app.string.source_management'),
       desc: $r('app.string.source_management_desc'),
       icon: '📖',
-      gradientColors: [{ color: '#4facfe', position: 0 }, { color: '#00f2fe', position: 1 }],
+      gradientColors: [{ color: '#4facfe', position: 0 } as GradientColorItem, { color: '#00f2fe', position: 1 } as GradientColorItem],
       gradientStart: '#4facfe',
       route: 'SourcePage'
     },
@@ -56,7 +56,7 @@ export struct HomePage {
       title: $r('app.string.settings'),
       desc: $r('app.string.settings_desc'),
       icon: '⚙️',
-      gradientColors: [{ color: '#43e97b', position: 0 }, { color: '#38f9d7', position: 1 }],
+      gradientColors: [{ color: '#43e97b', position: 0 } as GradientColorItem, { color: '#38f9d7', position: 1 } as GradientColorItem],
       gradientStart: '#43e97b',
       route: 'SettingsPage'
     }
@@ -65,6 +65,15 @@ export struct HomePage {
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
+
+  private getGradientColors(item: MenuItem): Array<[string, number]> {
+    const result: Array<[string, number]> = [];
+    for (let i = 0; i < item.gradientColors.length; i++) {
+      const gc = item.gradientColors[i];
+      result.push([gc.color, gc.position]);
+    }
+    return result;
+  }
 
   aboutToAppear(): void {
     this.isLightMode = themeManager.isLightTheme();
@@ -236,7 +245,7 @@ export struct HomePage {
       .borderRadius(DesignSystem.BorderRadius.lg)
       .linearGradient({
         angle: 135,
-        colors: item.gradientColors
+        colors: this.getGradientColors(item)
       })
       .justifyContent(FlexAlign.Center)
       .shadow({

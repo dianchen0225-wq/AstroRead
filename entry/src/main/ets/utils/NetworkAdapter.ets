@@ -27,13 +27,18 @@ export interface NetworkError {
 
 const DEFAULT_TIMEOUT = 10000;
 const MAX_TIMEOUT = 30000;
+const DEFAULT_MAX_RETRIES = 3;
+const RETRY_DELAY_BASE = 1000;
+const RETRY_DELAY_MAX = 5000;
 
 const DEFAULT_USER_AGENTS: string[] = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15'
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1'
 ];
 
 export class NetworkAdapter {
@@ -96,7 +101,65 @@ export class NetworkAdapter {
 
   async request(url: string, options?: NetworkRequestOptions): Promise<string> {
     const opts: NetworkRequestOptions = options ?? {};
-    return this.nativeRequest(url, opts);
+    const maxRetries = opts.timeout ? 1 : DEFAULT_MAX_RETRIES;
+    
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        const delay = Math.min(RETRY_DELAY_BASE * Math.pow(2, attempt - 1), RETRY_DELAY_MAX);
+        Logger.info(this.TAG, `重试请求: ${url}, 第${attempt}次, 等待${delay}ms`);
+        await this.sleep(delay);
+        
+        // 轮换 User-Agent
+        if (opts.headers) {
+          opts.headers['User-Agent'] = this.getRandomUserAgent();
+        } else {
+          opts.headers = { 'User-Agent': this.getRandomUserAgent() };
+        }
+      }
+      
+      try {
+        const result = await this.nativeRequest(url, opts);
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const networkError = this.parseNetworkError(lastError.message);
+        
+        // 不可重试的错误类型
+        if (networkError.type === 'http' && networkError.statusCode === 404) {
+          Logger.warn(this.TAG, `404错误，不重试: ${url}`);
+          throw lastError;
+        }
+        
+        // 403 可能是反爬，尝试轮换 UA
+        if (networkError.type === 'http' && networkError.statusCode === 403) {
+          Logger.warn(this.TAG, `403错误，尝试轮换UA: ${url}`);
+          continue;
+        }
+        
+        // 超时和网络错误可以重试
+        if (networkError.type === 'timeout' || networkError.type === 'network' || networkError.type === 'dns') {
+          Logger.warn(this.TAG, `${networkError.type}错误，准备重试: ${url}`);
+          continue;
+        }
+        
+        // SSL错误不重试
+        if (networkError.type === 'ssl') {
+          Logger.error(this.TAG, `SSL错误，不重试: ${url}`);
+          throw lastError;
+        }
+        
+        // 其他错误也重试
+        Logger.warn(this.TAG, `请求失败，准备重试: ${url}, 错误: ${networkError.message}`);
+      }
+    }
+    
+    throw lastError || new Error('Max retries exceeded');
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async get(url: string, headers?: Record<string, string>): Promise<string> {
