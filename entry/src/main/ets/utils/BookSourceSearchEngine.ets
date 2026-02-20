@@ -150,6 +150,16 @@ export class BookSourceSearchEngine {
       isComplete: false
     };
 
+    let lastProgressUpdate = 0;
+    const THROTTLE_MS = 200;
+    const throttledProgressCallback = progressCallback ? (p: SearchProgress) => {
+      const now = Date.now();
+      if (now - lastProgressUpdate >= THROTTLE_MS || p.isComplete) {
+        lastProgressUpdate = now;
+        progressCallback(p);
+      }
+    } : undefined;
+
     const executing: Promise<void>[] = [];
     const mutex = this.createMutex();
 
@@ -180,12 +190,12 @@ export class BookSourceSearchEngine {
             sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
           }
 
-          if (progressCallback) {
+          if (throttledProgressCallback) {
             progress.completedSources++;
             progress.currentSource = source.name;
             progress.foundBooks = resultBuilder.getTotalCount();
             progress.isComplete = progress.completedSources >= progress.totalSources;
-            progressCallback(progress);
+            throttledProgressCallback(progress);
           }
         })
         .catch((error: Error) => {
@@ -203,12 +213,12 @@ export class BookSourceSearchEngine {
             0
           );
 
-          if (progressCallback) {
+          if (throttledProgressCallback) {
             progress.completedSources++;
             progress.currentSource = source.name;
             progress.foundBooks = resultBuilder.getTotalCount();
             progress.isComplete = progress.completedSources >= progress.totalSources;
-            progressCallback(progress);
+            throttledProgressCallback(progress);
           }
         })
         .finally(() => {

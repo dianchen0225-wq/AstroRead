@@ -74,7 +74,7 @@ export class DatabaseSchema {
       book_id TEXT NOT NULL,
       title TEXT NOT NULL,
       url TEXT NOT NULL,
-      "order" INTEGER DEFAULT 0,
+      chapter_order INTEGER DEFAULT 0,
       is_vip INTEGER DEFAULT 0,
       FOREIGN KEY (book_id) REFERENCES book (id) ON DELETE CASCADE
     )`,
@@ -147,6 +147,38 @@ export class DatabaseSchema {
           Logger.warn(DatabaseSchema.TAG, `数据库迁移警告: ${errorMsg}`);
         }
       }
+    }
+
+    await DatabaseSchema.migrateChapterOrderColumn(rdbStore);
+  }
+
+  /**
+   * 迁移chapter表的order列到chapter_order列
+   */
+  static async migrateChapterOrderColumn(rdbStore: relationalStore.RdbStore): Promise<void> {
+    try {
+      const tableInfo = await rdbStore.querySql(`PRAGMA table_info(chapter)`);
+      const columnNames: string[] = [];
+      while (tableInfo.goToNextRow()) {
+        const nameIndex = tableInfo.getColumnIndex('name');
+        columnNames.push(tableInfo.getString(nameIndex));
+      }
+      tableInfo.close();
+
+      const hasOldColumn = columnNames.includes('order');
+      const hasNewColumn = columnNames.includes('chapter_order');
+
+      if (hasOldColumn && !hasNewColumn) {
+        Logger.info(DatabaseSchema.TAG, '开始迁移chapter表: order -> chapter_order');
+        await rdbStore.executeSql(`ALTER TABLE chapter ADD COLUMN chapter_order INTEGER DEFAULT 0`);
+        await rdbStore.executeSql(`UPDATE chapter SET chapter_order = "order" WHERE chapter_order = 0`);
+        Logger.info(DatabaseSchema.TAG, 'chapter表迁移完成');
+      } else if (!hasOldColumn && !hasNewColumn) {
+        Logger.info(DatabaseSchema.TAG, '添加chapter_order列');
+        await rdbStore.executeSql(`ALTER TABLE chapter ADD COLUMN chapter_order INTEGER DEFAULT 0`);
+      }
+    } catch (error) {
+      Logger.warn(DatabaseSchema.TAG, `chapter表迁移警告: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

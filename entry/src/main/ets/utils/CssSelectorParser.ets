@@ -24,26 +24,26 @@ export class CssSelectorParser {
         return elements;
       }
 
-      // 移除@css:前缀（Legado格式）
+      // 移除@css:前缀（标准格式）
       if (processedSelector.startsWith('@css:')) {
         processedSelector = processedSelector.substring(5).trim();
       }
 
-      // 处理@class.前缀（Legado格式简写）
+      // 处理@class.前缀（标准格式简写）
       if (processedSelector.startsWith('class.')) {
         processedSelector = '.' + processedSelector.substring(6);
       }
 
-      // 处理@tag.前缀（Legado格式简写）
+      // 处理@tag.前缀（标准格式简写）
       if (processedSelector.startsWith('tag.')) {
         processedSelector = processedSelector.substring(4);
-        Logger.debug(CssSelectorParser.TAG, `Legado tag.前缀转换: ${selector} -> ${processedSelector}`);
+        Logger.debug(CssSelectorParser.TAG, `标准格式 tag.前缀转换: ${selector} -> ${processedSelector}`);
       }
 
-      // 处理id.前缀（Legado格式简写）
+      // 处理id.前缀（标准格式简写）
       if (processedSelector.startsWith('id.')) {
         processedSelector = '#' + processedSelector.substring(3);
-        Logger.debug(CssSelectorParser.TAG, `Legado id.前缀转换: ${selector} -> ${processedSelector}`);
+        Logger.debug(CssSelectorParser.TAG, `标准格式 id.前缀转换: ${selector} -> ${processedSelector}`);
       }
 
       // 处理XPath格式（简化处理，转换为正则）
@@ -191,13 +191,26 @@ export class CssSelectorParser {
         Logger.debug(CssSelectorParser.TAG, `ID选择器解析 - id: ${id}`);
         
         const regex = new RegExp(
-          `<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${CssSelectorParser.escapeRegex(id)}["'][^>]*>([\\s\\S]*?)<\\/\\1>`,
+          `<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${CssSelectorParser.escapeRegex(id)}["'][^>]*>([\\s\\S]*?)(?:<\\/\\1>|(?=<[a-zA-Z]|$))`,
           'gi'
         );
         const matches = html.matchAll(regex);
         for (const match of matches) {
           elements.push(match[0]);
         }
+        
+        if (elements.length === 0) {
+          Logger.debug(CssSelectorParser.TAG, `ID选择器尝试宽松匹配`);
+          const looseRegex = new RegExp(
+            `<[^>]*\\bid\\s*=\\s*["']${CssSelectorParser.escapeRegex(id)}["'][^>]*>([\\s\\S]*?)(?=<[a-zA-Z][^>]*\\bid\\s*=|$)`,
+            'gi'
+          );
+          const looseMatches = html.matchAll(looseRegex);
+          for (const match of looseMatches) {
+            elements.push(match[0]);
+          }
+        }
+        
         Logger.debug(CssSelectorParser.TAG, `ID选择器找到 ${elements.length} 个元素`);
       }
       // 处理标签选择器
@@ -435,14 +448,18 @@ export class CssSelectorParser {
       }
 
       // 处理##替换规则（如：##简介：）
-      let replacePattern = '';
+      // 标准格式支持多个替换规则用|分隔
+      let replacePatterns: string[] = [];
       if (processedRule.includes('##')) {
         const parts = processedRule.split('##');
         processedRule = parts[0];
-        replacePattern = parts[1] || '';
+        if (parts.length > 1) {
+          const patternsStr = parts.slice(1).join('##');
+          replacePatterns = patternsStr.split('|').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+        }
       }
 
-      // 处理{{}}模板（Legado格式）
+      // 处理{{}}模板（标准格式）
       if (processedRule.includes('{{')) {
         return CssSelectorParser.processTemplate(html, processedRule);
       }
@@ -468,12 +485,16 @@ export class CssSelectorParser {
         const selector = processedRule.substring(0, atIndex).trim();
         const attr = processedRule.substring(atIndex + 1).trim();
 
+        Logger.debug(CssSelectorParser.TAG, `属性选择器解析 - selector: ${selector}, attr: ${attr}`);
+
         let elements: string[];
         if (selector) {
           elements = CssSelectorParser.selectElements(html, selector);
         } else {
           elements = [html];
         }
+
+        Logger.debug(CssSelectorParser.TAG, `选择器找到 ${elements.length} 个元素`);
 
         if (skipFirst > 0 && elements.length > skipFirst) {
           elements = elements.slice(skipFirst);
@@ -485,31 +506,27 @@ export class CssSelectorParser {
 
           if (attr === 'text' || attr === 'text()') {
             let text = CssSelectorParser.extractTextContent(elementHtml);
-            if (replacePattern) {
-              text = text.replace(new RegExp(CssSelectorParser.escapeRegex(replacePattern), 'g'), '');
-            }
+            text = CssSelectorParser.applyReplacePatterns(text, replacePatterns);
+            return text.trim();
+          } else if (attr === 'textNodes') {
+            let text = CssSelectorParser.extractTextNodes(elementHtml);
+            text = CssSelectorParser.applyReplacePatterns(text, replacePatterns);
             return text.trim();
           } else if (attr === 'href') {
             const hrefMatch = elementHtml.match(/href=["']([^"']*)["']/i);
             let href = hrefMatch ? hrefMatch[1] : '';
-            if (replacePattern) {
-              href = href.replace(new RegExp(CssSelectorParser.escapeRegex(replacePattern), 'g'), '');
-            }
+            href = CssSelectorParser.applyReplacePatterns(href, replacePatterns);
             return href;
           } else if (attr === 'src') {
             const srcMatch = elementHtml.match(/src=["']([^"']*)["']/i);
             let src = srcMatch ? srcMatch[1] : '';
-            if (replacePattern) {
-              src = src.replace(new RegExp(CssSelectorParser.escapeRegex(replacePattern), 'g'), '');
-            }
+            src = CssSelectorParser.applyReplacePatterns(src, replacePatterns);
             return src;
           } else {
             const attrRegex = new RegExp(`${CssSelectorParser.escapeRegex(attr)}=["']([^"']*)["']`, 'i');
             const attrMatch = elementHtml.match(attrRegex);
             let value = attrMatch ? attrMatch[1] : '';
-            if (replacePattern) {
-              value = value.replace(new RegExp(CssSelectorParser.escapeRegex(replacePattern), 'g'), '');
-            }
+            value = CssSelectorParser.applyReplacePatterns(value, replacePatterns);
             return value;
           }
         }
@@ -520,9 +537,7 @@ export class CssSelectorParser {
       if (elements.length > 0) {
         const elementIndex = index >= 0 && index < elements.length ? index : 0;
         let text = CssSelectorParser.extractTextContent(elements[elementIndex]);
-        if (replacePattern) {
-          text = text.replace(new RegExp(CssSelectorParser.escapeRegex(replacePattern), 'g'), '');
-        }
+        text = CssSelectorParser.applyReplacePatterns(text, replacePatterns);
         return text.trim();
       }
 
@@ -558,6 +573,57 @@ export class CssSelectorParser {
       return '';
     }
     return EntityDecoder.cleanHtml(html);
+  }
+
+  /**
+   * 提取所有文本节点内容（Legado格式的@textNodes）
+   * 递归提取HTML中所有文本内容，保留换行
+   */
+  static extractTextNodes(html: string): string {
+    if (!html) {
+      return '';
+    }
+
+    let text = html;
+    
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    text = text.replace(/<\/p>/gi, '\n');
+    text = text.replace(/<\/div>/gi, '\n');
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    text = text.replace(/<!--[\s\S]*?-->/g, '');
+    text = text.replace(/<[^>]+>/g, '');
+    
+    text = EntityDecoder.decode(text);
+    
+    text = text.replace(/\n\s*\n/g, '\n');
+    text = text.replace(/[ \t]+/g, ' ');
+    
+    return text;
+  }
+
+  /**
+   * 应用多个替换规则（Legado格式，用|分隔）
+   */
+  static applyReplacePatterns(text: string, patterns: string[]): string {
+    if (!text || patterns.length === 0) {
+      return text;
+    }
+
+    let result = text;
+    for (const pattern of patterns) {
+      if (!pattern) continue;
+      
+      try {
+        const regex = new RegExp(pattern, 'g');
+        result = result.replace(regex, '');
+      } catch (e) {
+        Logger.warn(CssSelectorParser.TAG, `替换规则正则错误: ${pattern}, 错误: ${e}`);
+        result = result.replace(new RegExp(CssSelectorParser.escapeRegex(pattern), 'g'), '');
+      }
+    }
+    
+    return result;
   }
 
   static escapeRegex(str: string): string {

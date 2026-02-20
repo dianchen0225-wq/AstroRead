@@ -23,7 +23,7 @@ export class ChapterRepository {
     const predicates = new relationalStore.RdbPredicates(TABLE_CHAPTER);
     try {
       predicates.equalTo('book_id', bookId);
-      predicates.orderByAsc('order');
+      predicates.orderByAsc('chapter_order');
     } catch (error) {
       Logger.error(ChapterRepository.TAG, `设置查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -61,7 +61,7 @@ export class ChapterRepository {
       const bookIdIndex = resultSet.getColumnIndex('book_id');
       const titleIndex = resultSet.getColumnIndex('title');
       const urlIndex = resultSet.getColumnIndex('url');
-      const orderIndex = resultSet.getColumnIndex('order');
+      const orderIndex = resultSet.getColumnIndex('chapter_order');
       const isVipIndex = resultSet.getColumnIndex('is_vip');
 
       return {
@@ -111,7 +111,7 @@ export class ChapterRepository {
             'book_id': chapter.bookId,
             'title': chapter.title,
             'url': chapter.url,
-            'order': chapter.order,
+            'chapter_order': chapter.order,
             'is_vip': chapter.isVip ? VIP_FLAG_TRUE : VIP_FLAG_FALSE
           });
         }
@@ -131,7 +131,7 @@ export class ChapterRepository {
                 'book_id': chapter.bookId,
                 'title': chapter.title,
                 'url': chapter.url,
-                'order': chapter.order,
+                'chapter_order': chapter.order,
                 'is_vip': chapter.isVip ? VIP_FLAG_TRUE : VIP_FLAG_FALSE
               };
               await this.rdbStore.insert(TABLE_CHAPTER, valueBucket);
