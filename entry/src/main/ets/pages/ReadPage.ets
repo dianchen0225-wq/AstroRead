@@ -263,7 +263,7 @@ struct ReadPage {
       AppButton({
         text: '上一章',
         variant: 'ghost',
-        size: 'sm',
+        buttonSize: 'sm',
         onClicked: () => {
           this.prevChapter();
         }
@@ -276,7 +276,7 @@ struct ReadPage {
       AppButton({
         text: '下一章',
         variant: 'ghost',
-        size: 'sm',
+        buttonSize: 'sm',
         onClicked: () => {
           this.nextChapter();
         }
@@ -324,7 +324,7 @@ struct ReadPage {
         AppButton({
           text: '目录',
           variant: 'ghost',
-          size: 'sm',
+          buttonSize: 'sm',
           onClicked: () => {
             this.showChapterSheet = true;
           }
@@ -333,7 +333,7 @@ struct ReadPage {
         AppButton({
           text: '设置',
           variant: 'ghost',
-          size: 'sm',
+          buttonSize: 'sm',
           onClicked: () => {
             this.showSettings = true;
           }
@@ -499,7 +499,7 @@ struct ReadPage {
       .padding(DesignSystem.Spacing.lg)
 
       List() {
-        ForEach(this.chapters, (chapter: Chapter) => {
+        ForEach(this.chapters, (chapter: Chapter, index: number) => {
           ListItem() {
             Row() {
               Text(chapter.title)
@@ -536,6 +536,7 @@ struct ReadPage {
         })
       }
       .width('100%')
+      .height('100%')
       .layoutWeight(1)
       .padding({
         left: DesignSystem.Spacing.lg,

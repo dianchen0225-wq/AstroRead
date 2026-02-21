@@ -11,7 +11,7 @@ import { EPUBParser } from '../utils/EPUBParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book, Chapter } from '../models/Book';
 import { Logger } from '../utils/Logger';
-import NavigationManager from '../common/NavigationManager';
+import { NavigationManager } from '../common/NavigationManager';
 import common from '@ohos.app.ability.common';
 
 @Entry
@@ -206,7 +206,7 @@ struct ImportPage {
 
     if (book) {
       try {
-        NavigationManager.navigateTo('pages/ReadPage', { bookId: book.id });
+        NavigationManager.getInstance().navigateToBookDetail({ bookId: book.id });
       } catch (error) {
         Logger.error('ImportPage', `打开书籍失败: ${error}`);
       }
@@ -279,13 +279,11 @@ struct ImportPage {
           ForEach(this.importedFiles, (file: FileInfo) => {
             ListItem() {
               Row() {
-                // 文件图标
                 Image(this.getFileIcon(file.extension))
                   .width(48)
                   .height(48)
                   .margin({ right: 12 })
 
-                // 文件信息
                 Column() {
                   Text(file.name)
                     .fontSize(16)
@@ -303,7 +301,6 @@ struct ImportPage {
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
 
-                // 操作按钮
                 Row() {
                   Button('打开')
                     .fontSize(12)
@@ -325,6 +322,7 @@ struct ImportPage {
           }, (file: FileInfo) => file.path)
         }
         .width('100%')
+        .height('100%')
         .padding(16)
         .layoutWeight(1)
         .divider({ strokeWidth: 8, color: 'transparent' })

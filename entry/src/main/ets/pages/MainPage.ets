@@ -14,6 +14,7 @@ import BookDetailPage from './BookDetailPage';
 import ReadPage from './ReadPage';
 import ImportPage from './ImportPage';
 import window from '@ohos.window';
+import display from '@ohos.display';
 import common from '@ohos.app.ability.common';
 
 enum PageIndex {
@@ -39,6 +40,9 @@ struct MainPage {
   @Local overlayPages: OverlayPage[] = [];
   @Local pageTransitionOpacity: number = 1;
   @Local pageTransitionOffset: number = 0;
+  @Local floatingNavConfig: FloatingNavConfig = floatingNavManager.getConfig();
+  @Local screenWidth: number = 360;
+  @Local screenHeight: number = 780;
   
   private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
@@ -47,27 +51,44 @@ struct MainPage {
   private navigationListener: NavigationChangeListener = (pageName: string, action: 'push' | 'pop' | 'replace', params?: ESObject) => {
     this.handleNavigationChange(pageName, params, action);
   };
+  private floatingNavListener: (config: FloatingNavConfig) => void = (config: FloatingNavConfig) => {
+    this.floatingNavConfig = config;
+  };
 
   aboutToAppear(): void {
     this.isComponentActive = true;
-    
+
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
     themeManager.setContext(context);
-    
+    floatingNavManager.loadConfig();
+
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-    
+    floatingNavManager.addConfigChangeListener(this.floatingNavListener);
+
     NavigationManager.getInstance().initializeStack('MainPage');
     NavigationManager.getInstance().addNavigationChangeListener(this.navigationListener);
-    
+
     this.setWindowImmersive();
+    this.getScreenSize();
   }
 
   aboutToDisappear(): void {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
+    floatingNavManager.removeConfigChangeListener(this.floatingNavListener);
     NavigationManager.getInstance().removeNavigationChangeListener(this.navigationListener);
+  }
+
+  private getScreenSize(): void {
+    try {
+      const displayInfo = display.getDefaultDisplaySync();
+      this.screenWidth = displayInfo.width;
+      this.screenHeight = displayInfo.height;
+    } catch (error) {
+      Logger.error('MainPage', `获取屏幕尺寸失败: ${error}`);
+    }
   }
 
   private handleNavigationChange(pageName: string, action: 'push' | 'pop' | 'replace', params?: ESObject): void {
@@ -178,7 +199,7 @@ struct MainPage {
       Column() {
         Tabs({ barPosition: BarPosition.End, index: this.currentPageIndex }) {
           TabContent() {
-            HomePage({ 
+            HomePage({
               safeAreaTop: this.safeAreaTop,
               onNavigate: (route: string, params?: ESObject) => {
                 this.handleHomeNavigate(route, params);
@@ -203,20 +224,21 @@ struct MainPage {
           .tabBar(this.buildTabBar(PageIndex.Source))
 
           TabContent() {
-            SettingsPage({ 
+            SettingsPage({
               safeAreaTop: this.safeAreaTop,
-              safeAreaBottom: this.safeAreaBottom 
+              safeAreaBottom: this.safeAreaBottom
             })
           }
           .tabBar(this.buildTabBar(PageIndex.Settings))
         }
         .barMode(BarMode.Fixed)
-        .barHeight(56 + this.safeAreaBottom)
+        .barHeight(this.floatingNavConfig.enabled ? 0 : 56 + this.safeAreaBottom)
         .barBackgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
         .onChange((index: number) => {
           this.currentPageIndex = index;
         })
         .animationDuration(DesignSystem.AnimationDuration.normal)
+        .visibility(this.floatingNavConfig.enabled ? Visibility.Hidden : Visibility.Visible)
       }
       .width('100%')
       .height('100%')
@@ -226,6 +248,18 @@ struct MainPage {
 
       if (this.overlayPages.length > 0) {
         this.buildOverlayPages()
+      }
+
+      if (this.floatingNavConfig.enabled && this.overlayPages.length === 0) {
+        FloatingNavBar({
+          currentIndex: this.currentPageIndex,
+          onTabChange: (index: number) => {
+            this.currentPageIndex = index;
+          },
+          screenWidth: this.screenWidth,
+          screenHeight: this.screenHeight,
+          safeAreaBottom: this.safeAreaBottom
+        })
       }
     }
     .width('100%')

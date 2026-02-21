@@ -6,7 +6,7 @@ import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
-import { CommonNavBar } from '../components/CommonNavBar';
+import { CommonNavBar, NavBarAction } from '../components/CommonNavBar';
 import { AppButton, AppLoading, AppEmpty } from '../components/UIComponents';
 import common from '@ohos.app.ability.common';
 
@@ -148,7 +148,7 @@ struct BookDetailPage {
 
     try {
       const chapterIndex = this.book?.lastReadChapterIndex ? this.book.lastReadChapterIndex : 0;
-      NavigationManager.getInstance().navigateTo('ReadPage', {
+      NavigationManager.getInstance().navigateToReadPage({
         bookId: this.bookId,
         initialChapterIndex: chapterIndex,
         initialChapterUrl: this.chapters[chapterIndex].url
@@ -163,7 +163,7 @@ struct BookDetailPage {
     this.showChapterSheet = false;
     
     try {
-      NavigationManager.getInstance().navigateTo('ReadPage', {
+      NavigationManager.getInstance().navigateToReadPage({
         bookId: this.bookId,
         initialChapterIndex: index,
         initialChapterUrl: this.chapters[index].url
@@ -171,6 +171,14 @@ struct BookDetailPage {
     } catch (err) {
       Logger.error('BookDetailPage', `pushPage failed: ${err}`);
     }
+  }
+
+  private handleStartReadClick(): void {
+    this.startRead();
+  }
+
+  private handleShowChapterSheet(): void {
+    this.showChapterSheet = true;
   }
 
   build() {
@@ -187,7 +195,7 @@ struct BookDetailPage {
                 this.addBook();
               }
             }
-          }
+          } as NavBarAction
         ]
       })
 
@@ -335,21 +343,17 @@ struct BookDetailPage {
         buttonText: this.chapters.length > 0 ? '开始阅读' : '加载章节',
         variant: 'primary',
         fullWidth: true,
-        loading: this.isLoadingChapters
+        loading: this.isLoadingChapters,
+        onClicked: this.handleStartReadClick
       })
-        .setOnClick(() => {
-          this.startRead();
-        })
 
       if (this.chapters.length > 0) {
         AppButton({
           buttonText: '目录',
           variant: 'secondary',
-          fullWidth: true
+          fullWidth: true,
+          onClicked: this.handleShowChapterSheet
         })
-          .setOnClick(() => {
-            this.showChapterSheet = true;
-          })
       }
     }
     .width('100%')
@@ -395,7 +399,7 @@ struct BookDetailPage {
             if (chapter.isVip) {
               Text('VIP')
                 .fontSize(DesignSystem.Typography.size.xs)
-                .fontColor('#FFFFFF')
+                .fontColor(DesignSystem.getButtonTextColor())
                 .padding({
                   left: DesignSystem.Spacing.xs,
                   right: DesignSystem.Spacing.xs,
@@ -458,7 +462,7 @@ struct BookDetailPage {
               if (chapter.isVip) {
                 Text('VIP')
                   .fontSize(DesignSystem.Typography.size.xs)
-                  .fontColor('#FFFFFF')
+                  .fontColor(DesignSystem.getButtonTextColor())
                   .padding({
                     left: DesignSystem.Spacing.xs,
                     right: DesignSystem.Spacing.xs,
@@ -482,6 +486,7 @@ struct BookDetailPage {
         })
       }
       .width('100%')
+      .height('100%')
       .layoutWeight(1)
       .padding({
         left: DesignSystem.Spacing.lg,

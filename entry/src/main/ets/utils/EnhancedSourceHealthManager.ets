@@ -74,6 +74,84 @@ export class EnhancedSourceHealthManager {
   }
 
   /**
+   * 重置指定书源的健康度记录
+   */
+  resetRecord(sourceId: string): void {
+    const record = this.healthRecords.get(sourceId);
+    if (record) {
+      record.successCount = 0;
+      record.failureCount = 0;
+      record.lastSuccessTime = 0;
+      record.lastFailureTime = 0;
+      record.lastErrorType = '';
+      record.lastErrorMessage = '';
+      record.avgResponseTime = 0;
+      record.totalResponseTime = 0;
+      record.requestCount = 0;
+      record.score = INITIAL_SCORE;
+      record.isEnabled = true;
+      record.consecutiveFailures = 0;
+      record.isPermanentlyDisabled = false;
+      record.disabledReason = '';
+      record.lastCheckTime = Date.now();
+      
+      Logger.info(this.TAG, `已重置书源 ${sourceId} 的健康度记录`);
+      this.saveRecords();
+    }
+  }
+
+  /**
+   * 重置所有书源的健康度记录
+   */
+  resetAllRecords(): void {
+    this.healthRecords.clear();
+    Logger.info(this.TAG, '已重置所有书源的健康度记录');
+    this.saveRecords();
+  }
+
+  /**
+   * 获取健康度记录
+   */
+  getRecord(sourceId: string): EnhancedHealthRecord | undefined {
+    return this.healthRecords.get(sourceId);
+  }
+
+  /**
+   * 获取所有健康度记录
+   */
+  getAllRecords(): EnhancedHealthRecord[] {
+    return Array.from(this.healthRecords.values());
+  }
+
+  /**
+   * 启用被禁用的书源
+   */
+  enableSource(sourceId: string): void {
+    const record = this.healthRecords.get(sourceId);
+    if (record) {
+      record.isEnabled = true;
+      record.isPermanentlyDisabled = false;
+      record.disabledReason = '';
+      record.consecutiveFailures = 0;
+      Logger.info(this.TAG, `已启用书源 ${sourceId}`);
+      this.saveRecords();
+    }
+  }
+
+  /**
+   * 禁用书源
+   */
+  disableSource(sourceId: string, reason: string = '手动禁用'): void {
+    const record = this.healthRecords.get(sourceId);
+    if (record) {
+      record.isEnabled = false;
+      record.disabledReason = reason;
+      Logger.info(this.TAG, `已禁用书源 ${sourceId}, 原因: ${reason}`);
+      this.saveRecords();
+    }
+  }
+
+  /**
    * 记录成功
    */
   recordSuccess(sourceId: string, sourceName: string, sourceUrl: string, responseTime: number): void {

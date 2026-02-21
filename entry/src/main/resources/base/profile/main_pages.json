@@ -4,6 +4,7 @@
       "pages/ReadPage",
       "pages/BookDetailPage",
       "pages/ImportPage",
-      "pages/HttpClientTestPage"
+      "pages/HttpClientTestPage",
+      "pages/BookSourceRepairPage"
     ]
   }

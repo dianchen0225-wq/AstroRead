@@ -5,7 +5,7 @@
 
 import { Logger } from './Logger';
 import { sourceCleaner } from './SourceCleaner';
-import { enhancedSourceHealthManager } from './EnhancedSourceHealthManager';
+import { enhancedSourceHealthManager, HealthStatistics } from './EnhancedSourceHealthManager';
 import { networkDiagnostics } from './NetworkDiagnostics';
 
 export interface FixReport {
@@ -99,7 +99,7 @@ export class SearchFixer {
   /**
    * 生成修复建议
    */
-  private generateRecommendations(report: FixReport, healthStats: any): void {
+  private generateRecommendations(report: FixReport, healthStats: HealthStatistics): void {
     if (healthStats.enabled === 0) {
       report.recommendations.push('❌ 没有可用的书源,请导入新的书源');
     } else if (healthStats.enabled < 5) {

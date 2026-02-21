@@ -16,6 +16,14 @@ export interface RankColor {
   dark: string;
 }
 
+interface BookDetailNavParams {
+  bookId: string;
+}
+
+interface MainPageNavParams {
+  tabIndex: number;
+}
+
 @ComponentV2
 export struct SearchPage {
   @Local isLightMode: boolean = true;
@@ -342,14 +350,16 @@ export struct SearchPage {
   private async openBook(book: Book): Promise<void> {
     try {
       await this.addToBookshelf(book);
-      NavigationManager.getInstance().navigateTo('BookDetailPage', { bookId: book.id });
+      const params: ESObject = { bookId: book.id };
+      NavigationManager.getInstance().navigateTo('BookDetailPage', params);
     } catch (error) {
       Logger.error('SearchPage', `打开书籍失败: ${error}`);
     }
   }
 
   private navigateToSourcePage(): void {
-    NavigationManager.getInstance().navigateTo('MainPage', { tabIndex: 3 });
+    const params: ESObject = { tabIndex: 3 };
+    NavigationManager.getInstance().navigateTo('MainPage', params);
   }
 
   private async clearSearchHistory(): Promise<void> {
@@ -465,7 +475,7 @@ export struct SearchPage {
       Row() {
         Text($r('app.string.search_button'))
           .fontSize(DesignSystem.Typography.size.sm)
-          .fontColor('#FFFFFF')
+          .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
           .fontWeight(DesignSystem.Typography.weight.medium)
       }
       .padding({
@@ -578,7 +588,7 @@ export struct SearchPage {
         Row() {
           Text('网络导入书源')
             .fontSize(DesignSystem.Typography.size.xs)
-            .fontColor('#FFFFFF')
+            .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
         }
         .padding({
           left: DesignSystem.Spacing.md,
@@ -747,7 +757,7 @@ export struct SearchPage {
           Column() {
             Text('无书源')
               .fontSize(8)
-              .fontColor('#FFFFFF')
+              .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
               .fontWeight(DesignSystem.Typography.weight.medium)
           }
           .width(60)
@@ -976,7 +986,7 @@ export struct SearchPage {
       Row() {
         Text('去导入书源')
           .fontSize(DesignSystem.Typography.size.sm)
-          .fontColor('#FFFFFF')
+          .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
       }
       .padding({
         left: DesignSystem.Spacing.lg,
@@ -1069,7 +1079,7 @@ export struct SearchPage {
             Row() {
               Text((index + 1).toString())
                 .fontSize(DesignSystem.Typography.size.xs)
-                .fontColor('#FFFFFF')
+                .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
                 .fontWeight(DesignSystem.Typography.weight.bold)
             }
             .width(24)

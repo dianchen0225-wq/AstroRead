@@ -1,8 +1,23 @@
 import { Logger } from '../utils/Logger';
 
+export interface BookDetailParams {
+  bookId: string;
+}
+
+export interface ReadPageParams {
+  bookId: string;
+  initialChapterIndex: number;
+  initialChapterUrl: string;
+}
+
+export interface ImportSourceParams {
+  sourceId: string;
+  sourceName: string;
+}
+
 export interface NavigationItem {
   pageName: string;
-  params?: ESObject;
+  params?: NavigationParams;
   timestamp: number;
 }
 
@@ -11,7 +26,9 @@ export interface NavigationOptions {
   replace?: boolean;
   clearStack?: boolean;
 }
-export type NavigationChangeListener = (pageName: string, action: 'push' | 'pop' | 'replace', params?: ESObject) => void;
+export type NavigationParams = Record<string, string | number | boolean | Object | null | undefined>;
+
+  export type NavigationChangeListener = (pageName: string, action: 'push' | 'pop' | 'replace', params?: NavigationParams) => void;
 
 export class NavigationManager {
   private static readonly TAG = 'NavigationManager';
@@ -44,7 +61,7 @@ export class NavigationManager {
       this.navigationChangeListeners.splice(index, 1);
     }
   }
-  private notifyListeners(pageName: string, action: 'push' | 'pop' | 'replace', params?: ESObject): void {
+  private notifyListeners(pageName: string, action: 'push' | 'pop' | 'replace', params?: NavigationParams): void {
     const listenersCopy: NavigationChangeListener[] = this.navigationChangeListeners.slice();
     listenersCopy.forEach(listener => {
       try {
@@ -55,7 +72,7 @@ export class NavigationManager {
     });
   }
 
-  navigateTo(pageName: string, params?: ESObject, options?: NavigationOptions): void {
+  navigateTo(pageName: string, params?: NavigationParams, options?: NavigationOptions): void {
     if (this.isNavigating) {
       Logger.warn(NavigationManager.TAG, '导航进行中，请稍后再试');
       return;
@@ -91,7 +108,48 @@ export class NavigationManager {
     }
   }
 
-  navigateBack(params?: ESObject): boolean {
+  private createNavParams(): NavigationParams {
+    const params: NavigationParams = {};
+    return params;
+  }
+
+  private createBookDetailParams(bookId: string): NavigationParams {
+    const params: NavigationParams = {};
+    params['bookId'] = bookId;
+    return params;
+  }
+
+  private createReadPageParams(bookId: string, chapterIndex: number, chapterUrl: string): NavigationParams {
+    const params: NavigationParams = {};
+    params['bookId'] = bookId;
+    params['initialChapterIndex'] = chapterIndex;
+    params['initialChapterUrl'] = chapterUrl;
+    return params;
+  }
+
+  navigateToBookDetail(params: BookDetailParams, options?: NavigationOptions): void {
+    const navParams = this.createBookDetailParams(params.bookId);
+    this.navigateTo('BookDetailPage', navParams, options);
+  }
+
+  navigateToReadPage(params: ReadPageParams, options?: NavigationOptions): void {
+    const navParams = this.createReadPageParams(params.bookId, params.initialChapterIndex, params.initialChapterUrl);
+    this.navigateTo('ReadPage', navParams, options);
+  }
+
+  navigateToImportSource(params: ImportSourceParams, options?: NavigationOptions): void {
+    const navParams: NavigationParams = {};
+    navParams['sourceId'] = params.sourceId;
+    navParams['sourceName'] = params.sourceName;
+    this.navigateTo('ImportSourcePage', navParams, options);
+  }
+
+  navigateToBookSourceRepairPage(options?: NavigationOptions): void {
+    const navParams = this.createNavParams();
+    this.navigateTo('BookSourceRepairPage', navParams, options);
+  }
+
+  navigateBack(params?: NavigationParams): boolean {
     if (this.isNavigating) {
       Logger.warn(NavigationManager.TAG, '导航进行中，请稍后再试');
       return false;
@@ -162,7 +220,7 @@ export class NavigationManager {
     Logger.info(NavigationManager.TAG, '导航栈已清空');
   }
 
-  initializeStack(pageName: string, params?: ESObject): void {
+  initializeStack(pageName: string, params?: NavigationParams): void {
     this.navigationStack = [{
       pageName,
       params,
@@ -170,15 +228,15 @@ export class NavigationManager {
     }];
     Logger.info(NavigationManager.TAG, `初始化导航栈: ${pageName}`);
   }
-  updateCurrentParams(params: ESObject): void {
+  updateCurrentParams(params: NavigationParams): void {
     const current = this.getCurrentPage();
     if (current) {
       current.params = this.mergeParams(current.params, params);
     }
   }
 
-  private mergeParams(baseParams?: ESObject, newParams?: ESObject): ESObject {
-    const result: ESObject = {};
+  private mergeParams(baseParams?: NavigationParams, newParams?: NavigationParams): NavigationParams {
+    const result: NavigationParams = {};
 
     if (baseParams) {
       Object.keys(baseParams).forEach(key => {

@@ -16,6 +16,7 @@ export struct AppButton {
   @Param loading: boolean = false;
   @Param fullWidth: boolean = false;
   @Param buttonIcon: string = '';
+  @Param onClicked: () => void = () => {};
   
   private clickHandler?: () => void;
   
@@ -135,8 +136,12 @@ export struct AppButton {
       curve: Curve.EaseOut
     })
     .onClick(() => {
-      if (!this.disabled && !this.loading && this.clickHandler) {
-        this.clickHandler();
+      if (!this.disabled && !this.loading) {
+        if (this.clickHandler) {
+          this.clickHandler();
+        } else if (this.onClicked) {
+          this.onClicked();
+        }
       }
     })
     .onTouch((event: TouchEvent) => {

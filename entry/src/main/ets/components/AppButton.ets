@@ -4,6 +4,18 @@ import { themeManager } from '../common/ThemeManager';
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
+interface SizeStyles {
+  height: number;
+  padding: number;
+  fontSize: number;
+}
+
+interface VariantStyles {
+  bgColor: string;
+  textColor: string;
+  borderColor: string;
+}
+
 @ComponentV2
 export struct AppButton {
   @Local isLightMode: boolean = true;
@@ -12,16 +24,16 @@ export struct AppButton {
   
   @Param text: string = '';
   @Param variant: ButtonVariant = 'primary';
-  @Param size: ButtonSize = 'md';
+  @Param buttonSize: ButtonSize = 'md';
   @Param disabled: boolean = false;
   @Param loading: boolean = false;
   @Param fullWidth: boolean = false;
   @Param icon: string = '';
   @Param accessibilityLabel: string = '';
   @Param accessibilityHint: string = '';
-  @Param onClicked?: () => void;
+  @Param onClicked: () => void = () => {};
   
-  private onClickHandler?: () => void;
+  private clickHandler?: () => void;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -35,8 +47,8 @@ export struct AppButton {
     themeManager.removeListener(this.themeListener);
   }
 
-  private getSizeStyles(): { height: number; padding: number; fontSize: number } {
-    switch (this.size) {
+  private getSizeStyles(): SizeStyles {
+    switch (this.buttonSize) {
       case 'sm':
         return { height: 32, padding: DesignSystem.Spacing.sm, fontSize: DesignSystem.Typography.size.xs };
       case 'lg':
@@ -46,7 +58,7 @@ export struct AppButton {
     }
   }
 
-  private getVariantStyles(): { bgColor: string; textColor: string; borderColor: string } {
+  private getVariantStyles(): VariantStyles {
     const pressed = this.isPressed && !this.disabled;
     
     switch (this.variant) {
@@ -125,8 +137,8 @@ export struct AppButton {
       if (!this.disabled && !this.loading) {
         if (this.onClicked) {
           this.onClicked();
-        } else if (this.onClickHandler) {
-          this.onClickHandler();
+        } else if (this.clickHandler) {
+          this.clickHandler();
         }
       }
     })
@@ -146,8 +158,8 @@ export struct AppButton {
     })
   }
 
-  onClick(handler: () => void): AppButton {
-    this.onClickHandler = handler;
+  setClickHandler(handler: () => void): AppButton {
+    this.clickHandler = handler;
     return this;
   }
 }

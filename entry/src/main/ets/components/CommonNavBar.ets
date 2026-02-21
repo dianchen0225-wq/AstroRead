@@ -32,7 +32,7 @@ export struct CommonNavBar {
   @Param safeAreaTop: number = 0;
   @Param rightActions: NavBarAction[] = [];
   
-  private onBackPress?: () => boolean;
+  @Local onBackPress?: () => boolean;
   
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
@@ -161,7 +161,7 @@ export struct CommonNavBar {
   buildRightActions() {
     if (this.rightActions && this.rightActions.length > 0) {
       Row({ space: DesignSystem.Spacing.sm }) {
-        ForEach(this.rightActions, (action: NavBarAction, index: number) => {
+        ForEach(this.rightActions, (action: NavBarAction) => {
           this.buildActionButton(action)
         })
       }
@@ -199,7 +199,7 @@ export struct CommonNavBar {
       if (action.badge) {
         Text(action.badge)
           .fontSize(DesignSystem.Typography.size.xs)
-          .fontColor('#FFFFFF')
+          .fontColor(DesignSystem.getButtonTextColor())
           .backgroundColor(DesignSystem.getErrorColor(this.isLightMode))
           .borderRadius(DesignSystem.BorderRadius.full)
           .padding({ left: DesignSystem.Spacing.xs, right: DesignSystem.Spacing.xs })
@@ -248,7 +248,7 @@ export struct CommonNavBar {
           Row() {
             Text('确定')
               .fontSize(DesignSystem.Typography.size.base)
-              .fontColor('#FFFFFF')
+              .fontColor(DesignSystem.getButtonTextColor())
               .fontWeight(DesignSystem.Typography.weight.medium)
           }
           .layoutWeight(1)
@@ -281,7 +281,8 @@ export struct PageHeader {
   @Local isLightMode: boolean = true;
   
   @Param title: string | Resource = '';
-  @Param subtitle?: string | Resource;
+  @Require
+    @Param subtitle?: string | Resource;
   @Param safeAreaTop: number = 0;
   @Param showBack: boolean = false;
   
@@ -366,11 +367,11 @@ export struct PageHeader {
 @ComponentV2
 export struct SectionHeader {
   @Local isLightMode: boolean = true;
-  
+
   @Param title: string | Resource = '';
-  @Param actionText?: string;
-  @Param onAction?: () => void;
-  
+  @Param actionText: string = '';
+  @Param onAction: () => void = () => {};
+
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -388,22 +389,24 @@ export struct SectionHeader {
     Row() {
       if (typeof this.title === 'string') {
         Text(this.title)
+          .fontSize(DesignSystem.Typography.size.base)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+          .layoutWeight(1)
       } else {
         Text(this.title)
+          .fontSize(DesignSystem.Typography.size.base)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+          .layoutWeight(1)
       }
-      .fontSize(DesignSystem.Typography.size.base)
-      .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-      .fontWeight(DesignSystem.Typography.weight.semibold)
-      .layoutWeight(1)
 
-      if (this.actionText && this.onAction) {
+      if (this.actionText.length > 0) {
         Text(this.actionText)
           .fontSize(DesignSystem.Typography.size.sm)
           .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
           .onClick(() => {
-            if (this.onAction) {
-              this.onAction();
-            }
+            this.onAction();
           })
       }
     }

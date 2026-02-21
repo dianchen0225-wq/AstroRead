@@ -292,6 +292,28 @@ export class BookSourceRepository {
     }
   }
 
+  /**
+   * 批量删除书源
+   */
+  async deleteBookSources(sourceIds: string[]): Promise<number> {
+    try {
+      if (!sourceIds || sourceIds.length === 0) {
+        return 0;
+      }
+
+      const predicates = new relationalStore.RdbPredicates('book_source');
+      predicates.in(DB_COLUMN_ID, sourceIds);
+      const deletedRows = await this.rdbStore.delete(predicates);
+      
+      Logger.info(BookSourceRepository.TAG, `批量删除书源成功，删除数量: ${deletedRows}`);
+      return deletedRows;
+    }
+    catch (error) {
+      Logger.error(BookSourceRepository.TAG, `批量删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+  }
+
   private parseBookSource(resultSet: relationalStore.ResultSet): BookSource {
     try {
       const idIndex = resultSet.getColumnIndex('id');

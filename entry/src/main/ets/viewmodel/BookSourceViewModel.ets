@@ -318,6 +318,52 @@ export class BookSourceViewModel {
   }
 
   /**
+   * 批量更新书源状态
+   */
+  async batchUpdateBookSourcesStatus(ids: string[], enabled: boolean): Promise<DeleteResult> {
+    try {
+      if (!ids || ids.length === 0) {
+        return {
+          success: false,
+          message: '没有选择任何书源'
+        };
+      }
+
+      // 验证所有ID
+      for (const id of ids) {
+        if (!this.isValidUUID(id)) {
+          throw new Error(`无效的书源ID: ${id}`);
+        }
+      }
+
+      let updatedCount = 0;
+      for (const id of ids) {
+        const source = this.bookSources.find((s: BookSource) => s.id === id);
+        if (source) {
+          source.enabled = enabled;
+          await this.databaseManager.upsertBookSource(source);
+          updatedCount++;
+        }
+      }
+
+      await this.loadEnabledBookSources();
+      
+      return {
+        success: true,
+        message: `成功更新 ${updatedCount} 个书源状态`,
+        count: updatedCount
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      Logger.error('BookSourceViewModel', `批量更新书源状态失败: ${errorMsg}`);
+      return {
+        success: false,
+        message: `批量更新书源状态失败: ${errorMsg}`
+      };
+    }
+  }
+
+  /**
    * 导入书源（从JSON文件或URL）
    */
   async importBookSources(sources: BookSource[]): Promise<void> {
@@ -404,22 +450,18 @@ export class BookSourceViewModel {
    * 删除书源（内部方法）
    */
   private async deleteBookSources(ids: string[]): Promise<number> {
-    if (this.databaseManager === null || ids.length === 0) {
+    if (ids.length === 0) {
       return 0;
     }
 
     try {
-      let deletedCount = 0;
-      for (const id of ids) {
-        const deleted = await this.deleteBookSourceById(id);
-        if (deleted) {
-          deletedCount++;
-        }
-      }
-      return deletedCount;
+      // 使用BookSourceManager的批量删除功能
+      const bookSourceManager = BookSourceManager.getInstance();
+      await bookSourceManager.removeSources(ids);
+      return ids.length; // 成功删除的数量就是传入的ID数量
     } catch (error) {
-      Logger.error('BookSourceViewModel', '删除书源失败');
-      throw new Error('删除书源失败');
+      Logger.error('BookSourceViewModel', `批量删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`批量删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

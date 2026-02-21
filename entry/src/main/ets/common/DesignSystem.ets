@@ -442,6 +442,11 @@ export class DesignSystem {
     return isLightMode ? DesignSystem.Colors.primary.light : DesignSystem.Colors.primary.dark;
   }
 
+  // 获取按钮文字颜色（白色）
+  static getButtonTextColor(): string {
+    return '#FFFFFF';
+  }
+
   // 获取边框颜色
   static getBorderColor(isLightMode: boolean): string {
     return isLightMode ? DesignSystem.Colors.border.light : DesignSystem.Colors.border.dark;

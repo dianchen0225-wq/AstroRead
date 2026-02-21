@@ -70,6 +70,8 @@ export struct SourcePage {
   @Local showDeleteConfirm: boolean = false;
   @Local disabledSourceCount: number = 0;
   @Local isDeletingDisabled: boolean = false;
+  @Local selectedIds: string[] = [];
+  @Local showBatchActions: boolean = false;
   
   private readonly PAGE_SIZE: number = 50;
   private isComponentActive: boolean = false;
@@ -586,6 +588,153 @@ export struct SourcePage {
     }
   }
 
+  /**
+   * 选择/取消选择单个书源
+   */
+  toggleSelectSource(id: string): void {
+    const index = this.selectedIds.indexOf(id);
+    if (index > -1) {
+      this.selectedIds.splice(index, 1);
+    } else {
+      this.selectedIds.push(id);
+    }
+    
+    // 如果没有选中任何项，则隐藏批量操作栏
+    this.showBatchActions = this.selectedIds.length > 0;
+  }
+
+  /**
+   * 选择所有当前页面的书源
+   */
+  selectAllCurrentPage(): void {
+    for (const item of this.sourceList) {
+      if (!this.selectedIds.includes(item.id)) {
+        this.selectedIds.push(item.id);
+      }
+    }
+    this.showBatchActions = true;
+  }
+
+  /**
+   * 取消选择所有书源
+   */
+  unselectAll(): void {
+    this.selectedIds = [];
+    this.showBatchActions = false;
+  }
+
+  /**
+   * 批量删除选中的书源
+   */
+  async batchDeleteSelected(): Promise<void> {
+    if (this.selectedIds.length === 0) {
+      showToast({
+        message: '请先选择要删除的书源',
+        duration: 2000
+      });
+      return;
+    }
+
+    try {
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result = await bookSourceViewModel.batchDeleteBookSources(this.selectedIds);
+
+      if (result.success) {
+        showToast({
+          message: `成功删除 ${result.count || this.selectedIds.length} 个书源`,
+          duration: 2000
+        });
+        this.unselectAll(); // 清空选择
+        await this.loadSources(); // 重新加载
+      } else {
+        showToast({
+          message: result.message || '批量删除失败',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('SourcePage', `批量删除失败: ${error}`);
+      showToast({
+        message: '批量删除失败',
+        duration: 2000
+      });
+    }
+  }
+
+  /**
+   * 批量启用选中的书源
+   */
+  async batchEnableSelected(): Promise<void> {
+    if (this.selectedIds.length === 0) {
+      showToast({
+        message: '请先选择要启用的书源',
+        duration: 2000
+      });
+      return;
+    }
+
+    try {
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result = await bookSourceViewModel.batchUpdateBookSourcesStatus(this.selectedIds, true);
+
+      if (result.success) {
+        showToast({
+          message: `成功启用 ${result.count || this.selectedIds.length} 个书源`,
+          duration: 2000
+        });
+        await this.loadSources(); // 重新加载
+      } else {
+        showToast({
+          message: result.message || '批量启用失败',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('SourcePage', `批量启用失败: ${error}`);
+      showToast({
+        message: '批量启用失败',
+        duration: 2000
+      });
+    }
+  }
+
+  /**
+   * 批量禁用选中的书源
+   */
+  async batchDisableSelected(): Promise<void> {
+    if (this.selectedIds.length === 0) {
+      showToast({
+        message: '请先选择要禁用的书源',
+        duration: 2000
+      });
+      return;
+    }
+
+    try {
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const result = await bookSourceViewModel.batchUpdateBookSourcesStatus(this.selectedIds, false);
+
+      if (result.success) {
+        showToast({
+          message: `成功禁用 ${result.count || this.selectedIds.length} 个书源`,
+          duration: 2000
+        });
+        await this.loadSources(); // 重新加载
+      } else {
+        showToast({
+          message: result.message || '批量禁用失败',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('SourcePage', `批量禁用失败: ${error}`);
+      showToast({
+        message: '批量禁用失败',
+        duration: 2000
+      });
+    }
+  }
+
   build() {
     Stack() {
       Column() {
@@ -655,6 +804,47 @@ export struct SourcePage {
           }
           .width('100%')
           .margin({ bottom: 10 })
+
+          // 批量操作栏
+          if (this.showBatchActions) {
+            Row() {
+              Button('取消')
+                .fontSize(14)
+                .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                .margin({ right: 10 })
+                .onClick(() => {
+                  this.unselectAll();
+                })
+
+              Text(`${this.selectedIds.length} 项已选`)
+                .fontSize(14)
+                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+                .layoutWeight(1)
+
+              Button('全部')
+                .fontSize(14)
+                .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                .margin({ right: 10 })
+                .onClick(() => {
+                  this.selectAllCurrentPage();
+                })
+
+              Button('删除')
+                .fontSize(14)
+                .fontColor('#ffffff')
+                .backgroundColor(DesignSystem.getDangerColor())
+                .borderRadius(8)
+                .padding({ left: 12, right: 12 })
+                .onClick(() => {
+                  this.batchDeleteSelected();
+                })
+            }
+            .width('100%')
+            .padding(10)
+            .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+            .borderRadius(12)
+            .margin({ bottom: 10 })
+          }
           
           if (this.searchKeyword.length > 0) {
             Row() {
@@ -841,6 +1031,13 @@ export struct SourcePage {
               } else {
                 ForEach(this.sourceList, (item: SourceItemData) => {
                   Row() {
+                    Checkbox({ name: item.id, group: 'sourceSelection' })
+                      .select(this.selectedIds.includes(item.id))
+                      .onChange((value: boolean) => {
+                        this.toggleSelectSource(item.id);
+                      })
+                      .margin({ right: 10 })
+
                     Column() {
                       Text(item.name)
                         .fontSize(14)
@@ -934,6 +1131,36 @@ export struct SourcePage {
               }
             }
             .width('100%')
+
+            // 在列表下方添加导入和删除按钮（仅当不在批量选择模式时显示）
+            if (!this.showBatchActions && this.sourceList.length > 0) {
+              Row() {
+                Button('网络导入书源')
+                  .layoutWeight(1)
+                  .height(44)
+                  .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                  .fontColor('#fff')
+                  .borderRadius(12)
+                  .margin({ right: 8 })
+                  .onClick(() => {
+                    this.showImportDialogUI();
+                  })
+                  
+                if (this.disabledSourceCount > 0) {
+                  Button('删除禁用')
+                    .layoutWeight(1)
+                    .height(44)
+                    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                    .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                    .borderRadius(12)
+                    .onClick(() => {
+                      this.deleteDisabledSources();
+                    })
+                }
+              }
+              .width('100%')
+              .margin({ top: 16 })
+            }
           }
           .width('100%')
           .layoutWeight(1)

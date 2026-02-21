@@ -2,7 +2,7 @@ import { Logger } from '../utils/Logger';
 
 export interface FloatingNavConfig {
   enabled: boolean;
-  position: 'left' | 'center' | 'right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+  position: FloatingNavPosition;
   width: number;
   height: number;
   borderRadius: number;
@@ -14,25 +14,50 @@ export interface FloatingNavConfig {
   animationEnabled: boolean;
 }
 
-const DEFAULT_CONFIG: FloatingNavConfig = {
-  enabled: false,
-  position: 'bottom-center',
-  width: 280,
-  height: 56,
-  borderRadius: 28,
-  opacity: 1.0,
-  backgroundOpacity: 0.95,
-  blurEnabled: true,
-  autoHide: false,
-  autoHideDelay: 3000,
-  animationEnabled: true
-};
+export type FloatingNavPosition = 'left' | 'center' | 'right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+
+export interface PositionStyle {
+  x: number | string;
+  y: number | string;
+}
+
+function createDefaultConfig(): FloatingNavConfig {
+  return {
+    enabled: false,
+    position: 'bottom-center',
+    width: 280,
+    height: 56,
+    borderRadius: 28,
+    opacity: 1.0,
+    backgroundOpacity: 0.95,
+    blurEnabled: true,
+    autoHide: false,
+    autoHideDelay: 3000,
+    animationEnabled: true
+  };
+}
+
+function cloneConfig(config: FloatingNavConfig): FloatingNavConfig {
+  return {
+    enabled: config.enabled,
+    position: config.position,
+    width: config.width,
+    height: config.height,
+    borderRadius: config.borderRadius,
+    opacity: config.opacity,
+    backgroundOpacity: config.backgroundOpacity,
+    blurEnabled: config.blurEnabled,
+    autoHide: config.autoHide,
+    autoHideDelay: config.autoHideDelay,
+    animationEnabled: config.animationEnabled
+  };
+}
 
 const STORAGE_KEY = 'floating_nav_config';
 
 export class FloatingNavManager {
   private static instance: FloatingNavManager;
-  private config: FloatingNavConfig = { ...DEFAULT_CONFIG };
+  private config: FloatingNavConfig = createDefaultConfig();
   private configChangeListeners: ((config: FloatingNavConfig) => void)[] = [];
 
   static getInstance(): FloatingNavManager {
@@ -46,14 +71,30 @@ export class FloatingNavManager {
     try {
       const configStr = AppStorage.get<string>(STORAGE_KEY);
       if (configStr) {
-        const loadedConfig = JSON.parse(configStr) as Partial<FloatingNavConfig>;
-        this.config = { ...DEFAULT_CONFIG, ...loadedConfig };
+        const loadedConfig = JSON.parse(configStr) as FloatingNavConfig;
+        this.config = this.mergeWithDefaults(loadedConfig);
         Logger.info('FloatingNavManager', '配置加载成功');
       }
     } catch (error) {
       Logger.error('FloatingNavManager', `加载配置失败: ${error}`);
-      this.config = { ...DEFAULT_CONFIG };
+      this.config = createDefaultConfig();
     }
+  }
+
+  private mergeWithDefaults(loaded: FloatingNavConfig): FloatingNavConfig {
+    const result = createDefaultConfig();
+    if (loaded.enabled !== undefined) result.enabled = loaded.enabled;
+    if (loaded.position !== undefined) result.position = loaded.position;
+    if (loaded.width !== undefined) result.width = loaded.width;
+    if (loaded.height !== undefined) result.height = loaded.height;
+    if (loaded.borderRadius !== undefined) result.borderRadius = loaded.borderRadius;
+    if (loaded.opacity !== undefined) result.opacity = loaded.opacity;
+    if (loaded.backgroundOpacity !== undefined) result.backgroundOpacity = loaded.backgroundOpacity;
+    if (loaded.blurEnabled !== undefined) result.blurEnabled = loaded.blurEnabled;
+    if (loaded.autoHide !== undefined) result.autoHide = loaded.autoHide;
+    if (loaded.autoHideDelay !== undefined) result.autoHideDelay = loaded.autoHideDelay;
+    if (loaded.animationEnabled !== undefined) result.animationEnabled = loaded.animationEnabled;
+    return result;
   }
 
   async saveConfig(): Promise<void> {
@@ -67,11 +108,21 @@ export class FloatingNavManager {
   }
 
   getConfig(): FloatingNavConfig {
-    return { ...this.config };
+    return cloneConfig(this.config);
   }
 
   async updateConfig(updates: Partial<FloatingNavConfig>): Promise<void> {
-    this.config = { ...this.config, ...updates };
+    if (updates.enabled !== undefined) this.config.enabled = updates.enabled;
+    if (updates.position !== undefined) this.config.position = updates.position;
+    if (updates.width !== undefined) this.config.width = updates.width;
+    if (updates.height !== undefined) this.config.height = updates.height;
+    if (updates.borderRadius !== undefined) this.config.borderRadius = updates.borderRadius;
+    if (updates.opacity !== undefined) this.config.opacity = updates.opacity;
+    if (updates.backgroundOpacity !== undefined) this.config.backgroundOpacity = updates.backgroundOpacity;
+    if (updates.blurEnabled !== undefined) this.config.blurEnabled = updates.blurEnabled;
+    if (updates.autoHide !== undefined) this.config.autoHide = updates.autoHide;
+    if (updates.autoHideDelay !== undefined) this.config.autoHideDelay = updates.autoHideDelay;
+    if (updates.animationEnabled !== undefined) this.config.animationEnabled = updates.animationEnabled;
     await this.saveConfig();
   }
 
@@ -80,7 +131,7 @@ export class FloatingNavManager {
     await this.saveConfig();
   }
 
-  async setPosition(position: FloatingNavConfig['position']): Promise<void> {
+  async setPosition(position: FloatingNavPosition): Promise<void> {
     this.config.position = position;
     await this.saveConfig();
   }
@@ -127,7 +178,7 @@ export class FloatingNavManager {
   }
 
   resetToDefault(): void {
-    this.config = { ...DEFAULT_CONFIG };
+    this.config = createDefaultConfig();
     this.saveConfig();
   }
 
@@ -143,38 +194,43 @@ export class FloatingNavManager {
   }
 
   private notifyConfigChange(): void {
-    this.configChangeListeners.forEach(listener => {
+    for (const listener of this.configChangeListeners) {
       try {
         listener(this.getConfig());
       } catch (error) {
         Logger.error('FloatingNavManager', `通知配置变更失败: ${error}`);
       }
-    });
+    }
   }
 
-  getPositionStyle(screenWidth: number, screenHeight: number, safeAreaBottom: number): {
-    x: number | string;
-    y: number | string;
-  } {
-    const { position, width } = this.config;
+  getPositionStyle(screenWidth: number, screenHeight: number, safeAreaBottom: number): PositionStyle {
+    const position = this.config.position;
+    const width = this.config.width;
+    const height = this.config.height;
     const bottomOffset = safeAreaBottom + 20;
+    const result: PositionStyle = { x: '50%', y: screenHeight - bottomOffset - height };
 
-    switch (position) {
-      case 'left':
-        return { x: 20, y: '50%' };
-      case 'center':
-        return { x: '50%', y: '50%' };
-      case 'right':
-        return { x: screenWidth - width - 20, y: '50%' };
-      case 'bottom-left':
-        return { x: 20, y: screenHeight - bottomOffset - this.config.height };
-      case 'bottom-center':
-        return { x: '50%', y: screenHeight - bottomOffset - this.config.height };
-      case 'bottom-right':
-        return { x: screenWidth - width - 20, y: screenHeight - bottomOffset - this.config.height };
-      default:
-        return { x: '50%', y: screenHeight - bottomOffset - this.config.height };
+    if (position === 'left') {
+      result.x = 20;
+      result.y = '50%';
+    } else if (position === 'center') {
+      result.x = '50%';
+      result.y = '50%';
+    } else if (position === 'right') {
+      result.x = screenWidth - width - 20;
+      result.y = '50%';
+    } else if (position === 'bottom-left') {
+      result.x = 20;
+      result.y = screenHeight - bottomOffset - height;
+    } else if (position === 'bottom-center') {
+      result.x = '50%';
+      result.y = screenHeight - bottomOffset - height;
+    } else if (position === 'bottom-right') {
+      result.x = screenWidth - width - 20;
+      result.y = screenHeight - bottomOffset - height;
     }
+
+    return result;
   }
 }
 

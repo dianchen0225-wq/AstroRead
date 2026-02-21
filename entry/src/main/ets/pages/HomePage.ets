@@ -24,7 +24,7 @@ export struct HomePage {
   @Local isLightMode: boolean = true;
   @Local pressedItemId: string = '';
   @Param safeAreaTop: number = 0;
-  @Param onNavigate?: (route: string, params?: ESObject) => void;
+  @Param onNavigate: (route: string, params?: ESObject) => void = () => {};
   
   private menuItems: MenuItem[] = [
     {

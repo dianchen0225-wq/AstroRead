@@ -7,8 +7,7 @@ import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { showToast } from '../utils/ToastUtils';
-import { floatingNavManager, FloatingNavConfig } from '../common/FloatingNavManager';
-import common from '@ohos.app.ability.common';
+import { floatingNavManager, FloatingNavConfig, FloatingNavPosition } from '../common/FloatingNavManager';
 
 interface SettingItem {
   id: string;
@@ -25,6 +24,12 @@ interface SettingGroup {
   id: string;
   title: string;
   items: SettingItem[];
+}
+
+interface PositionOption {
+  id: string;
+  label: string;
+  icon: string;
 }
 
 @ComponentV2
@@ -196,6 +201,14 @@ export struct SettingsPage {
             icon: '📊',
             type: 'navigation',
             route: 'PerformanceMonitorPage'
+          },
+          {
+            id: 'booksource_repair',
+            title: '书源诊断修复',
+            subtitle: '诊断并修复书源访问问题',
+            icon: '🔧',
+            type: 'navigation',
+            route: 'BookSourceRepairPage'
           }
         ]
       },
@@ -331,6 +344,8 @@ export struct SettingsPage {
         NavigationManager.getInstance().navigateTo('DebugLogPage');
       } else if (item.route === 'PerformanceMonitorPage') {
         NavigationManager.getInstance().navigateTo('PerformanceMonitorPage');
+      } else if (item.route === 'BookSourceRepairPage') {
+        NavigationManager.getInstance().navigateTo('BookSourceRepairPage');
       } else if (item.route === 'AboutSheet') {
         this.showAboutSheet = true;
       } else if (item.route === 'FloatingNavSettings') {
@@ -623,7 +638,7 @@ export struct SettingsPage {
             } else {
               Text('确定')
                 .fontSize(DesignSystem.Typography.size.base)
-                .fontColor('#FFFFFF')
+                .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
                 .fontWeight(DesignSystem.Typography.weight.medium)
             }
           }
@@ -689,7 +704,7 @@ export struct SettingsPage {
           Row() {
             Text('关闭')
               .fontSize(DesignSystem.Typography.size.base)
-              .fontColor('#FFFFFF')
+              .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
               .fontWeight(DesignSystem.Typography.weight.medium)
           }
           .width('100%')
@@ -757,7 +772,7 @@ export struct SettingsPage {
           Row() {
             Text('完成')
               .fontSize(DesignSystem.Typography.size.base)
-              .fontColor('#FFFFFF')
+              .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
               .fontWeight(DesignSystem.Typography.weight.medium)
           }
           .layoutWeight(1)
@@ -815,13 +830,13 @@ export struct SettingsPage {
 
       Column({ space: DesignSystem.Spacing.sm }) {
         ForEach([
-          { id: 'bottom-left', label: '左下角', icon: '↙️' },
-          { id: 'bottom-center', label: '底部居中', icon: '⬇️' },
-          { id: 'bottom-right', label: '右下角', icon: '↘️' },
-          { id: 'left', label: '左侧居中', icon: '⬅️' },
-          { id: 'center', label: '屏幕中央', icon: '⏺️' },
-          { id: 'right', label: '右侧居中', icon: '➡️' }
-        ], (pos: { id: string; label: string; icon: string }) => {
+          { id: 'bottom-left', label: '左下角', icon: '↙️' } as PositionOption,
+          { id: 'bottom-center', label: '底部居中', icon: '⬇️' } as PositionOption,
+          { id: 'bottom-right', label: '右下角', icon: '↘️' } as PositionOption,
+          { id: 'left', label: '左侧居中', icon: '⬅️' } as PositionOption,
+          { id: 'center', label: '屏幕中央', icon: '⏺️' } as PositionOption,
+          { id: 'right', label: '右侧居中', icon: '➡️' } as PositionOption
+        ], (pos: PositionOption) => {
           Row() {
             Text(pos.icon)
               .fontSize(DesignSystem.IconSize.sm)
@@ -845,7 +860,7 @@ export struct SettingsPage {
             DesignSystem.getHoverColor(this.isLightMode) :
             DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
           .onClick(() => {
-            floatingNavManager.setPosition(pos.id as FloatingNavConfig['position']);
+            floatingNavManager.setPosition(pos.id as FloatingNavPosition);
           })
         })
       }

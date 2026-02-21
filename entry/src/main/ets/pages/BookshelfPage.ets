@@ -361,9 +361,7 @@ export struct BookshelfPage {
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      NavigationManager.getInstance().navigateTo('BookDetailPage', {
-        bookId: book.id
-      });
+      NavigationManager.getInstance().navigateToBookDetail({ bookId: book.id });
     })
     .onTouch((event: TouchEvent) => {
       if (event.type === TouchType.Down) {
@@ -469,9 +467,7 @@ export struct BookshelfPage {
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      NavigationManager.getInstance().navigateTo('BookDetailPage', {
-        bookId: book.id
-      });
+      NavigationManager.getInstance().navigateToBookDetail({ bookId: book.id });
     })
     .onTouch((event: TouchEvent) => {
       if (event.type === TouchType.Down) {

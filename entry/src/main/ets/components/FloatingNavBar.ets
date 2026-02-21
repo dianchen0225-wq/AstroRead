@@ -1,6 +1,6 @@
 import { DesignSystem } from '../common/DesignSystem';
 import { themeManager } from '../common/ThemeManager';
-import { floatingNavManager, FloatingNavConfig } from '../common/FloatingNavManager';
+import { floatingNavManager, FloatingNavConfig, FloatingNavPosition } from '../common/FloatingNavManager';
 
 interface NavItem {
   index: number;
@@ -11,17 +11,17 @@ interface NavItem {
 @ComponentV2
 export struct FloatingNavBar {
   @Param currentIndex: number = 0;
-  @Param onTabChange?: (index: number) => void;
+  @Param onTabChange: (index: number) => void = () => {};
   @Param screenWidth: number = 360;
   @Param screenHeight: number = 780;
   @Param safeAreaBottom: number = 0;
-  
+
   @Local isLightMode: boolean = true;
   @Local config: FloatingNavConfig = floatingNavManager.getConfig();
   @Local isVisible: boolean = true;
   @Local isExpanded: boolean = false;
   @Local hideTimer: number = -1;
-  
+
   private navItems: NavItem[] = [
     { index: 0, icon: '🏠', label: '首页' },
     { index: 1, icon: '🔍', label: '搜索' },
@@ -29,11 +29,11 @@ export struct FloatingNavBar {
     { index: 3, icon: '📖', label: '书源' },
     { index: 4, icon: '⚙️', label: '设置' }
   ];
-  
+
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
-  
+
   private configListener: (config: FloatingNavConfig) => void = (config: FloatingNavConfig) => {
     this.config = config;
   };
@@ -42,7 +42,7 @@ export struct FloatingNavBar {
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
     floatingNavManager.addConfigChangeListener(this.configListener);
-    
+
     if (this.config.autoHide) {
       this.startAutoHideTimer();
     }
@@ -77,12 +77,9 @@ export struct FloatingNavBar {
     }
   }
 
-  private getPositionStyle(): { x: number | string; y: number | string } {
-    return floatingNavManager.getPositionStyle(
-      this.screenWidth,
-      this.screenHeight,
-      this.safeAreaBottom
-    );
+  private isBottomPosition(): boolean {
+    const pos = this.config.position;
+    return pos === 'bottom-left' || pos === 'bottom-center' || pos === 'bottom-right';
   }
 
   private getBackgroundColor(): string {
@@ -91,21 +88,21 @@ export struct FloatingNavBar {
     return baseColor + opacity;
   }
 
-  private isBottomPosition(): boolean {
-    return this.config.position.startsWith('bottom');
+  build() {
+    Stack() {
+      if (this.config.enabled) {
+        this.buildFloatingNav()
+      }
+    }
+    .width('100%')
+    .height('100%')
   }
 
-  build() {
-    if (!this.config.enabled) {
-      return;
-    }
-
-    const position = this.getPositionStyle();
-    const isBottom = this.isBottomPosition();
-
+  @Builder
+  buildFloatingNav() {
     Stack() {
       Row() {
-        if (this.isExpanded || !isBottom) {
+        if (this.isExpanded || !this.isBottomPosition()) {
           ForEach(this.navItems, (item: NavItem) => {
             this.buildNavItem(item)
           })
@@ -143,8 +140,8 @@ export struct FloatingNavBar {
       })
     }
     .position({
-      x: position.x,
-      y: position.y
+      x: floatingNavManager.getPositionStyle(this.screenWidth, this.screenHeight, this.safeAreaBottom).x,
+      y: floatingNavManager.getPositionStyle(this.screenWidth, this.screenHeight, this.safeAreaBottom).y
     })
     .opacity(this.isVisible ? 1 : 0.3)
     .scale({
@@ -193,9 +190,7 @@ export struct FloatingNavBar {
       Color.Transparent)
     .onClick(() => {
       this.handleInteraction();
-      if (this.onTabChange) {
-        this.onTabChange(item.index);
-      }
+      this.onTabChange(item.index);
     })
   }
 
@@ -223,11 +218,11 @@ export struct FloatingNavBar {
 export struct FloatingNavToggle {
   @Local isLightMode: boolean = true;
   @Local config: FloatingNavConfig = floatingNavManager.getConfig();
-  
+
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
-  
+
   private configListener: (config: FloatingNavConfig) => void = (config: FloatingNavConfig) => {
     this.config = config;
   };
