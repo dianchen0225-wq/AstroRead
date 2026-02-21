@@ -1,17 +1,3 @@
-/**
- * Copyright (c) 2025 Huawei Device Co., Ltd.
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
@@ -20,6 +6,8 @@ import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
+import { CommonNavBar } from '../components/CommonNavBar';
+import { AppButton, AppLoading, AppEmpty } from '../components/UIComponents';
 import common from '@ohos.app.ability.common';
 
 @Entry
@@ -31,59 +19,15 @@ struct BookDetailPage {
   @Local chapters: Chapter[] = [];
   @Local isLoadingChapters: boolean = false;
   @Local bookSource: BookSource | null = null;
-  @Local showChapterList: boolean = false;
   @Local currentChapterIndex: number = 0;
   @Local isAdded: boolean = false;
-  @Local dialogController: CustomDialogController = new CustomDialogController({
-    builder: this.dialogBuilder,
-    cancel: this.handleCancel,
-    autoCancel: true
-  })
+  @Local showChapterSheet: boolean = false;
+  @Local isAdding: boolean = false;
+  
   private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
-
-  @Builder
-  dialogBuilder() {
-    Column() {
-      Text('添加成功')
-        .fontSize(24)
-        .fontColor(("app.color.text_primary"))
-        .margin({ bottom: 20 })
-      
-      Row() {
-        Button('确定')
-          .fontSize(16)
-            .backgroundColor(("app.color.primary"))
-            .fontColor(("app.color.text_white"))
-          .borderRadius(8)
-          .layoutWeight(1)
-          .margin({ right: 10 })
-          .onClick(() => {
-            this.dialogController.close();
-          })
-          
-        Button('取消')
-          .fontSize(16)
-            .backgroundColor(("app.color.background_secondary"))
-            .fontColor(("app.color.text_primary"))
-          .borderRadius(8)
-          .layoutWeight(1)
-          .onClick(() => {
-            this.dialogController.close();
-          })
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.SpaceBetween)
-    }
-    .padding(20)
-    .width('300vp')
-  }
-
-  handleCancel(): void {
-    // 处理对话框取消逻辑
-  }
 
   aboutToAppear(): void {
     this.isComponentActive = true;
@@ -105,6 +49,7 @@ struct BookDetailPage {
     this.book = null;
     this.bookSource = null;
   }
+  
   async loadBookDetail(): Promise<void> {
     if (!this.isComponentActive) return;
     
@@ -179,13 +124,15 @@ struct BookDetailPage {
       return;
     }
 
+    this.isAdding = true;
     try {
       const bookViewModel = viewModelManager.getBookViewModel();
       await bookViewModel.addBook(this.book);
       this.isAdded = true;
-      this.dialogController.open();
     } catch (error) {
       Logger.error('BookDetailPage', `添加书籍失败: ${error}`);
+    } finally {
+      this.isAdding = false;
     }
   }
 
@@ -212,231 +159,342 @@ struct BookDetailPage {
     }
   }
 
+  async openChapter(index: number): Promise<void> {
+    this.showChapterSheet = false;
+    
+    try {
+      NavigationManager.getInstance().navigateTo('ReadPage', {
+        bookId: this.bookId,
+        initialChapterIndex: index,
+        initialChapterUrl: this.chapters[index].url
+      });
+    } catch (err) {
+      Logger.error('BookDetailPage', `pushPage failed: ${err}`);
+    }
+  }
+
   build() {
     Column() {
-      Row() {
-        Row() {
-          Text('‹')
-            .fontSize(20)
-            .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-        }
-        .width(32)
-        .height(32)
-        .borderRadius(16)
-        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-        .justifyContent(FlexAlign.Center)
-        .margin({ right: 15 })
-        .onClick(() => {
-          NavigationManager.getInstance().navigateBack();
-        })
-
-        Text('书籍详情')
-          .fontSize(18)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(600)
-          .layoutWeight(1)
-
-        Button(this.isAdded ? '已添加' : '添加书架')
-          .fontSize(14)
-          .fontColor(this.isAdded ?
-            DesignSystem.getSecondaryTextColor(this.isLightMode) :
-            DesignSystem.Colors.text.primary.light)
-          .backgroundColor(this.isAdded ?
-            DesignSystem.getSecondaryBackgroundColor(this.isLightMode) :
-            DesignSystem.getPrimaryColor(this.isLightMode))
-          .borderRadius(8)
-          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-          .margin({ left: 10 })
-          .onClick(() => {
-            if (!this.isAdded) {
-              this.addBook();
+      CommonNavBar({
+        title: '书籍详情',
+        showBack: true,
+        rightActions: [
+          {
+            icon: '📚',
+            text: this.isAdded ? '已添加' : '添加',
+            onClick: () => {
+              if (!this.isAdded) {
+                this.addBook();
+              }
             }
-          })
-      }
-      .width('100%')
-      .padding({ left: 15, right: 20, top: 15, bottom: 15 })
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-      .border({
-        width: { bottom: 1 },
-        color: DesignSystem.getBorderColor(this.isLightMode)
+          }
+        ]
       })
 
-      Scroll() {
-        Column() {
-          if (this.book) {
-            Column() {
-              Row() {
-                if (this.book.cover) {
-                  Image(this.book.cover)
-                    .width(90)
-                    .height(120)
-                    .borderRadius(6)
-                } else {
-                  Column() {
-                    Text('📖')
-                      .fontSize(32)
-                  }
-                  .width(90)
-                  .height(120)
-                  .borderRadius(6)
-                  .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                  .justifyContent(FlexAlign.Center)
-                }
-                Column() {
-                  Text(this.book.name)
-                    .fontSize(20)
-                    .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                    .fontWeight(600)
-                    .margin({ bottom: 8 })
-
-                  if (this.book.author) {
-                    Text(this.book.author)
-                      .fontSize(14)
-                      .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                      .margin({ bottom: 4 })
-                  }
-
-                  if (this.book.bookSourceName) {
-                    Text(`来源: ${this.book.bookSourceName}`)
-                      .fontSize(12)
-                      .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                      .margin({ bottom: 4 })
-                  }
-
-                  if (this.book.bookUrl) {
-                    Text(this.book.bookUrl)
-                      .fontSize(10)
-                      .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                      .margin({ bottom: 4 })
-                  }
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
-                .margin({ left: 12 })
-              }
-              .width('100%')
-              .alignItems(VerticalAlign.Top)
-
-              if (this.book.intro) {
-                Column() {
-                  Text('简介')
-                    .fontSize(14)
-                    .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                    .fontWeight(500)
-                    .width('100%')
-                    .margin({ bottom: 8 })
-
-                  Text(this.book.intro)
-                    .fontSize(14)
-                    .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                    .lineHeight(22)
-                    .width('100%')
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-                .margin({ top: 16 })
-              }
-
-              Button(this.chapters.length > 0 ? '开始阅读' : '加载章节')
-                .width('100%')
-                .height(44)
-                .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-                .fontColor(DesignSystem.Colors.text.primary.light)
-                .borderRadius(8)
-                .margin({ top: 20 })
-                .onClick(() => {
-                  this.startRead();
-                })
+      if (this.book) {
+        Scroll() {
+          Column() {
+            this.buildBookInfo()
+            
+            if (this.book.intro) {
+              this.buildIntro()
             }
-            .width('100%')
-            .padding(20)
-            .alignItems(HorizontalAlign.Start)
+
+            this.buildActionButtons()
+
+            if (this.isLoadingChapters) {
+              AppLoading({ loadingText: '加载章节中...' })
+                .margin({ top: DesignSystem.Spacing.xl })
+            } else if (this.chapters.length > 0) {
+              this.buildChapterList()
+            }
           }
-
-          if (this.isLoadingChapters) {
-            Column() {
-              LoadingProgress()
-                .width(40)
-                .height(40)
-                .color(DesignSystem.getPrimaryColor(this.isLightMode))
-              Text('加载中...')
-                .fontSize(14)
-                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                .margin({ top: 10 })
-            }
-            .width('100%')
-            .height(200)
-            .justifyContent(FlexAlign.Center)
-          } else if (this.chapters.length > 0) {
-            Column() {
-              Text(`目录（${this.chapters.length}章）`)
-                .fontSize(14)
-                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-                .fontWeight(500)
-                .width('100%')
-                .margin({ bottom: 12 })
-
-              List() {
-                ForEach(this.chapters, (chapter: Chapter, index: number) => {
-                  ListItem() {
-                    Row() {
-                      Text(chapter.title)
-                        .fontSize(14)
-                        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        .layoutWeight(1)
-
-                      if (chapter.isVip) {
-                        Text('VIP')
-                          .fontSize(10)
-                          .fontColor(DesignSystem.Colors.text.primary.light)
-                          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-                          .padding({ left: 4, right: 4, top: 2, bottom: 2 })
-                          .borderRadius(4)
-                          .margin({ left: 8 })
-                      }
-                    }
-                    .width('100%')
-                    .padding(12)
-                    .borderRadius(8)
-                    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                  }
-                  .margin({ bottom: 8 })
-                  .onClick(() => {
-                    this.currentChapterIndex = index;
-                    try {
-                      NavigationManager.getInstance().navigateTo('ReadPage', {
-                        bookId: this.bookId,
-                        initialChapterIndex: index,
-                        initialChapterUrl: chapter.url
-                      });
-                      Logger.info('BookDetailPage', 'push page success');
-                    } catch (err) {
-                      Logger.error('BookDetailPage', `pushPage failed: ${err}`);
-                    }
-                  })
-                }, (chapter: Chapter) => chapter.id || chapter.url)
-              }
-              .width('100%')
-              .height('100%')
-              .cachedCount(10)
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-            .margin({ top: 20 })
-          }
+          .width('100%')
+          .padding(DesignSystem.Spacing.lg)
         }
         .width('100%')
-        .padding(20)
+        .layoutWeight(1)
+        .scrollBar(BarState.Auto)
+      } else {
+        AppEmpty({
+          emptyIcon: '📖',
+          emptyTitle: '未找到书籍',
+          emptyDescription: '该书籍可能已被删除'
+        })
       }
-      .width('100%')
-      .layoutWeight(1)
-      .align(Alignment.Top)
-      .scrollBar(BarState.Auto)
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+    .bindSheet($$this.showChapterSheet, this.buildChapterSheet(), {
+      height: '70%',
+      backgroundColor: Color.Transparent,
+      dragBar: true
+    })
+  }
+
+  @Builder
+  buildBookInfo() {
+    Row() {
+      if (this.book?.cover) {
+        Image(this.book.cover)
+          .width(100)
+          .height(140)
+          .borderRadius(DesignSystem.BorderRadius.md)
+          .objectFit(ImageFit.Cover)
+      } else {
+        Column() {
+          Text('📖')
+            .fontSize(40)
+        }
+        .width(100)
+        .height(140)
+        .borderRadius(DesignSystem.BorderRadius.md)
+        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+        .justifyContent(FlexAlign.Center)
+      }
+
+      Column() {
+        Text(this.book?.name || '')
+          .fontSize(DesignSystem.Typography.size.xl)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.bold)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        if (this.book?.author) {
+          Text(this.book.author)
+            .fontSize(DesignSystem.Typography.size.sm)
+            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+            .margin({ top: DesignSystem.Spacing.sm })
+        }
+
+        if (this.book?.bookSourceName) {
+          Row() {
+            Text('来源: ')
+              .fontSize(DesignSystem.Typography.size.xs)
+              .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+            Text(this.book.bookSourceName)
+              .fontSize(DesignSystem.Typography.size.xs)
+              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+          }
+          .margin({ top: DesignSystem.Spacing.sm })
+        }
+
+        if (this.book?.kind) {
+          Text(this.book.kind)
+            .fontSize(DesignSystem.Typography.size.xs)
+            .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+            .padding({
+              left: DesignSystem.Spacing.sm,
+              right: DesignSystem.Spacing.sm,
+              top: DesignSystem.Spacing.xs,
+              bottom: DesignSystem.Spacing.xs
+            })
+            .borderRadius(DesignSystem.BorderRadius.sm)
+            .backgroundColor(DesignSystem.getHoverColor(this.isLightMode))
+            .margin({ top: DesignSystem.Spacing.sm })
+        }
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      .margin({ left: DesignSystem.Spacing.md })
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Top)
+  }
+
+  @Builder
+  buildIntro() {
+    Column() {
+      Text('简介')
+        .fontSize(DesignSystem.Typography.size.base)
+        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .fontWeight(DesignSystem.Typography.weight.semibold)
+        .width('100%')
+        .margin({ bottom: DesignSystem.Spacing.sm })
+
+      Text(this.book?.intro || '')
+        .fontSize(DesignSystem.Typography.size.sm)
+        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+        .lineHeight(22)
+        .width('100%')
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .margin({ top: DesignSystem.Spacing.lg })
+    .padding(DesignSystem.Spacing.md)
+    .borderRadius(DesignSystem.BorderRadius.lg)
+    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+  }
+
+  @Builder
+  buildActionButtons() {
+    Row({ space: DesignSystem.Spacing.md }) {
+      AppButton({
+        buttonText: this.chapters.length > 0 ? '开始阅读' : '加载章节',
+        variant: 'primary',
+        fullWidth: true,
+        loading: this.isLoadingChapters
+      })
+        .setOnClick(() => {
+          this.startRead();
+        })
+
+      if (this.chapters.length > 0) {
+        AppButton({
+          buttonText: '目录',
+          variant: 'secondary',
+          fullWidth: true
+        })
+          .setOnClick(() => {
+            this.showChapterSheet = true;
+          })
+      }
+    }
+    .width('100%')
+    .margin({ top: DesignSystem.Spacing.lg })
+  }
+
+  @Builder
+  buildChapterList() {
+    Column() {
+      Row() {
+        Text(`目录`)
+          .fontSize(DesignSystem.Typography.size.base)
+          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+
+        Blank()
+
+        Text(`${this.chapters.length} 章`)
+          .fontSize(DesignSystem.Typography.size.sm)
+          .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+
+        Text('查看全部')
+          .fontSize(DesignSystem.Typography.size.sm)
+          .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+          .margin({ left: DesignSystem.Spacing.md })
+          .onClick(() => {
+            this.showChapterSheet = true;
+          })
+      }
+      .width('100%')
+      .margin({ bottom: DesignSystem.Spacing.md })
+
+      Column() {
+        ForEach(this.chapters.slice(0, 5), (chapter: Chapter, index: number) => {
+          Row() {
+            Text(chapter.title)
+              .fontSize(DesignSystem.Typography.size.sm)
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+
+            if (chapter.isVip) {
+              Text('VIP')
+                .fontSize(DesignSystem.Typography.size.xs)
+                .fontColor('#FFFFFF')
+                .padding({
+                  left: DesignSystem.Spacing.xs,
+                  right: DesignSystem.Spacing.xs,
+                  top: 2,
+                  bottom: 2
+                })
+                .borderRadius(DesignSystem.BorderRadius.sm)
+                .backgroundColor(DesignSystem.getWarningColor(this.isLightMode))
+            }
+          }
+          .width('100%')
+          .padding(DesignSystem.Spacing.sm)
+          .borderRadius(DesignSystem.BorderRadius.md)
+          .backgroundColor(this.currentChapterIndex === index ?
+            DesignSystem.getHoverColor(this.isLightMode) :
+            Color.Transparent)
+          .onClick(() => {
+            this.openChapter(index);
+          })
+        })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .margin({ top: DesignSystem.Spacing.lg })
+    .padding(DesignSystem.Spacing.md)
+    .borderRadius(DesignSystem.BorderRadius.lg)
+    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+  }
+
+  @Builder
+  buildChapterSheet() {
+    Column() {
+      Row() {
+        Text('目录')
+          .fontSize(DesignSystem.Typography.size.lg)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+          .layoutWeight(1)
+
+        Text(`${this.chapters.length} 章`)
+          .fontSize(DesignSystem.Typography.size.sm)
+          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+      }
+      .width('100%')
+      .padding(DesignSystem.Spacing.lg)
+
+      List() {
+        ForEach(this.chapters, (chapter: Chapter, index: number) => {
+          ListItem() {
+            Row() {
+              Text(chapter.title)
+                .fontSize(DesignSystem.Typography.size.sm)
+                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+
+              if (chapter.isVip) {
+                Text('VIP')
+                  .fontSize(DesignSystem.Typography.size.xs)
+                  .fontColor('#FFFFFF')
+                  .padding({
+                    left: DesignSystem.Spacing.xs,
+                    right: DesignSystem.Spacing.xs,
+                    top: 2,
+                    bottom: 2
+                  })
+                  .borderRadius(DesignSystem.BorderRadius.sm)
+                  .backgroundColor(DesignSystem.getWarningColor(this.isLightMode))
+              }
+            }
+            .width('100%')
+            .padding(DesignSystem.Spacing.md)
+            .borderRadius(DesignSystem.BorderRadius.md)
+            .backgroundColor(this.currentChapterIndex === index ?
+              DesignSystem.getHoverColor(this.isLightMode) :
+              Color.Transparent)
+          }
+          .onClick(() => {
+            this.openChapter(index);
+          })
+        })
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .padding({
+        left: DesignSystem.Spacing.lg,
+        right: DesignSystem.Spacing.lg
+      })
+      .cachedCount(10)
+    }
+    .width('100%')
+    .height('100%')
+    .borderRadius({
+      topLeft: DesignSystem.BorderRadius.xl,
+      topRight: DesignSystem.BorderRadius.xl
+    })
     .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
   }
 }

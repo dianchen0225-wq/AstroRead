@@ -19,6 +19,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { databaseManager } from '../utils/DatabaseManager';
+import { searchFixer } from '../utils/SearchFixer';
 
 const DOMAIN = 0x0000;
 
@@ -35,6 +36,20 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, 'testTag', 'Database initialized successfully');
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to initialize database. Cause: %{public}s', JSON.stringify(err));
+    }
+
+    // 执行搜索功能修复
+    try {
+      hilog.info(DOMAIN, 'testTag', '开始执行搜索功能修复...');
+      const report = await searchFixer.performFullFix();
+      hilog.info(DOMAIN, 'testTag', '搜索功能修复完成: 网络状态=%{public}s, 失效书源=%{public}d, 禁用书源=%{public}d',
+        report.networkStatus, report.failedSourcesCount, report.disabledSourcesCount);
+      
+      if (report.recommendations.length > 0) {
+        hilog.info(DOMAIN, 'testTag', '修复建议: %{public}s', report.recommendations.join('; '));
+      }
+    } catch (err) {
+      hilog.error(DOMAIN, 'testTag', '搜索功能修复失败. Cause: %{public}s', JSON.stringify(err));
     }
 
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');

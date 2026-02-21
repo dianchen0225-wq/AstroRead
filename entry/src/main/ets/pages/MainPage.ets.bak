@@ -8,8 +8,6 @@ import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Logger } from '../utils/Logger';
 import { NavigationManager, NavigationChangeListener } from '../common/NavigationManager';
-import { floatingNavManager, FloatingNavConfig } from '../common/FloatingNavManager';
-import { FloatingNavBar } from '../components/FloatingNavBar';
 import BookDetailPage from './BookDetailPage';
 import ReadPage from './ReadPage';
 import ImportPage from './ImportPage';
@@ -44,7 +42,7 @@ struct MainPage {
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
-  private navigationListener: NavigationChangeListener = (pageName: string, action: 'push' | 'pop' | 'replace', params?: ESObject) => {
+  private navigationListener: NavigationChangeListener = (pageName: string, params?: ESObject, action: 'push' | 'pop' | 'replace') => {
     this.handleNavigationChange(pageName, params, action);
   };
 
@@ -70,7 +68,7 @@ struct MainPage {
     NavigationManager.getInstance().removeNavigationChangeListener(this.navigationListener);
   }
 
-  private handleNavigationChange(pageName: string, action: 'push' | 'pop' | 'replace', params?: ESObject): void {
+  private handleNavigationChange(pageName: string, params?: ESObject, action: 'push' | 'pop' | 'replace'): void {
     if (!this.isComponentActive) return;
 
     if (action === 'push') {
@@ -253,19 +251,23 @@ struct MainPage {
   }
 
   @Builder
-    buildOverlayPage(page: OverlayPage) {
-      if (page.type === 'detail') {
+  buildOverlayPage(page: OverlayPage) {
+    switch (page.type) {
+      case 'detail':
         BookDetailPage({ bookId: page.params.bookId as string })
-      } else if (page.type === 'read') {
+        break;
+      case 'read':
         ReadPage({
           bookId: page.params.bookId as string,
           initialChapterIndex: page.params.initialChapterIndex as number,
           initialChapterUrl: page.params.initialChapterUrl as string
         })
-      } else if (page.type === 'import') {
+        break;
+      case 'import':
         ImportPage({ path: page.params.path as string })
-      }
+        break;
     }
+  }
 
   @Builder
   buildTabBar(index: PageIndex) {

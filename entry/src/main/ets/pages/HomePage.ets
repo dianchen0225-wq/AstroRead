@@ -1,6 +1,7 @@
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { NavigationManager } from '../common/NavigationManager';
+import { PageHeader } from '../components/CommonNavBar';
 
 interface GradientColorItem {
   color: string;
@@ -15,6 +16,7 @@ interface MenuItem {
   gradientColors: GradientColorItem[];
   gradientStart: string;
   route: string;
+  tabIndex?: number;
 }
 
 @ComponentV2
@@ -22,6 +24,7 @@ export struct HomePage {
   @Local isLightMode: boolean = true;
   @Local pressedItemId: string = '';
   @Param safeAreaTop: number = 0;
+  @Param onNavigate?: (route: string, params?: ESObject) => void;
   
   private menuItems: MenuItem[] = [
     {
@@ -31,7 +34,8 @@ export struct HomePage {
       icon: '📚',
       gradientColors: [{ color: '#667eea', position: 0 } as GradientColorItem, { color: '#764ba2', position: 1 } as GradientColorItem],
       gradientStart: '#667eea',
-      route: 'BookshelfPage'
+      route: 'BookshelfPage',
+      tabIndex: 2
     },
     {
       id: 'search',
@@ -40,7 +44,8 @@ export struct HomePage {
       icon: '🔍',
       gradientColors: [{ color: '#f093fb', position: 0 } as GradientColorItem, { color: '#f5576c', position: 1 } as GradientColorItem],
       gradientStart: '#f093fb',
-      route: 'SearchPage'
+      route: 'SearchPage',
+      tabIndex: 1
     },
     {
       id: 'source',
@@ -49,7 +54,8 @@ export struct HomePage {
       icon: '📖',
       gradientColors: [{ color: '#4facfe', position: 0 } as GradientColorItem, { color: '#00f2fe', position: 1 } as GradientColorItem],
       gradientStart: '#4facfe',
-      route: 'SourcePage'
+      route: 'SourcePage',
+      tabIndex: 3
     },
     {
       id: 'settings',
@@ -58,7 +64,8 @@ export struct HomePage {
       icon: '⚙️',
       gradientColors: [{ color: '#43e97b', position: 0 } as GradientColorItem, { color: '#38f9d7', position: 1 } as GradientColorItem],
       gradientStart: '#43e97b',
-      route: 'SettingsPage'
+      route: 'SettingsPage',
+      tabIndex: 4
     }
   ];
   
@@ -75,6 +82,14 @@ export struct HomePage {
     return result;
   }
 
+  private handleNavigation(item: MenuItem): void {
+    if (item.tabIndex !== undefined && this.onNavigate) {
+      this.onNavigate('TabSwitch', { tabIndex: item.tabIndex });
+    } else {
+      NavigationManager.getInstance().navigateTo(item.route);
+    }
+  }
+
   aboutToAppear(): void {
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
@@ -89,6 +104,8 @@ export struct HomePage {
       this.buildHeader()
       
       this.buildAppTitle()
+      
+      this.buildQuickActions()
       
       this.buildMenuSection()
       
@@ -197,9 +214,66 @@ export struct HomePage {
     }
     .width('100%')
     .padding({
-      top: DesignSystem.Spacing.xl,
-      bottom: DesignSystem.Spacing.xxl
+      top: DesignSystem.Spacing.lg,
+      bottom: DesignSystem.Spacing.xl
     })
+  }
+
+  @Builder
+  buildQuickActions() {
+    Row() {
+      this.buildQuickActionItem('📚', '继续阅读', () => {
+        if (this.onNavigate) {
+          this.onNavigate('TabSwitch', { tabIndex: 2 });
+        }
+      })
+      
+      this.buildQuickActionItem('🔍', '搜索书籍', () => {
+        if (this.onNavigate) {
+          this.onNavigate('TabSwitch', { tabIndex: 1 });
+        }
+      })
+      
+      this.buildQuickActionItem('📥', '导入书源', () => {
+        if (this.onNavigate) {
+          this.onNavigate('TabSwitch', { tabIndex: 3 });
+        }
+      })
+    }
+    .width('100%')
+    .justifyContent(FlexAlign.SpaceEvenly)
+    .padding({
+      left: DesignSystem.Spacing.lg,
+      right: DesignSystem.Spacing.lg,
+      bottom: DesignSystem.Spacing.lg
+    })
+  }
+
+  @Builder
+  buildQuickActionItem(icon: string, title: string, action: () => void) {
+    Column() {
+      Row() {
+        Text(icon)
+          .fontSize(DesignSystem.IconSize.lg)
+      }
+      .width(48)
+      .height(48)
+      .borderRadius(DesignSystem.BorderRadius.full)
+      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+      .justifyContent(FlexAlign.Center)
+      .shadow({
+        radius: 4,
+        color: this.isLightMode ? 'rgba(0,0,0,0.05)' : 'rgba(0,0,0,0.2)',
+        offsetX: 0,
+        offsetY: 2
+      })
+
+      Text(title)
+        .fontSize(DesignSystem.Typography.size.xs)
+        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .margin({ top: DesignSystem.Spacing.sm })
+    }
+    .onClick(action)
   }
 
   @Builder
@@ -315,7 +389,7 @@ export struct HomePage {
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      NavigationManager.getInstance().navigateTo(item.route);
+      this.handleNavigation(item);
     })
     .onTouch((event: TouchEvent) => {
       if (event.type === TouchType.Down) {

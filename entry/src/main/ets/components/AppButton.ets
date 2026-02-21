@@ -19,6 +19,7 @@ export struct AppButton {
   @Param icon: string = '';
   @Param accessibilityLabel: string = '';
   @Param accessibilityHint: string = '';
+  @Param onClicked?: () => void;
   
   private onClickHandler?: () => void;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
@@ -121,8 +122,12 @@ export struct AppButton {
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      if (!this.disabled && !this.loading && this.onClickHandler) {
-        this.onClickHandler();
+      if (!this.disabled && !this.loading) {
+        if (this.onClicked) {
+          this.onClicked();
+        } else if (this.onClickHandler) {
+          this.onClickHandler();
+        }
       }
     })
     .onTouch((event: TouchEvent) => {
