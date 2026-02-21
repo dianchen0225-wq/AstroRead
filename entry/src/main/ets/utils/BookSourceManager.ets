@@ -11,6 +11,7 @@ import { BookSourceSearchEngine, SearchOptions, SearchResult } from './BookSourc
 import { BookSourceDebugger } from './BookSourceDebugger';
 import { Logger } from './Logger';
 import http from '@ohos.net.http';
+import { databaseManager } from './DatabaseManager';
 
 type JsonObject = Record<string, string | number | boolean | object | null | undefined>;
 
@@ -300,17 +301,19 @@ export class BookSourceManager {
    * 批量删除书源
    */
   async removeSources(ids: string[]): Promise<void> {
-    // 从内存中移除
     this.sources = this.sources.filter((s: BookSource) => !ids.includes(s.id));
     
-    // 从数据库中删除
     try {
-      const bookSourceRepository = await BookSourceRepository.getInstance();
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
       await bookSourceRepository.deleteBookSources(ids);
     } catch (error) {
-      Logger.error(this.TAG, `批量删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
-      // 如果数据库操作失败，回滚内存中的更改
-      throw error;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      Logger.error(this.TAG, `批量删除书源失败: ${errorMsg}`);
+      if (error instanceof Error) {
+        throw error;
+      } else {
+        throw new Error(String(error));
+      }
     }
   }
 

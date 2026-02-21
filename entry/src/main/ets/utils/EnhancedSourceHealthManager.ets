@@ -124,7 +124,7 @@ export class EnhancedSourceHealthManager {
   }
 
   /**
-   * 启用被禁用的书源
+   * 启用书源
    */
   enableSource(sourceId: string): void {
     const record = this.healthRecords.get(sourceId);
@@ -134,19 +134,6 @@ export class EnhancedSourceHealthManager {
       record.disabledReason = '';
       record.consecutiveFailures = 0;
       Logger.info(this.TAG, `已启用书源 ${sourceId}`);
-      this.saveRecords();
-    }
-  }
-
-  /**
-   * 禁用书源
-   */
-  disableSource(sourceId: string, reason: string = '手动禁用'): void {
-    const record = this.healthRecords.get(sourceId);
-    if (record) {
-      record.isEnabled = false;
-      record.disabledReason = reason;
-      Logger.info(this.TAG, `已禁用书源 ${sourceId}, 原因: ${reason}`);
       this.saveRecords();
     }
   }
@@ -357,28 +344,6 @@ export class EnhancedSourceHealthManager {
     return record ? record.score : INITIAL_SCORE;
   }
 
-  /**
-   * 启用书源
-   */
-  enableSource(sourceId: string): void {
-    const record = this.healthRecords.get(sourceId);
-    if (record && !record.isPermanentlyDisabled) {
-      record.isEnabled = true;
-      record.consecutiveFailures = 0;
-      this.saveRecords();
-    }
-  }
-
-  /**
-   * 禁用书源
-   */
-  disableSource(sourceId: string): void {
-    const record = this.healthRecords.get(sourceId);
-    if (record) {
-      record.isEnabled = false;
-      this.saveRecords();
-    }
-  }
 
   /**
    * 重置书源(仅对非永久禁用的书源有效)

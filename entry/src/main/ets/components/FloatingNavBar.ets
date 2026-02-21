@@ -100,6 +100,7 @@ export struct FloatingNavBar {
 
   @Builder
   buildFloatingNav() {
+    
     Stack() {
       Row() {
         if (this.isExpanded || !this.isBottomPosition()) {
@@ -139,10 +140,7 @@ export struct FloatingNavBar {
         this.handleInteraction();
       })
     }
-    .position({
-      x: floatingNavManager.getPositionStyle(this.screenWidth, this.screenHeight, this.safeAreaBottom).x,
-      y: floatingNavManager.getPositionStyle(this.screenWidth, this.screenHeight, this.safeAreaBottom).y
-    })
+    .position(floatingNavManager.getPositionStyle(this.screenWidth, this.screenHeight, this.safeAreaBottom))
     .opacity(this.isVisible ? 1 : 0.3)
     .scale({
       x: this.isVisible ? 1 : 0.9,

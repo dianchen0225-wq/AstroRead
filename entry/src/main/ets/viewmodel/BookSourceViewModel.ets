@@ -7,6 +7,7 @@ import SourceImportManager from '../utils/SourceImportManager';
 import SourceValidator from '../utils/SourceValidator';
 import BookSourceParser from '../utils/BookSourceParser';
 import BookSourceManager, { SearchBooksResult, YCKSourceData } from '../utils/BookSourceManager';
+import { BookSourceManager as BookSourceManagerClass } from '../utils/BookSourceManager';
 import { Logger } from '../utils/Logger';
 import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from '../utils/SourceSandbox';
 import fileio from '@ohos.fileio';
@@ -193,7 +194,22 @@ interface ValidationResult {
  * 负责管理书源相关的业务逻辑和状态
  */
 export class BookSourceViewModel {
+  private static instance: BookSourceViewModel | null = null;
   private bookSources: BookSource[] = [];
+
+  static getInstance(): BookSourceViewModel {
+    if (!BookSourceViewModel.instance) {
+      BookSourceViewModel.instance = new BookSourceViewModel();
+    }
+    return BookSourceViewModel.instance;
+  }
+
+  /**
+   * Load all book sources (alias for loadAllBookSources for backward compatibility)
+   */
+  async loadSources(): Promise<BookSource[]> {
+    return await this.loadAllBookSources();
+  }
   private readonly databaseManager = databaseManager;
   private readonly sourceImportManager = SourceImportManager;
   private readonly sourceValidator = SourceValidator;
@@ -455,13 +471,13 @@ export class BookSourceViewModel {
     }
 
     try {
-      // 使用BookSourceManager的批量删除功能
-      const bookSourceManager = BookSourceManager.getInstance();
+      const bookSourceManager: BookSourceManagerClass = BookSourceManagerClass.getInstance();
       await bookSourceManager.removeSources(ids);
-      return ids.length; // 成功删除的数量就是传入的ID数量
+      return ids.length;
     } catch (error) {
-      Logger.error('BookSourceViewModel', `批量删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw new Error(`批量删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      Logger.error('BookSourceViewModel', `批量删除书源失败: ${errorMsg}`);
+      throw new Error(`批量删除书源失败: ${errorMsg}`);
     }
   }
 

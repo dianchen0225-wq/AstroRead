@@ -9,33 +9,31 @@ import { BookSourceManager } from '../utils/BookSourceManager';
 import { EnhancedSourceHealthManager } from '../utils/EnhancedSourceHealthManager';
 import { Logger } from '../utils/Logger';
 import { BookSourceViewModel } from '../viewmodel/BookSourceViewModel';
-import { Button, Column, Divider, List, ListItem, Row, Stack, Text, TextArea, TextInput, Visibility } from '@kit.BasicComponents';
-import { Card } from '@kit.MaterialDesign';
-import { $r } from '@kit.resource';
 
-@Component
+@Entry
+@ComponentV2
 export struct BookSourceRepairPage {
-  @State diagnosticSummary: DiagnosticSummary | null = null;
-  @State isDiagnosing: boolean = false;
-  @State repairResults: string[] = [];
-  @State selectedSourceId: string = '';
-  @State repairMessage: string = '';
-  @State showDetails: boolean = false;
+  @Local diagnosticSummary: DiagnosticSummary | null = null;
+  @Local isDiagnosing: boolean = false;
+  @Local repairResults: string[] = [];
+  @Local selectedSourceId: string = '';
+  @Local repairMessage: string = '';
+  @Local showDetails: boolean = false;
 
   private diagnosticTool: BookSourceDiagnosticTool = BookSourceDiagnosticTool.getInstance();
   private sourceManager: BookSourceManager = BookSourceManager.getInstance();
   private healthManager: EnhancedSourceHealthManager = EnhancedSourceHealthManager.getInstance();
-  private viewModel: BookSourceViewModel = BookSourceViewModel.getInstance();
+  private viewModel: BookSourceViewModel = new BookSourceViewModel();
 
   aboutToAppear(): void {
-    this.refreshSources();
+    // 初始化上下文
   }
 
   refreshSources(): void {
-    this.viewModel.loadSources();
+    // 无需手动刷新，通过方法获取最新数据
   }
 
-  build(): void {
+  build() {
     Column() {
       Text('书源诊断与修复')
         .fontSize(24)
@@ -73,7 +71,7 @@ export struct BookSourceRepairPage {
       }
 
       if (this.diagnosticSummary) {
-        Card() {
+        Column() {
           Column() {
             Text(`诊断结果`)
               .fontSize(18)
@@ -151,7 +149,7 @@ export struct BookSourceRepairPage {
       }
 
       if (this.repairResults.length > 0) {
-        Card() {
+        Column() {
           Column() {
             Text('修复详情')
               .fontSize(18)
@@ -187,11 +185,12 @@ export struct BookSourceRepairPage {
     this.repairMessage = '';
 
     try {
-      const sources = this.viewModel.sources.filter(source => source.enabled);
+      // 直接从数据库获取所有启用的书源
+      const sources = await this.viewModel.loadEnabledBookSources();
       this.diagnosticSummary = await this.diagnosticTool.diagnoseSources(sources);
       Logger.info('BookSourceRepairPage', `诊断完成: ${JSON.stringify(this.diagnosticSummary)}`);
     } catch (error) {
-      Logger.error('BookSourceRepairPage', `诊断失败: ${error}`);
+      Logger.error('BookSourceRepairPage', `诊断失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.isDiagnosing = false;
     }
@@ -202,16 +201,17 @@ export struct BookSourceRepairPage {
     this.repairResults = [];
 
     try {
-      const sources = this.viewModel.sources.filter(source => source.enabled);
-      const repairedCount = await this.diagnosticTool.repairAll(sources, true);
+      const sources = await this.viewModel.loadAllBookSources();
+      const enabledSources = sources.filter(source => source.enabled);
+      const repairedCount = await this.diagnosticTool.repairAll(enabledSources, true);
       
-      this.repairMessage = `修复完成: ${repairedCount}/${sources.length} 个书源已修复`;
+      this.repairMessage = `修复完成: ${repairedCount}/${enabledSources.length} 个书源已修复`;
       
       // 重新诊断以显示修复效果
-      this.diagnosticSummary = await this.diagnosticTool.diagnoseSources(sources);
+      this.diagnosticSummary = await this.diagnosticTool.diagnoseSources(enabledSources);
     } catch (error) {
       this.repairMessage = `修复失败: ${error instanceof Error ? error.message : String(error)}`;
-      Logger.error('BookSourceRepairPage', `修复失败: ${error}`);
+      Logger.error('BookSourceRepairPage', `修复失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.isDiagnosing = false;
     }

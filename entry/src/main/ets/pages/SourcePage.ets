@@ -832,7 +832,7 @@ export struct SourcePage {
               Button('删除')
                 .fontSize(14)
                 .fontColor('#ffffff')
-                .backgroundColor(DesignSystem.getDangerColor())
+                .backgroundColor(DesignSystem.getErrorColor(this.isLightMode))
                 .borderRadius(8)
                 .padding({ left: 12, right: 12 })
                 .onClick(() => {
@@ -1128,39 +1128,38 @@ export struct SourcePage {
                   .justifyContent(FlexAlign.Center)
                   .padding({ top: 16, bottom: 16 })
                 }
+                
+                if (!this.showBatchActions && this.sourceList.length > 0) {
+                  Row() {
+                    Button('网络导入书源')
+                      .layoutWeight(1)
+                      .height(44)
+                      .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                      .fontColor('#fff')
+                      .borderRadius(12)
+                      .margin({ right: 8 })
+                      .onClick(() => {
+                        this.showImportDialogUI();
+                      })
+                      
+                    if (this.disabledSourceCount > 0) {
+                      Button('删除禁用')
+                        .layoutWeight(1)
+                        .height(44)
+                        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                        .borderRadius(12)
+                        .onClick(() => {
+                          this.deleteDisabledSources();
+                        })
+                    }
+                  }
+                  .width('100%')
+                  .margin({ top: 16 })
+                }
               }
             }
             .width('100%')
-
-            // 在列表下方添加导入和删除按钮（仅当不在批量选择模式时显示）
-            if (!this.showBatchActions && this.sourceList.length > 0) {
-              Row() {
-                Button('网络导入书源')
-                  .layoutWeight(1)
-                  .height(44)
-                  .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-                  .fontColor('#fff')
-                  .borderRadius(12)
-                  .margin({ right: 8 })
-                  .onClick(() => {
-                    this.showImportDialogUI();
-                  })
-                  
-                if (this.disabledSourceCount > 0) {
-                  Button('删除禁用')
-                    .layoutWeight(1)
-                    .height(44)
-                    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-                    .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                    .borderRadius(12)
-                    .onClick(() => {
-                      this.deleteDisabledSources();
-                    })
-                }
-              }
-              .width('100%')
-              .margin({ top: 16 })
-            }
           }
           .width('100%')
           .layoutWeight(1)

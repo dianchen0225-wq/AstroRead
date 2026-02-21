@@ -310,7 +310,11 @@ export class BookSourceRepository {
     }
     catch (error) {
       Logger.error(BookSourceRepository.TAG, `批量删除书源失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
+      if (error instanceof Error) {
+        throw error;
+      } else {
+        throw new Error(String(error));
+      }
     }
   }
 

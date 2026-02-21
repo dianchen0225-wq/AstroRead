@@ -26,6 +26,15 @@ export interface DiagnosticSummary {
   repairSuggestions: string[];
 }
 
+export interface ParsedUrl {
+  protocol: string;
+  hostname: string;
+}
+
+interface CustomHeaders {
+  [key: string]: string | number | boolean | object | null;
+}
+
 export class BookSourceDiagnosticTool {
   private static instance: BookSourceDiagnosticTool | null = null;
   private healthManager: EnhancedSourceHealthManager;
@@ -179,13 +188,20 @@ export class BookSourceDiagnosticTool {
       }
 
       // 收集所有问题和建议
-      summary.issuesFound.push(...result.issues.map(issue => `${source.name}: ${issue}`));
-      summary.repairSuggestions.push(...result.suggestions);
+      const mappedIssues = result.issues.map(issue => `${source.name}: ${issue}`);
+      for (const issue of mappedIssues) {
+        summary.issuesFound.push(issue);
+      }
+      for (const suggestion of result.suggestions) {
+        summary.repairSuggestions.push(suggestion);
+      }
     }
 
     // 去重
-    summary.issuesFound = [...new Set(summary.issuesFound)];
-    summary.repairSuggestions = [...new Set(summary.repairSuggestions)];
+    const uniqueIssues = Array.from(new Set(summary.issuesFound));
+    summary.issuesFound = uniqueIssues;
+    const uniqueSuggestions = Array.from(new Set(summary.repairSuggestions));
+    summary.repairSuggestions = uniqueSuggestions;
 
     Logger.info(this.TAG, `诊断完成: 总计${summary.totalSources}个书源，健康${summary.healthySources}个，不健康${summary.unhealthySources}个`);
     
@@ -252,28 +268,34 @@ export class BookSourceDiagnosticTool {
   private buildHeaders(source: BookSource): Record<string, string> {
     const headers: Record<string, string> = {};
 
-    // 如果书源有自定义头部
     if (source.header) {
       try {
-        const customHeaders = JSON.parse(source.header) as Record<string, string>;
-        Object.assign(headers, customHeaders);
+        const customHeadersObj = JSON.parse(source.header);
+        if (customHeadersObj && typeof customHeadersObj === 'object') {
+          const keys = Object.keys(customHeadersObj);
+          for (const key of keys) {
+            const value = customHeadersObj[key];
+            if (typeof value === 'string') {
+              headers[key] = value;
+            }
+          }
+        }
       } catch (e) {
         Logger.warn(this.TAG, `解析书源 ${source.name} 自定义头部失败: ${e}`);
       }
     }
 
-    // 设置默认User-Agent（避免被识别为爬虫）
     if (!headers['User-Agent']) {
       headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     }
 
-    // 设置Referer
     if (!headers['Referer'] && source.url) {
       try {
-        const url = new URL(source.url);
-        headers['Referer'] = `${url.protocol}//${url.hostname}/`;
+        const parsedUrl = this.parseUrl(source.url);
+        if (parsedUrl.protocol && parsedUrl.hostname) {
+          headers['Referer'] = `${parsedUrl.protocol}//${parsedUrl.hostname}/`;
+        }
       } catch (e) {
-        // 忽略URL解析错误
       }
     }
 
@@ -318,5 +340,19 @@ export class BookSourceDiagnosticTool {
    */
   enableSource(sourceId: string): void {
     this.healthManager.enableSource(sourceId);
+  }
+
+  /**
+   * 解析URL以获取协议和主机名
+   * 替代原生URL构造函数，因为HarmonyOS ArkTS不支持
+   */
+  private parseUrl(url: string): ParsedUrl {
+    const result: ParsedUrl = { protocol: '', hostname: '' };
+    const match = url.match(/^([a-z][a-z0-9+.-]*):\/\/([^\/?#]+)/i);
+    if (match) {
+      result.protocol = match[1].toLowerCase() + '://';
+      result.hostname = match[2].split(':')[0];
+    }
+    return result;
   }
 }
