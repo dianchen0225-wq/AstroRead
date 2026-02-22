@@ -110,6 +110,34 @@ export class EnhancedSourceHealthManager {
   }
 
   /**
+   * 删除指定书源的健康度记录（用于书源被删除时）
+   */
+  removeRecord(sourceId: string): void {
+    if (this.healthRecords.has(sourceId)) {
+      this.healthRecords.delete(sourceId);
+      Logger.info(this.TAG, `已删除书源 ${sourceId} 的健康度记录`);
+      this.saveRecords();
+    }
+  }
+
+  /**
+   * 批量删除书源的健康度记录
+   */
+  removeRecords(sourceIds: string[]): void {
+    let removedCount = 0;
+    for (const id of sourceIds) {
+      if (this.healthRecords.has(id)) {
+        this.healthRecords.delete(id);
+        removedCount++;
+      }
+    }
+    if (removedCount > 0) {
+      Logger.info(this.TAG, `已批量删除 ${removedCount} 个书源的健康度记录`);
+      this.saveRecords();
+    }
+  }
+
+  /**
    * 获取健康度记录
    */
   getRecord(sourceId: string): EnhancedHealthRecord | undefined {
@@ -135,6 +163,20 @@ export class EnhancedSourceHealthManager {
       record.consecutiveFailures = 0;
       Logger.info(this.TAG, `已启用书源 ${sourceId}`);
       this.saveRecords();
+    }
+  }
+
+  /**
+   * 初始化书源记录（如果不存在）
+   */
+  initializeSourceIfNeeded(sourceId: string, sourceName: string, sourceUrl: string, isEnabled: boolean = true): void {
+    let record = this.healthRecords.get(sourceId);
+
+    if (!record) {
+      record = this.createRecord(sourceId, sourceName, sourceUrl);
+      record.isEnabled = isEnabled;
+      this.healthRecords.set(sourceId, record);
+      Logger.debug(this.TAG, `初始化书源记录: ${sourceName}, enabled=${isEnabled}`);
     }
   }
 

@@ -1081,7 +1081,7 @@ export struct SourcePage {
                       Toggle({ type: ToggleType.Switch, isOn: item.enabled })
                         .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
                         .onChange((isOn: boolean) => {
-                          item.enabled = isOn;
+                          // 不要直接修改 item.enabled，让 toggleSource 处理状态更新
                           this.toggleSource(item.id);
                         })
                     }

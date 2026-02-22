@@ -32,13 +32,22 @@ const RETRY_DELAY_BASE = 1000;
 const RETRY_DELAY_MAX = 5000;
 
 const DEFAULT_USER_AGENTS: string[] = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+  // Chrome 120+ (Windows)
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36 Edg/118.0.0.0',
+  // Chrome (Mac)
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+  // Firefox
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0',
+  // Safari
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1'
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+  // Mobile
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36 EdgA/119.0.0.0'
 ];
 
 export class NetworkAdapter {
@@ -59,6 +68,14 @@ export class NetworkAdapter {
     this.defaultHeaders.set('Pragma', 'no-cache');
     this.defaultHeaders.set('Connection', 'keep-alive');
     this.defaultHeaders.set('Upgrade-Insecure-Requests', '1');
+    // 新增：更多浏览器特征，绕过反爬虫
+    this.defaultHeaders.set('Sec-Fetch-Dest', 'document');
+    this.defaultHeaders.set('Sec-Fetch-Mode', 'navigate');
+    this.defaultHeaders.set('Sec-Fetch-Site', 'none');
+    this.defaultHeaders.set('Sec-Fetch-User', '?1');
+    this.defaultHeaders.set('DNT', '1');
+    this.defaultHeaders.set('sec-ch-ua-mobile', '?0');
+    this.defaultHeaders.set('sec-ch-ua-platform', '"Windows"');
   }
 
   private getRandomUserAgent(): string {
@@ -102,59 +119,71 @@ export class NetworkAdapter {
   async request(url: string, options?: NetworkRequestOptions): Promise<string> {
     const opts: NetworkRequestOptions = options ?? {};
     const maxRetries = opts.timeout ? 1 : DEFAULT_MAX_RETRIES;
-    
+
     let lastError: Error | null = null;
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
         const delay = Math.min(RETRY_DELAY_BASE * Math.pow(2, attempt - 1), RETRY_DELAY_MAX);
         Logger.info(this.TAG, `重试请求: ${url}, 第${attempt}次, 等待${delay}ms`);
         await this.sleep(delay);
-        
-        // 轮换 User-Agent
-        if (opts.headers) {
-          opts.headers['User-Agent'] = this.getRandomUserAgent();
-        } else {
-          opts.headers = { 'User-Agent': this.getRandomUserAgent() };
+
+        // 轮换 User-Agent 和请求头
+        if (!opts.headers) {
+          opts.headers = {};
+        }
+        opts.headers['User-Agent'] = this.getRandomUserAgent();
+        // 随机化 Accept-Language 增加多样性
+        const languages = ['zh-CN,zh;q=0.9,en;q=0.8', 'zh-CN,zh;q=0.9', 'en-US,en;q=0.9,zh-CN;q=0.8'];
+        opts.headers['Accept-Language'] = languages[attempt % languages.length];
+        // 添加随机 Referer
+        if (Math.random() > 0.5) {
+          opts.headers['Referer'] = this.extractReferer(url);
         }
       }
-      
+
       try {
         const result = await this.nativeRequest(url, opts);
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         const networkError = this.parseNetworkError(lastError.message);
-        
+
         // 不可重试的错误类型
         if (networkError.type === 'http' && networkError.statusCode === 404) {
           Logger.warn(this.TAG, `404错误，不重试: ${url}`);
           throw lastError;
         }
-        
-        // 403 可能是反爬，尝试轮换 UA
+
+        // 403 可能是反爬，尝试轮换 UA 和更多请求头
         if (networkError.type === 'http' && networkError.statusCode === 403) {
-          Logger.warn(this.TAG, `403错误，尝试轮换UA: ${url}`);
+          Logger.warn(this.TAG, `403错误，尝试轮换UA和请求头: ${url}, 第${attempt + 1}次`);
+          // 添加更多反爬绕过请求头
+          if (!opts.headers) {
+            opts.headers = {};
+          }
+          opts.headers['Cache-Control'] = 'max-age=0';
+          opts.headers['sec-ch-ua'] = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"';
           continue;
         }
-        
+
         // 超时和网络错误可以重试
         if (networkError.type === 'timeout' || networkError.type === 'network' || networkError.type === 'dns') {
           Logger.warn(this.TAG, `${networkError.type}错误，准备重试: ${url}`);
           continue;
         }
-        
+
         // SSL错误不重试
         if (networkError.type === 'ssl') {
           Logger.error(this.TAG, `SSL错误，不重试: ${url}`);
           throw lastError;
         }
-        
+
         // 其他错误也重试
         Logger.warn(this.TAG, `请求失败，准备重试: ${url}, 错误: ${networkError.message}`);
       }
     }
-    
+
     throw lastError || new Error('Max retries exceeded');
   }
 

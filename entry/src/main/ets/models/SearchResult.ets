@@ -56,8 +56,8 @@ export interface SearchStopCondition {
 
 export const DEFAULT_STOP_CONDITION: SearchStopCondition = {
   maxBooks: 50,
-  maxTime: 15000,
-  minSources: 3
+  maxTime: 12000,
+  minSources: 2
 };
 
 export class SearchResultBuilder {
@@ -92,10 +92,23 @@ export class SearchResultBuilder {
     if (success && books.length > 0) {
       for (let i = 0; i < books.length; i++) {
         const book = books[i];
-        const key = `${book.name}_${book.author || ''}`.toLowerCase().trim();
+        
+        // 跳过无效书籍
+        if (!book.name || book.name.trim().length === 0) {
+          continue;
+        }
+        
+        // 生成唯一键（使用更严格的去重规则）
+        const normalizedName = this.normalizeText(book.name);
+        const normalizedAuthor = this.normalizeText(book.author || '');
+        const key = `${normalizedName}_${normalizedAuthor}`;
         
         if (!this.seenKeys.has(key)) {
           this.seenKeys.add(key);
+          // 确保书籍有必要的字段
+          if (!book.author || book.author.trim().length === 0) {
+            book.author = '未知作者';
+          }
           this.allBooks.push(book);
           newBooks.push(book);
         }
@@ -103,6 +116,18 @@ export class SearchResultBuilder {
     }
     
     return newBooks;
+  }
+
+  /**
+   * 标准化文本用于去重比较
+   */
+  private normalizeText(text: string): string {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[[:punct:]]/g, '');
   }
 
   build(page: number = 1): PagedSearchResult {
@@ -162,17 +187,52 @@ export class SearchResultBuilder {
   private calculateRelevanceScore(book: Book): number {
     let score = 0;
 
+    // 封面图片质量
     if (book.cover && book.cover.length > 0) {
       score += 10;
+      // 封面URL有效性额外加分
+      if (book.cover.startsWith('http')) {
+        score += 5;
+      }
     }
+    
+    // 简介完整度
     if (book.intro && book.intro.length > 0) {
-      score += 5;
+      const introLength = book.intro.length;
+      score += Math.min(introLength / 50, 10);
     }
+    
+    // 作者信息
     if (book.author && book.author !== '未知作者') {
+      score += 8;
+    }
+    
+    // 字数
+    if (book.wordCount && book.wordCount > 0) {
+      score += Math.min(book.wordCount / 50000, 15);
+    }
+    
+    // 最新章节
+    if (book.latestChapter && book.latestChapter.length > 0) {
       score += 5;
     }
-    if (book.wordCount && book.wordCount > 0) {
-      score += Math.min(book.wordCount / 100000, 10);
+    
+    // 分类信息
+    if (book.kind && book.kind.length > 0) {
+      score += 3;
+    }
+    
+    // 书源可靠性（根据响应时间）
+    const sourceStat = this.sourceStats.find(s => s.sourceId === book.bookSourceId);
+    if (sourceStat && sourceStat.success) {
+      // 响应时间越快，得分越高
+      if (sourceStat.responseTime < 1000) {
+        score += 10;
+      } else if (sourceStat.responseTime < 3000) {
+        score += 5;
+      } else if (sourceStat.responseTime < 5000) {
+        score += 2;
+      }
     }
 
     return score;

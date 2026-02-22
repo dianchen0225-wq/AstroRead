@@ -22,7 +22,7 @@ import { AsyncCssSelectorParser } from './AsyncCssSelectorParser';
 import { parseCache } from './ParseCache';
 import { EnhancedJSEngine } from './EnhancedJSEngine';
 import { Logger } from './Logger';
-import { sourceHealthManager } from './SourceHealthManager';
+import { enhancedSourceHealthManager as sourceHealthManager } from './EnhancedSourceHealthManager';
 
 export interface SearchResult {
   books: Book[];
@@ -63,6 +63,11 @@ interface MutexInterface {
   unlock: () => void;
 }
 
+interface ContainerPattern {
+  name: string;
+  regex: RegExp;
+}
+
 export class BookSourceSearchEngine {
   private static instance: BookSourceSearchEngine | null = null;
   private htmlParser: HTMLParser;
@@ -77,7 +82,7 @@ export class BookSourceSearchEngine {
     maxConcurrent: 5,
     requestInterval: 500,
     timeout: 10000,
-    maxResultsPerSource: 20
+    maxResultsPerSource: 15
   };
 
   private paginationConfig: SearchPaginationConfig = DEFAULT_PAGINATION_CONFIG;
@@ -191,6 +196,10 @@ export class BookSourceSearchEngine {
       }
     } : undefined;
 
+    // 记录连续失败次数
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 5;
+
     const checkStopCondition = (): boolean => {
       const elapsed = Date.now() - startTime;
       const totalBooks = resultBuilder.getTotalCount();
@@ -208,6 +217,12 @@ export class BookSourceSearchEngine {
 
       if (successSources >= stopCondition.minSources && totalBooks > 0) {
         Logger.info(this.TAG, `智能停止: 已搜索${successSources}个书源，找到${totalBooks}本书`);
+        return true;
+      }
+
+      // 连续失败过多，提前停止
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        Logger.warn(this.TAG, `智能停止: 连续${consecutiveFailures}个书源失败，可能网络或书源有问题`);
         return true;
       }
 
@@ -235,10 +250,18 @@ export class BookSourceSearchEngine {
               result.error,
               result.responseTime
             );
-            
-            if (result.success) {
+
+            if (result.success && result.books.length > 0) {
+              // 成功且找到书，重置连续失败计数
+              consecutiveFailures = 0;
               sourceHealthManager.recordSuccess(source.id, source.name, source.url, result.responseTime);
+            } else if (result.success && result.books.length === 0) {
+              // 成功但找不到书（解析问题），不算失败也不算成功
+              consecutiveFailures++;
+              Logger.warn(this.TAG, `书源 ${source.name} 返回成功但无结果，可能是解析规则失效`);
             } else {
+              // 请求失败
+              consecutiveFailures++;
               const networkError = this.parseNetworkError(result.error || '');
               sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
             }
@@ -266,12 +289,15 @@ export class BookSourceSearchEngine {
           })
           .catch((error: Error) => {
             if (shouldStop) return;
-            
+
             Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
-            
+
+            // 增加连续失败计数
+            consecutiveFailures++;
+
             const networkError = this.parseNetworkError(error.message);
             sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
-            
+
             resultBuilder.addSourceResult(
               source.id,
               source.name,
@@ -287,6 +313,16 @@ export class BookSourceSearchEngine {
 
             if (throttledProgressCallback) {
               throttledProgressCallback(this.cloneSearchProgress(progress));
+            }
+
+            // 检查是否需要提前停止
+            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+              shouldStop = true;
+              progress.isComplete = true;
+              Logger.warn(this.TAG, `连续${consecutiveFailures}个书源失败，提前停止搜索`);
+              if (throttledProgressCallback) {
+                throttledProgressCallback(this.cloneSearchProgress(progress));
+              }
             }
           })
           .finally(() => {
@@ -633,13 +669,19 @@ export class BookSourceSearchEngine {
     }
 
     Logger.debug(this.TAG, `开始解析: ${source.name}, 列表规则: ${searchRule.bookList}`);
+    Logger.debug(this.TAG, `书名规则: ${searchRule.name}, 作者规则: ${searchRule.author}, URL规则: ${searchRule.bookUrl}`);
 
     // 1. 获取书籍列表（使用异步解析避免主线程阻塞）
     const bookListHtml = await this.htmlParser.parseAsync(html, searchRule.bookList);
 
     if (!bookListHtml || bookListHtml.length === 0) {
       Logger.warn(this.TAG, `解析结果为空: ${source.name}, 列表规则: ${searchRule.bookList}`);
-      Logger.debug(this.TAG, `HTML前500字符: ${html.substring(0, 500)}`);
+      // 增强调试：保存 HTML 内容用于分析
+      const htmlPreview = html.substring(0, 800).replace(/\s+/g, ' ');
+      Logger.debug(this.TAG, `HTML前800字符: ${htmlPreview}`);
+      // 尝试用简单选择器诊断问题
+      const diagnostic = await this.diagnoseHtmlStructure(html);
+      Logger.debug(this.TAG, `HTML结构诊断: ${diagnostic}`);
       return books;
     }
 
@@ -774,38 +816,91 @@ export class BookSourceSearchEngine {
   }
 
   /**
-   * 从元素中提取文本
+   * 从元素中提取文本 - 增强版，递归提取所有文本
    */
   private extractTextFromElement(element: string): string {
     if (!element) return '';
 
-    // 提取文本内容
-    const textMatch = element.match(/>([^<]*)</);
-    if (textMatch) {
-      return this.decodeHtmlEntities(textMatch[1].trim());
-    }
+    // 使用改进的文本提取：移除所有标签，保留内容
+    let text = element;
 
-    return '';
+    // 移除 script/style
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+
+    // 替换 br 为换行
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+
+    // 移除所有 HTML 标签
+    text = text.replace(/<[^>]+>/g, '');
+
+    // 解码 HTML 实体
+    text = this.decodeHtmlEntities(text);
+
+    // 清理空白
+    text = text.replace(/\s+/g, ' ').trim();
+
+    return text;
   }
 
   /**
-   * 解码 HTML 实体
+   * 解码 HTML 实体 - 增强版，支持更多实体
    */
   private decodeHtmlEntities(text: string): string {
     const entities: Record<string, string> = {
+      // 基础实体
       '&amp;': '&',
       '&lt;': '<',
       '&gt;': '>',
       '&quot;': '"',
       '&#39;': "'",
+      '&#x27;': "'",
       '&nbsp;': ' ',
+      '&#160;': ' ',
+      // 中文标点
       '&hellip;': '…',
+      '&#8230;': '…',
+      // 破折号和连字符
       '&mdash;': '—',
+      '&#8212;': '—',
       '&ndash;': '–',
+      '&#8211;': '–',
+      // 引号
       '&ldquo;': '"',
+      '&#8220;': '"',
       '&rdquo;': '"',
-      '&lsquo;': '\u2018',
-      '&rsquo;': '\u2019',
+      '&#8221;': '"',
+      '&lsquo;': "'",
+      '&#8216;': "'",
+      '&rsquo;': "'",
+      '&#8217;': "'",
+      // 其他常用实体
+      '&copy;': '©',
+      '&#169;': '©',
+      '&reg;': '®',
+      '&#174;': '®',
+      '&trade;': '™',
+      '&#8482;': '™',
+      '&yen;': '¥',
+      '&#165;': '¥',
+      '&euro;': '€',
+      '&#8364;': '€',
+      // 数学符号
+      '&times;': '×',
+      '&#215;': '×',
+      '&divide;': '÷',
+      '&#247;': '÷',
+      '&plusmn;': '±',
+      '&#177;': '±',
+      // 箭头
+      '&larr;': '←',
+      '&#8592;': '←',
+      '&uarr;': '↑',
+      '&#8593;': '↑',
+      '&rarr;': '→',
+      '&#8594;': '→',
+      '&darr;': '↓',
+      '&#8595;': '↓',
     };
 
     let result = text;
@@ -814,13 +909,22 @@ export class BookSourceSearchEngine {
       result = result.split(entity).join(entities[entity]);
     }
 
-    // 处理数字实体
+    // 处理十进制数字实体 &#123;
     result = result.replace(/&#(\d+);/g, (match: string, dec: string) => {
-      return String.fromCharCode(parseInt(dec, 10));
+      const code = parseInt(dec, 10);
+      if (!isNaN(code) && code > 0 && code < 0x10FFFF) {
+        return String.fromCharCode(code);
+      }
+      return match;
     });
 
+    // 处理十六进制数字实体 &#x7B;
     result = result.replace(/&#x([0-9a-fA-F]+);/g, (match: string, hex: string) => {
-      return String.fromCharCode(parseInt(hex, 16));
+      const code = parseInt(hex, 16);
+      if (!isNaN(code) && code > 0 && code < 0x10FFFF) {
+        return String.fromCharCode(code);
+      }
+      return match;
     });
 
     return result;
@@ -948,6 +1052,50 @@ export class BookSourceSearchEngine {
     }
     
     return { type: 'unknown', message: errorMsg };
+  }
+
+  /**
+   * HTML 结构诊断 - 帮助理解页面结构
+   */
+  private async diagnoseHtmlStructure(html: string): Promise<string> {
+    const checks: string[] = [];
+
+    const containerPatterns: ContainerPattern[] = [
+      { name: 'div.book', regex: /<div[^>]*class=["'][^"']*book[^"']*["'][^>]*>/i },
+      { name: 'div.item', regex: /<div[^>]*class=["'][^"']*item[^"']*["'][^>]*>/i },
+      { name: 'div.list', regex: /<div[^>]*class=["'][^"']*list[^"']*["'][^>]*>/i },
+      { name: 'li.item', regex: /<li[^>]*class=["'][^"']*item[^"']*["'][^>]*>/i },
+      { name: 'tr', regex: /<tr[\s>]/i },
+      { name: 'article', regex: /<article[\s>]/i },
+      { name: 'section', regex: /<section[\s>]/i }
+    ];
+
+    for (const pattern of containerPatterns) {
+      const matches = html.match(pattern.regex);
+      if (matches) {
+        checks.push(`${pattern.name}: ${matches.length}个`);
+      }
+    }
+
+    // 检查是否有 script 动态渲染
+    if (html.includes('<script') && html.includes('document.write')) {
+      checks.push('警告: 页面使用JS动态渲染');
+    }
+
+    // 检查是否是 JSON 数据
+    if (html.trim().startsWith('{') || html.trim().startsWith('[')) {
+      checks.push('内容类型: JSON数据');
+    }
+
+    // 检查状态码错误页面
+    if (html.includes('403') || html.includes('Forbidden')) {
+      checks.push('警告: 可能是403错误页面');
+    }
+    if (html.includes('404') || html.includes('Not Found')) {
+      checks.push('警告: 可能是404错误页面');
+    }
+
+    return checks.length > 0 ? checks.join(', ') : '未识别到常见模式';
   }
 
   /**

@@ -7,6 +7,8 @@ import { Logger } from './Logger';
 import { sourceCleaner } from './SourceCleaner';
 import { enhancedSourceHealthManager, HealthStatistics } from './EnhancedSourceHealthManager';
 import { networkDiagnostics } from './NetworkDiagnostics';
+import { BookSourceManager } from './BookSourceManager';
+import { BookSource } from '../models/BookSource';
 
 export interface FixReport {
   timestamp: string;
@@ -57,8 +59,21 @@ export class SearchFixer {
         return report;
       }
 
-      // 步骤2: 清理失效书源
-      Logger.info(this.TAG, '步骤2: 清理失效书源...');
+      // 步骤2: 同步书源数据到健康度管理器
+      Logger.info(this.TAG, '步骤2: 同步书源数据...');
+      const bookSourceManager = BookSourceManager.getInstance();
+      const allSources = bookSourceManager.getAllSources();
+      const enabledSources = bookSourceManager.getEnabledSources();
+
+      Logger.info(this.TAG, `从 BookSourceManager 获取到 ${allSources.length} 个书源, 其中启用 ${enabledSources.length} 个`);
+
+      // 将书源同步到健康度管理器
+      for (const source of allSources) {
+        enhancedSourceHealthManager.initializeSourceIfNeeded(source.id, source.name, source.url, source.enabled);
+      }
+
+      // 步骤3: 清理失效书源
+      Logger.info(this.TAG, '步骤3: 清理失效书源...');
       await sourceCleaner.cleanupFailedSources();
       const failedSources = sourceCleaner.getFailedSourceNames();
       report.failedSourcesCount = failedSources.length;
@@ -70,21 +85,32 @@ export class SearchFixer {
         }
       }
 
-      // 步骤3: 更新书源健康度
-      Logger.info(this.TAG, '步骤3: 更新书源健康度...');
+      // 步骤4: 更新书源健康度
+      Logger.info(this.TAG, '步骤4: 更新书源健康度...');
       const healthStats = enhancedSourceHealthManager.getStatistics();
       report.disabledSourcesCount = healthStats.disabled;
 
       Logger.info(this.TAG, `书源统计: 总数=${healthStats.total}, 启用=${healthStats.enabled}, 禁用=${healthStats.disabled}, 永久禁用=${healthStats.permanentlyDisabled}`);
 
-      // 步骤4: 生成健康报告
-      Logger.info(this.TAG, '步骤4: 生成健康报告...');
+      // 如果统计为0但实际有书源，使用实际书源数量
+      if (healthStats.total === 0 && allSources.length > 0) {
+        Logger.warn(this.TAG, `健康度管理器统计为0,但实际有 ${allSources.length} 个书源,使用实际数量`);
+        report.recommendations.push(`📊 书源总数: ${allSources.length} 个`);
+        report.recommendations.push(`✅ 启用书源: ${enabledSources.length} 个`);
+      }
+
+      // 步骤5: 生成健康报告
+      Logger.info(this.TAG, '步骤5: 生成健康报告...');
       const healthReport = enhancedSourceHealthManager.generateHealthReport();
       Logger.info(this.TAG, healthReport);
 
-      // 步骤5: 生成建议
-      Logger.info(this.TAG, '步骤5: 生成修复建议...');
-      this.generateRecommendations(report, healthStats);
+      // 步骤6: 生成建议
+      Logger.info(this.TAG, '步骤6: 生成修复建议...');
+      // 创建包含实际书源数量的统计
+      const actualStats: HealthStatistics = healthStats.total === 0 && allSources.length > 0
+        ? { total: allSources.length, enabled: enabledSources.length, disabled: allSources.length - enabledSources.length, permanentlyDisabled: 0, avgScore: 50 }
+        : healthStats;
+      this.generateRecommendations(report, actualStats);
 
       Logger.info(this.TAG, '=== 搜索功能修复完成 ===');
 
@@ -131,9 +157,20 @@ export class SearchFixer {
     const isConnected = await networkDiagnostics.quickNetworkCheck();
     report.push(`网络状态: ${isConnected ? '✓ 已连接' : '✗ 未连接'}`);
 
-    // 检查书源
+    // 检查书源 - 从 BookSourceManager 获取实际书源数量
+    const bookSourceManager = BookSourceManager.getInstance();
+    const allSources = bookSourceManager.getAllSources();
+    const enabledSources = bookSourceManager.getEnabledSources();
+
+    // 同步到健康度管理器
+    for (const source of allSources) {
+      enhancedSourceHealthManager.initializeSourceIfNeeded(source.id, source.name, source.url, source.enabled);
+    }
+
     const stats = enhancedSourceHealthManager.getStatistics();
-    report.push(`书源状态: ${stats.enabled}/${stats.total} 可用`);
+    const total = stats.total > 0 ? stats.total : allSources.length;
+    const enabled = stats.enabled > 0 ? stats.enabled : enabledSources.length;
+    report.push(`书源状态: ${enabled}/${total} 可用`);
 
     // 检查失效书源
     const failedSources = sourceCleaner.getFailedSourceNames();

@@ -81,19 +81,33 @@ export class CssSelectorParser {
         const atIndex = processedSelector.indexOf('@');
         const parentSelector = processedSelector.substring(0, atIndex).trim();
         const childSelector = processedSelector.substring(atIndex + 1).trim();
-        
+
         Logger.debug(CssSelectorParser.TAG, `子选择器解析 - 父: ${parentSelector}, 子: ${childSelector}`);
 
         const parentElements = CssSelectorParser.selectElements(html, parentSelector);
         Logger.debug(CssSelectorParser.TAG, `父选择器找到 ${parentElements.length} 个元素`);
-        
-        for (const parentHtml of parentElements) {
+
+        // 使用 Set 去重，避免相同子元素被多次添加
+        const uniqueChildElements = new Set<string>();
+
+        for (let i = 0; i < parentElements.length; i++) {
+          const parentHtml = parentElements[i];
+          Logger.debug(CssSelectorParser.TAG, `解析第 ${i + 1}/${parentElements.length} 个父元素的子元素`);
+
           const childElements = CssSelectorParser.selectElements(parentHtml, childSelector);
-          elements.push(...childElements);
+
+          for (const child of childElements) {
+            // 标准化后去重（移除多余空白）
+            const normalizedChild = child.replace(/>\s+</g, '><').trim();
+            if (!uniqueChildElements.has(normalizedChild)) {
+              uniqueChildElements.add(normalizedChild);
+              elements.push(child);
+            }
+          }
         }
-        
-        Logger.debug(CssSelectorParser.TAG, `子选择器共找到 ${elements.length} 个元素`);
-        
+
+        Logger.debug(CssSelectorParser.TAG, `子选择器共找到 ${elements.length} 个元素（去重后）`);
+
         if (skipFirst > 0 && elements.length > skipFirst) {
           return elements.slice(skipFirst);
         }
@@ -108,24 +122,43 @@ export class CssSelectorParser {
         processedSelector = processedSelector.substring(0, processedSelector.lastIndexOf('.'));
       }
 
-      // 处理后代选择器（如 div.book a）
-      if (processedSelector.includes(' ') && !processedSelector.startsWith('.') && !processedSelector.startsWith('#')) {
-        const parts = processedSelector.split(/\s+/);
-        let currentElements = [html];
+      // 处理后代选择器（如 div.book a 或 .list .item h3）
+      // 修复：支持所有类型的后代选择器
+      if (processedSelector.includes(' ')) {
+        const parts = processedSelector.split(/\s+/).filter((p: string) => p.length > 0);
+        if (parts.length > 1) {
+          Logger.debug(CssSelectorParser.TAG, `后代选择器解析: ${parts.join(' -> ')}`);
+          let currentElements = [html];
 
-        for (const part of parts) {
-          const nextElements: string[] = [];
-          for (const currentHtml of currentElements) {
-            const found = CssSelectorParser.selectElements(currentHtml, part);
-            nextElements.push(...found);
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            const nextElements: string[] = [];
+            const seen = new Set<string>(); // 去重
+
+            for (const currentHtml of currentElements) {
+              const found = CssSelectorParser.selectElements(currentHtml, part);
+              for (const element of found) {
+                // 标准化去重
+                const normalized = element.replace(/>\s+</g, '><').trim();
+                if (!seen.has(normalized)) {
+                  seen.add(normalized);
+                  nextElements.push(element);
+                }
+              }
+            }
+            currentElements = nextElements;
+            Logger.debug(CssSelectorParser.TAG, `后代选择器第 ${i + 1} 步 "${part}" 找到 ${currentElements.length} 个元素`);
+
+            if (currentElements.length === 0) {
+              break;
+            }
           }
-          currentElements = nextElements;
-        }
 
-        if (index >= 0 && index < currentElements.length) {
-          return [currentElements[index]];
+          if (index >= 0 && index < currentElements.length) {
+            return [currentElements[index]];
+          }
+          return currentElements;
         }
-        return currentElements;
       }
 
       // 处理属性选择器（如 [class="book"]）
@@ -589,7 +622,31 @@ export class CssSelectorParser {
     if (!html) {
       return '';
     }
-    return EntityDecoder.cleanHtml(html);
+
+    // 递归提取所有文本节点
+    let text = html;
+
+    // 1. 移除 script/style 标签及其内容
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    text = text.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '');
+    text = text.replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
+
+    // 2. 将某些标签替换为换行，提高可读性
+    text = text.replace(/<(br|hr)\s*\/?>/gi, '\n');
+    text = text.replace(/<\/\s*(p|div|h[1-6]|li|tr|section|article|header|footer)[^>]*>/gi, '\n');
+
+    // 3. 移除所有 HTML 标签，但保留标签之间的内容
+    text = text.replace(/<[^>]+>/g, '');
+
+    // 4. 解码 HTML 实体
+    text = EntityDecoder.decode(text);
+
+    // 5. 清理多余空白和换行
+    text = text.replace(/\n\s*\n/g, '\n');
+    text = text.replace(/[ \t]+/g, ' ');
+
+    return text.trim();
   }
 
   /**

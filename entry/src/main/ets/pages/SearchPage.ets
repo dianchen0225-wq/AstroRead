@@ -5,7 +5,7 @@ import { BookSource } from '../models/BookSource';
 import { Book, SourceStatus } from '../models/Book';
 import { PagedSearchResult, SearchProgress } from '../models/SearchResult';
 import { Logger } from '../utils/Logger';
-import { NavigationManager } from '../common/NavigationManager';
+import { NavigationManager, NavigationParams, GenericNavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/NetworkManager';
 import { purifyIntro } from '../utils/ContentPurifier';
@@ -16,13 +16,7 @@ export interface RankColor {
   dark: string;
 }
 
-interface BookDetailNavParams {
-  bookId: string;
-}
 
-interface MainPageNavParams {
-  tabIndex: number;
-}
 
 @ComponentV2
 export struct SearchPage {
@@ -67,8 +61,13 @@ export struct SearchPage {
     viewModelManager.setContext(context);
     NetworkManager.getInstance().setContext(context);
     
-    this.loadSearchHistory();
-    this.loadBookSources();
+    // 使用 Promise.all 并行加载，提高性能
+    Promise.all([
+      this.loadSearchHistory(),
+      this.loadBookSources()
+    ]).catch((error: Error) => {
+      Logger.error('SearchPage', `初始化加载失败: ${error}`);
+    });
   }
 
   aboutToDisappear(): void {
@@ -156,7 +155,24 @@ export struct SearchPage {
   }
 
   private async performSearch(page: number = 1): Promise<void> {
-    if (!this.searchText.trim()) return;
+    const trimmedSearchText = this.searchText.trim();
+    
+    // 输入验证
+    if (!trimmedSearchText || trimmedSearchText.length === 0) {
+      this.errorMessage = '请输入搜索关键词';
+      return;
+    }
+    
+    if (trimmedSearchText.length < 1) {
+      this.errorMessage = '搜索关键词太短';
+      return;
+    }
+
+    // 防止重复搜索相同内容
+    if (this.isSearching) {
+      Logger.warn('SearchPage', '搜索正在进行中，忽略重复请求');
+      return;
+    }
 
     this.isSearching = true;
     this.hasSearched = true;
@@ -164,19 +180,23 @@ export struct SearchPage {
     this.searchProgress = '正在初始化搜索...';
     this.foundBooksCount = 0;
     this.completedSources = 0;
+    this.validBooksCount = 0;
+    this.invalidBooksCount = 0;
+    this.allSearchResults = [];
 
     if (page === 1) {
       this.searchResults = [];
       this.currentPage = 1;
+      this.totalPages = 1;
+      this.totalCount = 0;
     }
 
     try {
-      if (this.bookSources.length === 0) {
-        await this.loadBookSources();
-      }
+      // 每次搜索前都重新加载书源，确保获取最新的书源列表
+      await this.loadBookSources();
 
       if (this.bookSources.length === 0) {
-        this.errorMessage = '没有可用的书源';
+        this.errorMessage = '没有可用的书源，请先导入书源';
         this.hasEnabledSources = false;
         this.isSearching = false;
         return;
@@ -191,17 +211,23 @@ export struct SearchPage {
         if (this.isComponentActive) {
           this.completedSources = progress.completedSources;
           this.foundBooksCount = progress.foundBooks;
-          this.searchProgress = `正在搜索 ${progress.currentSource}...`;
+          this.searchProgress = progress.totalSources > 0 
+            ? `正在搜索 ${progress.currentSource}... (${progress.completedSources}/${progress.totalSources})`
+            : '正在搜索...';
         }
       };
 
       const bookFoundCallback = (newBooks: Book[], _progress: SearchProgress): void => {
         if (this.isComponentActive && page === 1) {
+          // 使用更严格的去重逻辑
+          const existingKeys = new Set(this.searchResults.map(b => 
+            `${b.name}_${b.author || ''}`.toLowerCase().trim()
+          ));
+          
           for (const book of newBooks) {
-            const exists = this.searchResults.some(b => 
-              b.name === book.name && (b.author || '') === (book.author || '')
-            );
-            if (!exists) {
+            const bookKey = `${book.name}_${book.author || ''}`.toLowerCase().trim();
+            if (!existingKeys.has(bookKey)) {
+              existingKeys.add(bookKey);
               this.searchResults = this.addBookToArray(this.searchResults, book);
             }
           }
@@ -210,7 +236,7 @@ export struct SearchPage {
       };
 
       const result: PagedSearchResult = await bookViewModel.searchBooksWithPaging(
-        this.searchText.trim(),
+        trimmedSearchText,
         sourcesToUse,
         page,
         progressCallback,
@@ -221,7 +247,19 @@ export struct SearchPage {
         if (page === 1) {
           this.searchResults = result.books;
         } else {
-          this.searchResults = this.mergeBookArrays(this.searchResults, result.books);
+          // 合并结果时去重
+          const existingKeys = new Set(this.searchResults.map(b => 
+            `${b.name}_${b.author || ''}`.toLowerCase().trim()
+          ));
+          const newBooks = result.books.filter(b => {
+            const key = `${b.name}_${b.author || ''}`.toLowerCase().trim();
+            if (existingKeys.has(key)) {
+              return false;
+            }
+            existingKeys.add(key);
+            return true;
+          });
+          this.searchResults = this.mergeBookArrays(this.searchResults, newBooks);
         }
         this.currentPage = result.currentPage;
         this.totalPages = result.totalPages;
@@ -236,12 +274,21 @@ export struct SearchPage {
     } catch (error) {
       Logger.error('SearchPage', `搜索失败: ${error}`);
       if (this.isComponentActive) {
-        const errorMsg = error instanceof Error ? error.message : '未知错误';
+        const errorMsg = error instanceof Error ? error.message : String(error);
         
-        if (errorMsg.includes('network') || errorMsg.includes('网络')) {
+        // 更详细的错误分类处理
+        if (errorMsg.includes('network') || errorMsg.includes('网络') || errorMsg.includes('ENETUNREACH') || errorMsg.includes('ECONNREFUSED')) {
           this.errorMessage = '网络连接失败，请检查网络设置';
-        } else if (errorMsg.includes('timeout') || errorMsg.includes('超时')) {
-          this.errorMessage = '搜索超时，请稍后重试';
+        } else if (errorMsg.includes('timeout') || errorMsg.includes('超时') || errorMsg.includes('ETIMEDOUT')) {
+          this.errorMessage = '搜索超时，请稍后重试或检查网络';
+        } else if (errorMsg.includes('certificate') || errorMsg.includes('SSL') || errorMsg.includes('TLS')) {
+          this.errorMessage = '安全连接失败，请检查网络环境';
+        } else if (errorMsg.includes('dns') || errorMsg.includes('ENOTFOUND') || errorMsg.includes('域名')) {
+          this.errorMessage = '域名解析失败，书源可能已失效';
+        } else if (errorMsg.includes('abort') || errorMsg.includes('取消')) {
+          this.errorMessage = '搜索已取消';
+        } else if (errorMsg.includes('书源') || errorMsg.includes('规则')) {
+          this.errorMessage = `书源配置错误: ${errorMsg}`;
         } else {
           this.errorMessage = `搜索失败: ${errorMsg}`;
         }
@@ -251,7 +298,8 @@ export struct SearchPage {
         this.isSearching = false;
         this.searchProgress = '';
         
-        if (this.searchResults.length >= 50) {
+        // 当搜索结果较多时进行书源验证
+        if (this.searchResults.length >= 30) {
           this.validateBooksSources();
         }
       }
@@ -350,7 +398,7 @@ export struct SearchPage {
   private async openBook(book: Book): Promise<void> {
     try {
       await this.addToBookshelf(book);
-      const params: ESObject = { bookId: book.id };
+      const params: GenericNavParams = { bookId: book.id };
       NavigationManager.getInstance().navigateTo('BookDetailPage', params);
     } catch (error) {
       Logger.error('SearchPage', `打开书籍失败: ${error}`);
@@ -358,7 +406,7 @@ export struct SearchPage {
   }
 
   private navigateToSourcePage(): void {
-    const params: ESObject = { tabIndex: 3 };
+    const params: GenericNavParams = { tabIndex: 3 };
     NavigationManager.getInstance().navigateTo('MainPage', params);
   }
 
@@ -459,18 +507,32 @@ export struct SearchPage {
         .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
         .margin({ right: DesignSystem.Spacing.sm })
 
-      TextInput({ placeholder: $r('app.string.search_placeholder'), text: this.searchText })
+      TextInput({ placeholder: $r('app.string.search_placeholder'), text: $$this.searchText })
         .layoutWeight(1)
         .backgroundColor(Color.Transparent)
         .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
         .fontSize(DesignSystem.Typography.size.sm)
         .placeholderColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+        .maxLength(100)
+        .enterKeyType(EnterKeyType.Search)
         .onChange((value: string) => {
-          this.searchText = value;
+          this.searchText = value.trim();
         })
         .onSubmit(() => {
-          this.performSearch();
+          if (this.searchText.length > 0 && !this.isSearching) {
+            this.performSearch(1);
+          }
         })
+
+      if (this.searchText.length > 0) {
+        Text('✕')
+          .fontSize(DesignSystem.Typography.size.sm)
+          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+          .margin({ right: DesignSystem.Spacing.sm })
+          .onClick(() => {
+            this.searchText = '';
+          })
+      }
 
       Row() {
         Text($r('app.string.search_button'))
@@ -485,12 +547,12 @@ export struct SearchPage {
         bottom: DesignSystem.Spacing.sm
       })
       .borderRadius(DesignSystem.BorderRadius.md)
-      .backgroundColor(this.isSearching ? 
+      .backgroundColor(this.isSearching || this.searchText.length === 0 ? 
         DesignSystem.getBorderColor(this.isLightMode) : 
         DesignSystem.getPrimaryColor(this.isLightMode))
-      .opacity(this.isSearching ? 0.6 : 1)
+      .opacity(this.isSearching || this.searchText.length === 0 ? 0.6 : 1)
       .onClick(() => {
-        if (!this.isSearching) {
+        if (!this.isSearching && this.searchText.length > 0) {
           this.performSearch(1);
         }
       })
@@ -716,17 +778,20 @@ export struct SearchPage {
   @Builder
   buildResultsList() {
     List({ space: DesignSystem.Spacing.sm }) {
-      ForEach(this.searchResults, (book: Book) => {
+      ForEach(this.searchResults, (book: Book, _index: number) => {
         ListItem() {
           this.buildBookItem(book)
         }
-      }, (book: Book, index: number) => `book_${index}_${book.name}_${book.bookSourceId}_${book.sourceStatus}`)
+      }, (book: Book, index: number) => `${book.id || book.name}_${book.bookSourceId}_${index}`)
     }
     .width('100%')
-    .height(this.searchResults.length * 120 + 20)
-    .cachedCount(5)
+    .height('100%')
+    .layoutWeight(1)
+    .cachedCount(10)
+    .edgeEffect(EdgeEffect.Spring)
+    .scrollBar(BarState.Auto)
     .nestedScroll({
-      scrollForward: NestedScrollMode.PARENT_FIRST,
+      scrollForward: NestedScrollMode.SELF_FIRST,
       scrollBackward: NestedScrollMode.SELF_FIRST
     })
   }
@@ -763,19 +828,19 @@ export struct SearchPage {
           .width(60)
           .height(80)
           .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor('rgba(244, 67, 54, 0.75)')
+          .backgroundColor(DesignSystem.getErrorOverlayColor())
           .justifyContent(FlexAlign.Center)
         } else if (book.sourceStatus === SourceStatus.CHECKING) {
           Column() {
             LoadingProgress()
               .width(16)
               .height(16)
-              .color('#FFFFFF')
+              .color(DesignSystem.getButtonTextColor())
           }
           .width(60)
           .height(80)
           .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor('rgba(158, 158, 158, 0.75)')
+          .backgroundColor(DesignSystem.getCheckingOverlayColor())
           .justifyContent(FlexAlign.Center)
         }
       }

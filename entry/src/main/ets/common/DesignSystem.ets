@@ -515,6 +515,16 @@ export class DesignSystem {
     return isLightMode ? DesignSystem.StatusColors.info.light : DesignSystem.StatusColors.info.dark;
   }
 
+  // 获取错误状态覆盖层颜色（带透明度）
+  static getErrorOverlayColor(): string {
+    return 'rgba(244, 67, 54, 0.75)';
+  }
+
+  // 获取检查中状态覆盖层颜色（带透明度）
+  static getCheckingOverlayColor(): string {
+    return 'rgba(158, 158, 158, 0.75)';
+  }
+
   // 阴影系统
   static readonly Shadows: ShadowsConfig = {
     sm: { light: '0 1px 2px rgba(0, 0, 0, 0.05)', dark: '0 1px 2px rgba(0, 0, 0, 0.3)' } as ShadowVariant,

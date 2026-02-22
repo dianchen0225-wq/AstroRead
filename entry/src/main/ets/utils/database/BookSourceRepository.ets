@@ -302,7 +302,9 @@ export class BookSourceRepository {
       }
 
       const predicates = new relationalStore.RdbPredicates('book_source');
-      predicates.in(DB_COLUMN_ID, sourceIds);
+      // 将 string[] 转换为 ValueType[] (string | number | boolean | Uint8Array | null)
+      const valueTypeArray: (string | number | boolean | Uint8Array | null)[] = sourceIds.map(id => id as (string | number | boolean | Uint8Array | null));
+      predicates.in(DB_COLUMN_ID, valueTypeArray);
       const deletedRows = await this.rdbStore.delete(predicates);
       
       Logger.info(BookSourceRepository.TAG, `批量删除书源成功，删除数量: ${deletedRows}`);

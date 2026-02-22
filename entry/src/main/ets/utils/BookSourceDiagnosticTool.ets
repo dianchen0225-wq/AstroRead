@@ -31,10 +31,6 @@ export interface ParsedUrl {
   hostname: string;
 }
 
-interface CustomHeaders {
-  [key: string]: string | number | boolean | object | null;
-}
-
 export class BookSourceDiagnosticTool {
   private static instance: BookSourceDiagnosticTool | null = null;
   private healthManager: EnhancedSourceHealthManager;
@@ -267,35 +263,28 @@ export class BookSourceDiagnosticTool {
    */
   private buildHeaders(source: BookSource): Record<string, string> {
     const headers: Record<string, string> = {};
+    headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-    if (source.header) {
-      try {
-        const customHeadersObj = JSON.parse(source.header);
-        if (customHeadersObj && typeof customHeadersObj === 'object') {
-          const keys = Object.keys(customHeadersObj);
-          for (const key of keys) {
-            const value = customHeadersObj[key];
-            if (typeof value === 'string') {
-              headers[key] = value;
-            }
-          }
-        }
-      } catch (e) {
-        Logger.warn(this.TAG, `解析书源 ${source.name} 自定义头部失败: ${e}`);
+    if (source.url && source.url.length > 0) {
+      const parsedUrl = this.parseUrl(source.url);
+      if (parsedUrl.protocol.length > 0 && parsedUrl.hostname.length > 0) {
+        headers['Referer'] = `${parsedUrl.protocol}//${parsedUrl.hostname}/`;
       }
     }
 
-    if (!headers['User-Agent']) {
-      headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-    }
-
-    if (!headers['Referer'] && source.url) {
-      try {
-        const parsedUrl = this.parseUrl(source.url);
-        if (parsedUrl.protocol && parsedUrl.hostname) {
-          headers['Referer'] = `${parsedUrl.protocol}//${parsedUrl.hostname}/`;
+    if (source.header && source.header.length > 0) {
+      const headerStr = source.header;
+      if (headerStr.includes('User-Agent')) {
+        const uaMatch = headerStr.match(/"User-Agent"\s*:\s*"([^"]+)"/);
+        if (uaMatch && uaMatch.length > 1) {
+          headers['User-Agent'] = uaMatch[1];
         }
-      } catch (e) {
+      }
+      if (headerStr.includes('Referer')) {
+        const refererMatch = headerStr.match(/"Referer"\s*:\s*"([^"]+)"/);
+        if (refererMatch && refererMatch.length > 1) {
+          headers['Referer'] = refererMatch[1];
+        }
       }
     }
 

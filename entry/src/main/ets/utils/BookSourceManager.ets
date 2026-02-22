@@ -12,6 +12,7 @@ import { BookSourceDebugger } from './BookSourceDebugger';
 import { Logger } from './Logger';
 import http from '@ohos.net.http';
 import { databaseManager } from './DatabaseManager';
+import { enhancedSourceHealthManager } from './EnhancedSourceHealthManager';
 
 type JsonObject = Record<string, string | number | boolean | object | null | undefined>;
 
@@ -301,19 +302,45 @@ export class BookSourceManager {
    * 批量删除书源
    */
   async removeSources(ids: string[]): Promise<void> {
-    this.sources = this.sources.filter((s: BookSource) => !ids.includes(s.id));
-    
+    if (!ids || ids.length === 0) {
+      return;
+    }
+
     try {
+      // 1. 先从数据库删除，确保数据库操作成功
       const bookSourceRepository = databaseManager.getBookSourceRepo();
       await bookSourceRepository.deleteBookSources(ids);
+      
+      // 2. 数据库删除成功后，再更新内存缓存
+      this.sources = this.sources.filter((s: BookSource) => !ids.includes(s.id));
+      
+      // 3. 清理健康度管理器中已删除书源的记录
+      enhancedSourceHealthManager.removeRecords(ids);
+      
+      Logger.info(this.TAG, `成功批量删除 ${ids.length} 个书源`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       Logger.error(this.TAG, `批量删除书源失败: ${errorMsg}`);
+      // 重新加载书源列表以确保内存和数据库同步
+      await this.reloadSources();
       if (error instanceof Error) {
         throw error;
       } else {
         throw new Error(String(error));
       }
+    }
+  }
+  
+  /**
+   * 重新加载书源列表（用于错误恢复）
+   */
+  private async reloadSources(): Promise<void> {
+    try {
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      this.sources = await bookSourceRepository.getAllBookSources();
+      Logger.info(this.TAG, `重新加载了 ${this.sources.length} 个书源`);
+    } catch (error) {
+      Logger.error(this.TAG, `重新加载书源失败: ${error}`);
     }
   }
 
