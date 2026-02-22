@@ -13,6 +13,7 @@ export * from './RequestCache';
 export * from './RetryHandler';
 export * from './AbortController';
 export * from './HttpClient';
+export * from './UserAgentPool';
 
 export function createHttpClient(config?: HttpClientConfig): HttpClient {
   return HttpClient.getInstance(config);

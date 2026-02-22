@@ -6,6 +6,7 @@ import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
 import common from '@ohos.app.ability.common';
 import { BookCoverImage } from '../components/BookCoverImage';
+import { BookListDataSource } from '../components/OptimizedList';
 
 type ViewMode = 'list' | 'grid';
 
@@ -18,7 +19,8 @@ export struct BookshelfPage {
   @Local viewMode: ViewMode = 'list';
   @Local pressedBookId: string = '';
   @Param safeAreaTop: number = 0;
-  
+
+  private bookDataSource: BookListDataSource = new BookListDataSource([]);
   private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
@@ -40,15 +42,18 @@ export struct BookshelfPage {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
     this.bookList = [];
+    this.bookDataSource.clear();
   }
 
   async loadBooks(): Promise<void> {
     if (!this.isComponentActive) return;
-    
+
     this.isLoading = true;
     try {
       const bookViewModel = viewModelManager.getBookViewModel();
       this.bookList = await bookViewModel.loadAllBooks();
+      // 更新 LazyForEach 数据源
+      this.bookDataSource.updateData(this.bookList);
     } catch (error) {
       Logger.error('BookshelfPage', `加载书籍失败: ${error}`);
     } finally {
@@ -241,7 +246,7 @@ export struct BookshelfPage {
   @Builder
   buildListView() {
     List({ space: DesignSystem.Spacing.md }) {
-      ForEach(this.bookList, (book: Book) => {
+      LazyForEach(this.bookDataSource, (book: Book) => {
         ListItem() {
           this.buildBookListItem(book)
         }
@@ -255,7 +260,7 @@ export struct BookshelfPage {
       top: DesignSystem.Spacing.md,
       bottom: DesignSystem.Spacing.md
     })
-    .cachedCount(5)
+    .cachedCount(15)
   }
 
   @Builder
@@ -375,7 +380,7 @@ export struct BookshelfPage {
   @Builder
   buildGridView() {
     Grid() {
-      ForEach(this.bookList, (book: Book) => {
+      LazyForEach(this.bookDataSource, (book: Book) => {
         GridItem() {
           this.buildBookGridItem(book)
         }

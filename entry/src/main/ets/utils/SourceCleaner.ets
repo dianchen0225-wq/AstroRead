@@ -4,7 +4,7 @@
  */
 
 import { Logger } from './Logger';
-import { sourceHealthManager } from './SourceHealthManager';
+import { enhancedSourceHealthManager } from './EnhancedSourceHealthManager';
 
 export interface FailedSource {
   name: string;
@@ -83,9 +83,8 @@ export class SourceCleaner {
     const allFailed = this.getAllFailedSources();
     
     for (const failed of allFailed) {
-      // 使用书源名称作为临时ID
       const tempId = `failed_${failed.name}`;
-      sourceHealthManager.recordFailure(
+      enhancedSourceHealthManager.recordFailure(
         tempId,
         failed.name,
         '',

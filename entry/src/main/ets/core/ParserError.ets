@@ -1,16 +1,22 @@
 /**
  * ParserError - 统一错误处理类
- * 标准化不同解析器的异常输出
+ * 继承自 AppError，提供解析器特有的错误信息
  */
 
 import {
   ParseErrorInfo,
-  ParseWarningInfo,
   ParserType,
   ParseStatus,
   ParseMetadata,
   ParseResult
 } from '../interfaces/IParser';
+import {
+  AppError,
+  AppErrorCode,
+  ErrorCategory,
+  ErrorSeverity,
+  AppErrorOptions
+} from './AppError';
 
 export enum ParserErrorCode {
   UNKNOWN = 'PARSER_UNKNOWN',
@@ -71,14 +77,24 @@ export class ParserErrorJSON {
   }
 }
 
-export class ParserError extends Error {
-  readonly code: ParserErrorCode;
+function mapParserErrorCode(code: ParserErrorCode): AppErrorCode {
+  const mapping: Record<string, AppErrorCode> = {
+    [ParserErrorCode.INVALID_INPUT]: AppErrorCode.INVALID_INPUT,
+    [ParserErrorCode.EMPTY_INPUT]: AppErrorCode.EMPTY_INPUT,
+    [ParserErrorCode.SYNTAX_ERROR]: AppErrorCode.SYNTAX_ERROR,
+    [ParserErrorCode.ENCODING_ERROR]: AppErrorCode.ENCODING_ERROR,
+    [ParserErrorCode.TIMEOUT]: AppErrorCode.TIMEOUT,
+    [ParserErrorCode.UNSUPPORTED_TYPE]: AppErrorCode.UNSUPPORTED_TYPE
+  };
+  return mapping[code] ?? AppErrorCode.PARSE_ERROR;
+}
+
+export class ParserError extends AppError {
+  readonly parserCode: ParserErrorCode;
   readonly parserType: ParserType;
   readonly line?: number;
   readonly column?: number;
   readonly context?: string;
-  readonly cause?: Error;
-  readonly timestamp: number;
 
   constructor(
     code: ParserErrorCode,
@@ -86,20 +102,58 @@ export class ParserError extends Error {
     parserType: ParserType = ParserType.TEXT,
     options?: ParserErrorOptions
   ) {
-    super(message);
+    const appCode = mapParserErrorCode(code);
+    const appOptions: AppErrorOptions = {
+      category: ErrorCategory.PARSE,
+      severity: ParserError.inferSeverityFromCode(code),
+      recoverable: ParserError.inferRecoverableFromCode(code),
+      cause: options?.cause
+    };
+
+    super(appCode, message, appOptions);
+    
+    this.parserCode = code;
     this.name = 'ParserError';
-    this.code = code;
     this.parserType = parserType;
     this.line = options?.line;
     this.column = options?.column;
     this.context = options?.context;
-    this.cause = options?.cause;
-    this.timestamp = Date.now();
+  }
+
+  private static inferSeverityFromCode(code: ParserErrorCode): ErrorSeverity {
+    const criticalCodes = [
+      ParserErrorCode.RESOURCE_EXHAUSTED,
+      ParserErrorCode.ADAPTER_NOT_FOUND,
+      ParserErrorCode.TIMEOUT
+    ];
+    
+    const highCodes = [
+      ParserErrorCode.SYNTAX_ERROR,
+      ParserErrorCode.INVALID_FORMAT
+    ];
+
+    if (criticalCodes.includes(code)) return ErrorSeverity.CRITICAL;
+    if (highCodes.includes(code)) return ErrorSeverity.HIGH;
+    return ErrorSeverity.MEDIUM;
+  }
+
+  private static inferRecoverableFromCode(code: ParserErrorCode): boolean {
+    const unrecoverableCodes = [
+      ParserErrorCode.INVALID_INPUT,
+      ParserErrorCode.SYNTAX_ERROR,
+      ParserErrorCode.UNSUPPORTED_TYPE,
+      ParserErrorCode.ADAPTER_NOT_FOUND
+    ];
+    return !unrecoverableCodes.includes(code);
+  }
+
+  get code(): AppErrorCode {
+    return super.code;
   }
 
   toErrorInfo(): ParseErrorInfo {
     return {
-      code: this.code,
+      code: this.parserCode,
       message: this.message,
       line: this.line,
       column: this.column,
@@ -113,13 +167,13 @@ export class ParserError extends Error {
       ParserErrorCode.RESOURCE_EXHAUSTED,
       ParserErrorCode.ADAPTER_NOT_FOUND,
       ParserErrorCode.TIMEOUT
-    ].includes(this.code);
+    ].includes(this.parserCode);
   }
 
   toJSON(): ParserErrorJSON {
     return new ParserErrorJSON(
       this.name,
-      this.code,
+      this.parserCode,
       this.message,
       this.parserType,
       this.timestamp,
@@ -196,144 +250,5 @@ export class ParserError extends Error {
       `No adapter found for parser type: ${parserType}`,
       parserType
     );
-  }
-}
-
-export interface ParserWarningOptions {
-  line?: number;
-  column?: number;
-  severity?: 'warning' | 'info';
-}
-
-export class ParserWarning {
-  readonly code: string;
-  readonly message: string;
-  readonly line?: number;
-  readonly column?: number;
-  readonly severity: 'warning' | 'info';
-  readonly timestamp: number;
-
-  constructor(
-    code: string,
-    message: string,
-    options?: ParserWarningOptions
-  ) {
-    this.code = code;
-    this.message = message;
-    this.line = options?.line;
-    this.column = options?.column;
-    this.severity = options?.severity ?? 'warning';
-    this.timestamp = Date.now();
-  }
-
-  toWarningInfo(): ParseWarningInfo {
-    return {
-      code: this.code,
-      message: this.message,
-      line: this.line,
-      column: this.column,
-      severity: this.severity
-    };
-  }
-
-  static deprecatedFeature(feature: string, alternative?: string): ParserWarning {
-    const message = alternative
-      ? `Deprecated feature: ${feature}. Use ${alternative} instead.`
-      : `Deprecated feature: ${feature}`;
-    return new ParserWarning('DEPRECATED_FEATURE', message);
-  }
-
-  static performanceHint(hint: string): ParserWarning {
-    const options: ParserWarningOptions = { severity: 'info' };
-    return new ParserWarning('PERFORMANCE_HINT', hint, options);
-  }
-
-  static partialResult(reason: string): ParserWarning {
-    return new ParserWarning('PARTIAL_RESULT', `Partial result due to: ${reason}`);
-  }
-}
-
-export class ParseResultBuilder<T> {
-  private data: T;
-  private errors: ParseErrorInfo[] = [];
-  private warnings: ParseWarningInfo[] = [];
-  private metadata: Partial<ParseMetadata> = {};
-  private raw?: string;
-  private status: ParseStatus = ParseStatus.SUCCESS;
-
-  constructor(data: T) {
-    this.data = data;
-  }
-
-  addError(error: ParseErrorInfo | ParserError): ParseResultBuilder<T> {
-    const errorInfo = error instanceof ParserError ? error.toErrorInfo() : error;
-    this.errors.push(errorInfo);
-    if (errorInfo.severity === 'critical') {
-      this.status = ParseStatus.FAILED;
-    } else if (this.status === ParseStatus.SUCCESS) {
-      this.status = ParseStatus.PARTIAL;
-    }
-    return this;
-  }
-
-  addWarning(warning: ParseWarningInfo | ParserWarning): ParseResultBuilder<T> {
-    const warningInfo = warning instanceof ParserWarning ? warning.toWarningInfo() : warning;
-    this.warnings.push(warningInfo);
-    return this;
-  }
-
-  setMetadata(metadata: Partial<ParseMetadata>): ParseResultBuilder<T> {
-    if (metadata.parserType !== undefined) {
-      this.metadata.parserType = metadata.parserType;
-    }
-    if (metadata.parseTime !== undefined) {
-      this.metadata.parseTime = metadata.parseTime;
-    }
-    if (metadata.dataSize !== undefined) {
-      this.metadata.dataSize = metadata.dataSize;
-    }
-    if (metadata.cached !== undefined) {
-      this.metadata.cached = metadata.cached;
-    }
-    if (metadata.timestamp !== undefined) {
-      this.metadata.timestamp = metadata.timestamp;
-    }
-    if (metadata.version !== undefined) {
-      this.metadata.version = metadata.version;
-    }
-    return this;
-  }
-
-  setRaw(raw: string): ParseResultBuilder<T> {
-    this.raw = raw;
-    return this;
-  }
-
-  setStatus(status: ParseStatus): ParseResultBuilder<T> {
-    this.status = status;
-    return this;
-  }
-
-  setData(data: T): ParseResultBuilder<T> {
-    this.data = data;
-    return this;
-  }
-
-  build(): ParseResult<T> {
-    return {
-      data: this.data,
-      status: this.status,
-      errors: this.errors,
-      warnings: this.warnings,
-      metadata: {
-        parserType: this.metadata.parserType ?? ParserType.TEXT,
-        parseTime: this.metadata.parseTime ?? 0,
-        dataSize: this.metadata.dataSize ?? 0,
-        cached: this.metadata.cached ?? false,
-        timestamp: this.metadata.timestamp ?? Date.now(),
-        version: this.metadata.version ?? '1.0.0'
-      },
-      raw: this.raw
-    };
   }
 }

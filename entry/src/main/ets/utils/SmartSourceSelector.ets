@@ -1,103 +1,58 @@
 /**
  * SmartSourceSelector - 智能书源选择器
  * 根据书源性能、成功率、响应时间等指标智能选择最佳书源
+ * 使用 EnhancedSourceHealthManager 作为数据源
  */
 
 import { BookSource } from '../models/BookSource';
 import { Logger } from './Logger';
+import { EnhancedSourceHealthManager, EnhancedHealthRecord } from './EnhancedSourceHealthManager';
 
-/**
- * 书源性能指标
- */
-export interface SourcePerformanceMetrics {
-  sourceId: string;
-  sourceName: string;
-
-  // 成功率相关
-  totalRequests: number;
-  successfulRequests: number;
-  failedRequests: number;
-  successRate: number;
-
-  // 响应时间相关
-  avgResponseTime: number;
-  minResponseTime: number;
-  maxResponseTime: number;
-  recentResponseTimes: number[];
-
-  // 错误相关
-  consecutiveFailures: number;
-  lastErrorTime: number;
-  lastError: string;
-
-  // 时间戳
-  lastSuccessTime: number;
-  lastUsedTime: number;
-  firstUsedTime: number;
-
-  // 权重和评分
-  weight: number;
-  score: number;
-  healthScore: number;
-
-  // 状态
-  isEnabled: boolean;
-  isHealthy: boolean;
-  isBlacklisted: boolean;
-  blacklistUntil: number;
-}
-
-/**
- * 书源选择策略
- */
 export enum SourceSelectionStrategy {
-  BEST_PERFORMANCE = 'best_performance',      // 最佳性能
-  FASTEST_RESPONSE = 'fastest_response',      // 最快响应
-  HIGHEST_SUCCESS_RATE = 'highest_success_rate', // 最高成功率
-  BALANCED = 'balanced',                      // 平衡策略
-  ROUND_ROBIN = 'round_robin',                // 轮询
-  WEIGHTED_RANDOM = 'weighted_random'         // 加权随机
+  BEST_PERFORMANCE = 'best_performance',
+  FASTEST_RESPONSE = 'fastest_response',
+  HIGHEST_SUCCESS_RATE = 'highest_success_rate',
+  BALANCED = 'balanced',
+  ROUND_ROBIN = 'round_robin',
+  WEIGHTED_RANDOM = 'weighted_random'
 }
 
-/**
- * 书源选择配置
- */
 export interface SourceSelectionConfig {
   strategy: SourceSelectionStrategy;
-  maxConsecutiveFailures: number;
-  blacklistDuration: number;
-  healthCheckInterval: number;
   minHealthScore: number;
-  maxRecentResponseTimes: number;
+  blacklistDuration: number;
   enableAutoBlacklist: boolean;
-  enableAutoRecovery: boolean;
 }
 
-/**
- * 默认配置
- */
+export interface SourceMetrics {
+  score: number;
+  successRate: number;
+  avgResponseTime: number;
+  isBlacklisted: boolean;
+  sourceName: string;
+}
+
+export interface SourceMetricsWithId extends SourceMetrics {
+  sourceId: string;
+}
+
 const DEFAULT_SELECTION_CONFIG: SourceSelectionConfig = {
   strategy: SourceSelectionStrategy.BALANCED,
-  maxConsecutiveFailures: 3,
-  blacklistDuration: 300000, // 5分钟
-  healthCheckInterval: 60000, // 1分钟
   minHealthScore: 30,
-  maxRecentResponseTimes: 10,
-  enableAutoBlacklist: true,
-  enableAutoRecovery: true
+  blacklistDuration: 300000,
+  enableAutoBlacklist: true
 };
 
-/**
- * 智能书源选择器
- */
 export class SmartSourceSelector {
   private static instance: SmartSourceSelector | null = null;
-  private metrics: Map<string, SourcePerformanceMetrics> = new Map();
+  private healthManager: EnhancedSourceHealthManager;
   private config: SourceSelectionConfig;
   private roundRobinIndex: number = 0;
+  private blacklistMap: Map<string, number> = new Map();
 
   private constructor(config: SourceSelectionConfig = DEFAULT_SELECTION_CONFIG) {
     this.config = config;
+    this.healthManager = EnhancedSourceHealthManager.getInstance();
   }
 
   static getInstance(): SmartSourceSelector {
@@ -107,56 +62,6 @@ export class SmartSourceSelector {
     return SmartSourceSelector.instance;
   }
 
-  /**
-   * 初始化书源指标
-   */
-  initializeSources(sources: BookSource[]): void {
-    sources.forEach(source => {
-      if (!this.metrics.has(source.id)) {
-        this.metrics.set(source.id, this.createInitialMetrics(source));
-      } else {
-        // 更新启用状态
-        const metrics = this.metrics.get(source.id)!;
-        metrics.isEnabled = source.enabled;
-      }
-    });
-    Logger.info('SmartSourceSelector', `初始化了 ${sources.length} 个书源指标`);
-  }
-
-  /**
-   * 创建初始指标
-   */
-  private createInitialMetrics(source: BookSource): SourcePerformanceMetrics {
-    return {
-      sourceId: source.id,
-      sourceName: source.name,
-      totalRequests: 0,
-      successfulRequests: 0,
-      failedRequests: 0,
-      successRate: 0,
-      avgResponseTime: 0,
-      minResponseTime: Number.MAX_VALUE,
-      maxResponseTime: 0,
-      recentResponseTimes: [],
-      consecutiveFailures: 0,
-      lastErrorTime: 0,
-      lastError: '',
-      lastSuccessTime: 0,
-      lastUsedTime: 0,
-      firstUsedTime: Date.now(),
-      weight: 1.0,
-      score: 50,
-      healthScore: 100,
-      isEnabled: source.enabled,
-      isHealthy: true,
-      isBlacklisted: false,
-      blacklistUntil: 0
-    };
-  }
-
-  /**
-   * 选择最佳书源
-   */
   selectBestSource(sources: BookSource[], strategy?: SourceSelectionStrategy): BookSource | null {
     const useStrategy = strategy || this.config.strategy;
     const availableSources = this.filterAvailableSources(sources);
@@ -198,9 +103,6 @@ export class SmartSourceSelector {
     return selectedSource;
   }
 
-  /**
-   * 选择多个书源（按优先级排序）
-   */
   selectMultipleSources(sources: BookSource[], count: number, strategy?: SourceSelectionStrategy): BookSource[] {
     const useStrategy = strategy || this.config.strategy;
     const availableSources = this.filterAvailableSources(sources);
@@ -209,36 +111,32 @@ export class SmartSourceSelector {
       return [];
     }
 
-    // 根据策略排序
     const sortedSources = this.sortSourcesByStrategy(availableSources, useStrategy);
-
-    // 返回前N个
     return sortedSources.slice(0, Math.min(count, sortedSources.length));
   }
 
-  /**
-   * 过滤可用书源
-   */
   private filterAvailableSources(sources: BookSource[]): BookSource[] {
     const now = Date.now();
     return sources.filter(source => {
-      const metrics = this.metrics.get(source.id);
-      if (!metrics) {
-        return source.enabled;
-      }
-
-      // 检查是否启用
-      if (!source.enabled || !metrics.isEnabled) {
+      if (!source.enabled) {
         return false;
       }
 
-      // 检查是否在黑名单中
-      if (metrics.isBlacklisted && now < metrics.blacklistUntil) {
+      const record = this.healthManager.getRecord(source.id);
+      if (!record) {
+        return true;
+      }
+
+      if (!record.isEnabled || record.isPermanentlyDisabled) {
         return false;
       }
 
-      // 检查健康分数
-      if (metrics.healthScore < this.config.minHealthScore) {
+      const blacklistedUntil = this.blacklistMap.get(source.id);
+      if (blacklistedUntil && now < blacklistedUntil) {
+        return false;
+      }
+
+      if (record.score < this.config.minHealthScore) {
         return false;
       }
 
@@ -246,50 +144,32 @@ export class SmartSourceSelector {
     });
   }
 
-  /**
-   * 按性能选择
-   */
   private selectByPerformance(sources: BookSource[]): BookSource {
     return this.sortSourcesByStrategy(sources, SourceSelectionStrategy.BEST_PERFORMANCE)[0];
   }
 
-  /**
-   * 按响应时间选择
-   */
   private selectByResponseTime(sources: BookSource[]): BookSource {
     return this.sortSourcesByStrategy(sources, SourceSelectionStrategy.FASTEST_RESPONSE)[0];
   }
 
-  /**
-   * 按成功率选择
-   */
   private selectBySuccessRate(sources: BookSource[]): BookSource {
     return this.sortSourcesByStrategy(sources, SourceSelectionStrategy.HIGHEST_SUCCESS_RATE)[0];
   }
 
-  /**
-   * 平衡策略选择
-   */
   private selectByBalanced(sources: BookSource[]): BookSource {
     return this.sortSourcesByStrategy(sources, SourceSelectionStrategy.BALANCED)[0];
   }
 
-  /**
-   * 轮询选择
-   */
   private selectByRoundRobin(sources: BookSource[]): BookSource {
     const source = sources[this.roundRobinIndex % sources.length];
     this.roundRobinIndex++;
     return source;
   }
 
-  /**
-   * 加权随机选择
-   */
   private selectByWeightedRandom(sources: BookSource[]): BookSource {
     const weights = sources.map(source => {
-      const metrics = this.metrics.get(source.id);
-      return metrics ? metrics.weight : 1.0;
+      const record = this.healthManager.getRecord(source.id);
+      return record ? Math.max(record.score, 1) : 50;
     });
 
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
@@ -305,30 +185,33 @@ export class SmartSourceSelector {
     return sources[0];
   }
 
-  /**
-   * 根据策略排序书源
-   */
   private sortSourcesByStrategy(sources: BookSource[], strategy: SourceSelectionStrategy): BookSource[] {
     return sources.slice().sort((a, b) => {
-      const metricsA = this.metrics.get(a.id);
-      const metricsB = this.metrics.get(b.id);
+      const recordA = this.healthManager.getRecord(a.id);
+      const recordB = this.healthManager.getRecord(b.id);
 
-      if (!metricsA && !metricsB) return 0;
-      if (!metricsA) return 1;
-      if (!metricsB) return -1;
+      if (!recordA && !recordB) return 0;
+      if (!recordA) return 1;
+      if (!recordB) return -1;
 
       switch (strategy) {
         case SourceSelectionStrategy.BEST_PERFORMANCE:
-          return metricsB.score - metricsA.score;
+          return recordB.score - recordA.score;
 
         case SourceSelectionStrategy.FASTEST_RESPONSE:
-          return metricsA.avgResponseTime - metricsB.avgResponseTime;
+          return recordA.avgResponseTime - recordB.avgResponseTime;
 
-        case SourceSelectionStrategy.HIGHEST_SUCCESS_RATE:
-          return metricsB.successRate - metricsA.successRate;
+        case SourceSelectionStrategy.HIGHEST_SUCCESS_RATE: {
+          const rateA = recordA.requestCount > 0 ? recordA.successCount / recordA.requestCount : 0;
+          const rateB = recordB.requestCount > 0 ? recordB.successCount / recordB.requestCount : 0;
+          return rateB - rateA;
+        }
 
-        case SourceSelectionStrategy.BALANCED:
-          return metricsB.healthScore - metricsA.healthScore;
+        case SourceSelectionStrategy.BALANCED: {
+          const scoreA = this.calculateBalancedScore(recordA);
+          const scoreB = this.calculateBalancedScore(recordB);
+          return scoreB - scoreA;
+        }
 
         default:
           return 0;
@@ -336,243 +219,167 @@ export class SmartSourceSelector {
     });
   }
 
-  /**
-   * 记录请求成功
-   */
+  private calculateBalancedScore(record: EnhancedHealthRecord): number {
+    const successRate = record.requestCount > 0 ? record.successCount / record.requestCount : 0.5;
+    const responseScore = Math.max(0, 100 - record.avgResponseTime / 100);
+    return record.score * 0.5 + successRate * 30 + responseScore * 0.2;
+  }
+
   recordSuccess(sourceId: string, responseTime: number): void {
-    const metrics = this.metrics.get(sourceId);
-    if (!metrics) return;
+    const record = this.healthManager.getRecord(sourceId);
+    if (!record) return;
 
-    const now = Date.now();
+    this.healthManager.recordSuccess(
+      sourceId,
+      record.sourceName,
+      record.sourceUrl,
+      responseTime
+    );
 
-    metrics.totalRequests++;
-    metrics.successfulRequests++;
-    metrics.consecutiveFailures = 0;
-    metrics.lastSuccessTime = now;
-    metrics.lastUsedTime = now;
-
-    // 更新响应时间
-    this.updateResponseTime(metrics, responseTime);
-
-    // 更新成功率
-    this.updateSuccessRate(metrics);
-
-    // 更新评分
-    this.updateScore(metrics);
-
-    // 检查是否需要从黑名单中移除
-    if (metrics.isBlacklisted && now >= metrics.blacklistUntil) {
-      metrics.isBlacklisted = false;
-      Logger.info('SmartSourceSelector', `书源 ${metrics.sourceName} 已从黑名单中移除`);
+    if (this.blacklistMap.has(sourceId)) {
+      this.blacklistMap.delete(sourceId);
+      Logger.info('SmartSourceSelector', `书源 ${record.sourceName} 已从黑名单中移除`);
     }
 
     Logger.debug('SmartSourceSelector',
-      `书源 ${metrics.sourceName} 请求成功: 响应时间=${responseTime}ms, 成功率=${(metrics.successRate * 100).toFixed(1)}%`);
+      `书源 ${record.sourceName} 请求成功: 响应时间=${responseTime}ms`);
   }
 
-  /**
-   * 记录请求失败
-   */
   recordFailure(sourceId: string, error: string): void {
-    const metrics = this.metrics.get(sourceId);
-    if (!metrics) return;
+    const record = this.healthManager.getRecord(sourceId);
+    if (!record) return;
 
-    const now = Date.now();
+    const errorType = this.classifyError(error);
+    this.healthManager.recordFailure(
+      sourceId,
+      record.sourceName,
+      record.sourceUrl,
+      errorType,
+      error
+    );
 
-    metrics.totalRequests++;
-    metrics.failedRequests++;
-    metrics.consecutiveFailures++;
-    metrics.lastErrorTime = now;
-    metrics.lastError = error;
-    metrics.lastUsedTime = now;
-
-    // 更新成功率
-    this.updateSuccessRate(metrics);
-
-    // 更新评分
-    this.updateScore(metrics);
-
-    // 检查是否需要加入黑名单
-    if (this.config.enableAutoBlacklist &&
-      metrics.consecutiveFailures >= this.config.maxConsecutiveFailures) {
+    if (this.config.enableAutoBlacklist && record.consecutiveFailures >= 3) {
       this.blacklistSource(sourceId);
     }
 
     Logger.warn('SmartSourceSelector',
-      `书源 ${metrics.sourceName} 请求失败: ${error}, 连续失败=${metrics.consecutiveFailures}`);
+      `书源 ${record.sourceName} 请求失败: ${error}`);
   }
 
-  /**
-   * 更新响应时间
-   */
-  private updateResponseTime(metrics: SourcePerformanceMetrics, responseTime: number): void {
-    metrics.recentResponseTimes.push(responseTime);
-
-    if (metrics.recentResponseTimes.length > this.config.maxRecentResponseTimes) {
-      metrics.recentResponseTimes.shift();
-    }
-
-    metrics.minResponseTime = Math.min(metrics.minResponseTime, responseTime);
-    metrics.maxResponseTime = Math.max(metrics.maxResponseTime, responseTime);
-
-    const sum = metrics.recentResponseTimes.reduce((a, b) => a + b, 0);
-    metrics.avgResponseTime = sum / metrics.recentResponseTimes.length;
+  private classifyError(error: string): string {
+    const msg = error.toLowerCase();
+    if (msg.includes('timeout')) return 'timeout';
+    if (msg.includes('dns')) return 'dns';
+    if (msg.includes('ssl') || msg.includes('certificate')) return 'ssl';
+    if (msg.includes('network') || msg.includes('connection')) return 'network';
+    if (msg.includes('404')) return 'not_found';
+    if (msg.includes('500') || msg.includes('502') || msg.includes('503')) return 'server';
+    return 'unknown';
   }
 
-  /**
-   * 更新成功率
-   */
-  private updateSuccessRate(metrics: SourcePerformanceMetrics): void {
-    if (metrics.totalRequests > 0) {
-      metrics.successRate = metrics.successfulRequests / metrics.totalRequests;
-    }
-  }
-
-  /**
-   * 更新评分
-   */
-  private updateScore(metrics: SourcePerformanceMetrics): void {
-    // 成功率权重: 40%
-    const successRateScore = metrics.successRate * 40;
-
-    // 响应时间权重: 30% (响应时间越短分数越高)
-    const responseTimeScore = Math.max(0, 30 - (metrics.avgResponseTime / 1000));
-
-    // 健康分数权重: 30%
-    const healthScoreComponent = metrics.healthScore * 0.3;
-
-    metrics.score = successRateScore + responseTimeScore + healthScoreComponent;
-
-    // 更新健康分数
-    this.updateHealthScore(metrics);
-  }
-
-  /**
-   * 更新健康分数
-   */
-  private updateHealthScore(metrics: SourcePerformanceMetrics): void {
-    let healthScore = 100;
-
-    // 根据连续失败次数扣分
-    healthScore -= metrics.consecutiveFailures * 10;
-
-    // 根据成功率调整
-    healthScore *= metrics.successRate;
-
-    // 根据响应时间调整
-    if (metrics.avgResponseTime > 5000) {
-      healthScore *= 0.8;
-    } else if (metrics.avgResponseTime > 3000) {
-      healthScore *= 0.9;
-    }
-
-    metrics.healthScore = Math.max(0, Math.min(100, healthScore));
-    metrics.isHealthy = metrics.healthScore >= this.config.minHealthScore;
-  }
-
-  /**
-   * 将书源加入黑名单
-   */
   blacklistSource(sourceId: string, duration?: number): void {
-    const metrics = this.metrics.get(sourceId);
-    if (!metrics) return;
+    const record = this.healthManager.getRecord(sourceId);
+    if (!record) return;
 
     const blacklistDuration = duration || this.config.blacklistDuration;
-    metrics.isBlacklisted = true;
-    metrics.blacklistUntil = Date.now() + blacklistDuration;
+    this.blacklistMap.set(sourceId, Date.now() + blacklistDuration);
 
     Logger.warn('SmartSourceSelector',
-      `书源 ${metrics.sourceName} 已加入黑名单，持续 ${blacklistDuration / 1000} 秒`);
+      `书源 ${record.sourceName} 已加入黑名单，持续 ${blacklistDuration / 1000} 秒`);
   }
 
-  /**
-   * 从黑名单中移除书源
-   */
   unblacklistSource(sourceId: string): void {
-    const metrics = this.metrics.get(sourceId);
-    if (!metrics) return;
-
-    metrics.isBlacklisted = false;
-    metrics.blacklistUntil = 0;
-    metrics.consecutiveFailures = 0;
-
-    Logger.info('SmartSourceSelector', `书源 ${metrics.sourceName} 已从黑名单中移除`);
+    this.blacklistMap.delete(sourceId);
+    Logger.info('SmartSourceSelector', `书源已从黑名单中移除`);
   }
 
-  /**
-   * 获取书源指标
-   */
-  getMetrics(sourceId: string): SourcePerformanceMetrics | undefined {
-    return this.metrics.get(sourceId);
+  isBlacklisted(sourceId: string): boolean {
+    const blacklistedUntil = this.blacklistMap.get(sourceId);
+    return blacklistedUntil ? Date.now() < blacklistedUntil : false;
   }
 
-  /**
-   * 获取所有书源指标
-   */
-  getAllMetrics(): SourcePerformanceMetrics[] {
-    return Array.from(this.metrics.values());
+  getHealthManager(): EnhancedSourceHealthManager {
+    return this.healthManager;
   }
 
-  /**
-   * 获取健康书源数量
-   */
-  getHealthySourceCount(): number {
-    return Array.from(this.metrics.values()).filter(m => m.isHealthy && m.isEnabled).length;
-  }
-
-  /**
-   * 获取书源统计报告
-   */
   getReport(): string {
-    const allMetrics = Array.from(this.metrics.values());
-    const healthyCount = allMetrics.filter(m => m.isHealthy).length;
-    const blacklistedCount = allMetrics.filter(m => m.isBlacklisted).length;
+    const records = this.healthManager.getAllHealthRecords();
+    const blacklistedCount = Array.from(this.blacklistMap.entries())
+      .filter((entry: [string, number]) => Date.now() < entry[1]).length;
 
     let report = '=== 智能书源选择器报告 ===\n';
-    report += `总书源数: ${allMetrics.length}\n`;
-    report += `健康书源: ${healthyCount}\n`;
+    report += `总书源数: ${records.length}\n`;
+    report += `健康书源: ${records.filter(r => r.score >= this.config.minHealthScore).length}\n`;
     report += `黑名单书源: ${blacklistedCount}\n\n`;
 
-    allMetrics.forEach(m => {
-      report += `【${m.sourceName}】\n`;
-      report += `  成功率: ${(m.successRate * 100).toFixed(1)}%\n`;
-      report += `  平均响应: ${m.avgResponseTime.toFixed(0)}ms\n`;
-      report += `  健康分数: ${m.healthScore.toFixed(1)}\n`;
-      report += `  评分: ${m.score.toFixed(1)}\n`;
-      report += `  状态: ${m.isHealthy ? '健康' : '不健康'} ${m.isBlacklisted ? '(黑名单)' : ''}\n\n`;
+    records.forEach(r => {
+      const successRate = r.requestCount > 0 ? (r.successCount / r.requestCount * 100).toFixed(1) : '0.0';
+      const isBlacklisted = this.isBlacklisted(r.sourceId);
+      report += `【${r.sourceName}】\n`;
+      report += `  成功率: ${successRate}%\n`;
+      report += `  平均响应: ${r.avgResponseTime.toFixed(0)}ms\n`;
+      report += `  评分: ${r.score}\n`;
+      report += `  状态: ${r.isEnabled ? '启用' : '禁用'} ${isBlacklisted ? '(黑名单)' : ''}\n\n`;
     });
 
     return report;
   }
 
-  /**
-   * 重置所有指标
-   */
   reset(): void {
-    this.metrics.clear();
+    this.blacklistMap.clear();
     this.roundRobinIndex = 0;
-    Logger.info('SmartSourceSelector', '所有书源指标已重置');
+    Logger.info('SmartSourceSelector', '选择器状态已重置');
   }
 
-  /**
-   * 更新配置
-   */
   updateConfig(config: Partial<SourceSelectionConfig>): void {
-    this.config = this.mergeConfig(this.config, config);
+    if (config.strategy !== undefined) this.config.strategy = config.strategy;
+    if (config.minHealthScore !== undefined) this.config.minHealthScore = config.minHealthScore;
+    if (config.blacklistDuration !== undefined) this.config.blacklistDuration = config.blacklistDuration;
+    if (config.enableAutoBlacklist !== undefined) this.config.enableAutoBlacklist = config.enableAutoBlacklist;
     Logger.info('SmartSourceSelector', '配置已更新');
   }
 
-  private mergeConfig(base: SourceSelectionConfig, update: Partial<SourceSelectionConfig>): SourceSelectionConfig {
-    return {
-      strategy: update.strategy !== undefined ? update.strategy : base.strategy,
-      maxConsecutiveFailures: update.maxConsecutiveFailures !== undefined ? update.maxConsecutiveFailures : base.maxConsecutiveFailures,
-      blacklistDuration: update.blacklistDuration !== undefined ? update.blacklistDuration : base.blacklistDuration,
-      healthCheckInterval: update.healthCheckInterval !== undefined ? update.healthCheckInterval : base.healthCheckInterval,
-      minHealthScore: update.minHealthScore !== undefined ? update.minHealthScore : base.minHealthScore,
-      maxRecentResponseTimes: update.maxRecentResponseTimes !== undefined ? update.maxRecentResponseTimes : base.maxRecentResponseTimes,
-      enableAutoBlacklist: update.enableAutoBlacklist !== undefined ? update.enableAutoBlacklist : base.enableAutoBlacklist,
-      enableAutoRecovery: update.enableAutoRecovery !== undefined ? update.enableAutoRecovery : base.enableAutoRecovery
+  initializeSources(sources: BookSource[]): void {
+    for (const source of sources) {
+      this.healthManager.initializeSourceIfNeeded(source.id, source.name, source.url, source.enabled);
+    }
+    Logger.info('SmartSourceSelector', `已初始化 ${sources.length} 个书源`);
+  }
+
+  getMetrics(sourceId: string): SourceMetrics | null {
+    const record = this.healthManager.getRecord(sourceId);
+    if (!record) return null;
+    
+    const successRate = record.requestCount > 0 ? record.successCount / record.requestCount : 0;
+    const metrics: SourceMetrics = {
+      score: record.score,
+      successRate: successRate,
+      avgResponseTime: record.avgResponseTime,
+      isBlacklisted: this.isBlacklisted(sourceId),
+      sourceName: record.sourceName
     };
+    return metrics;
+  }
+
+  getAllMetrics(): SourceMetricsWithId[] {
+    const records = this.healthManager.getAllHealthRecords();
+    return records.map((record: EnhancedHealthRecord): SourceMetricsWithId => {
+      const successRate = record.requestCount > 0 ? record.successCount / record.requestCount : 0;
+      const metrics: SourceMetricsWithId = {
+        sourceId: record.sourceId,
+        sourceName: record.sourceName,
+        score: record.score,
+        successRate: successRate,
+        avgResponseTime: record.avgResponseTime,
+        isBlacklisted: this.isBlacklisted(record.sourceId)
+      };
+      return metrics;
+    });
+  }
+
+  getHealthySourceCount(): number {
+    const records = this.healthManager.getAllHealthRecords();
+    return records.filter(r => r.score >= this.config.minHealthScore && r.isEnabled).length;
   }
 }
 

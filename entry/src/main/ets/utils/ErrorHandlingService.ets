@@ -5,7 +5,7 @@
 
 import { Logger } from './Logger';
 import { networkConfigManager, DegradationConfig } from './NetworkConfig';
-import { smartSourceSelector } from './SmartSourceSelector';
+import { SmartSourceSelector } from './SmartSourceSelector';
 
 /**
  * 错误类型
@@ -345,12 +345,10 @@ export class ErrorHandlingService {
    * 处理网络错误
    */
   async handleNetworkError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
-    // 记录书源失败
     if (context?.sourceId) {
-      smartSourceSelector.recordFailure(context.sourceId, error.message);
+      SmartSourceSelector.getInstance().recordFailure(context.sourceId, error.message);
     }
 
-    // 检查是否可以重试
     if (context && context.retryCount < context.maxRetries) {
       return {
         success: false,
@@ -361,7 +359,6 @@ export class ErrorHandlingService {
       };
     }
 
-    // 切换书源
     return {
       success: false,
       strategy: DegradationStrategy.FALLBACK_SOURCE,
@@ -374,12 +371,10 @@ export class ErrorHandlingService {
    * 处理超时错误
    */
   async handleTimeoutError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
-    // 记录书源失败
     if (context?.sourceId) {
-      smartSourceSelector.recordFailure(context.sourceId, '请求超时');
+      SmartSourceSelector.getInstance().recordFailure(context.sourceId, '请求超时');
     }
 
-    // 检查是否可以重试
     if (context && context.retryCount < context.maxRetries) {
       return {
         success: false,
@@ -390,7 +385,6 @@ export class ErrorHandlingService {
       };
     }
 
-    // 切换书源
     return {
       success: false,
       strategy: DegradationStrategy.FALLBACK_SOURCE,
@@ -403,12 +397,10 @@ export class ErrorHandlingService {
    * 处理解析错误
    */
   async handleParseError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
-    // 记录书源失败
     if (context?.sourceId) {
-      smartSourceSelector.recordFailure(context.sourceId, '解析错误: ' + error.message);
+      SmartSourceSelector.getInstance().recordFailure(context.sourceId, '解析错误: ' + error.message);
     }
 
-    // 解析错误通常不可重试，直接切换书源
     return {
       success: false,
       strategy: DegradationStrategy.FALLBACK_SOURCE,
@@ -417,16 +409,11 @@ export class ErrorHandlingService {
     };
   }
 
-  /**
-   * 处理服务器错误
-   */
   async handleServerError(error: Error, context?: ErrorContext): Promise<DegradationResult> {
-    // 记录书源失败
     if (context?.sourceId) {
-      smartSourceSelector.recordFailure(context.sourceId, '服务器错误');
+      SmartSourceSelector.getInstance().recordFailure(context.sourceId, '服务器错误');
     }
 
-    // 检查是否可以重试
     if (context && context.retryCount < context.maxRetries) {
       return {
         success: false,
@@ -576,3 +563,84 @@ export class ErrorHandlingService {
 }
 
 export const errorHandlingService = ErrorHandlingService.getInstance();
+
+export class AppError extends Error {
+  type: ErrorType;
+  code: string;
+  userMessage: string;
+
+  constructor(
+    type: ErrorType,
+    message: string,
+    code: string = '',
+    userMessage: string = ''
+  ) {
+    super(message);
+    this.type = type;
+    this.code = code;
+    this.userMessage = userMessage || this.getDefaultUserMessage(type);
+  }
+
+  private getDefaultUserMessage(type: ErrorType): string {
+    const messages: Record<ErrorType, string> = {
+      [ErrorType.NETWORK]: '网络连接失败，请检查网络设置',
+      [ErrorType.TIMEOUT]: '请求超时，请重试',
+      [ErrorType.PARSE]: '数据解析失败，请重试',
+      [ErrorType.AUTH]: '认证失败，请检查权限',
+      [ErrorType.NOT_FOUND]: '资源未找到',
+      [ErrorType.SERVER]: '服务器错误，请稍后重试',
+      [ErrorType.UNKNOWN]: '发生未知错误，请重试'
+    };
+    return messages[type] || messages[ErrorType.UNKNOWN];
+  }
+}
+
+export class AppErrorHandler {
+  static handleError(error: Error): string {
+    if (error instanceof AppError) {
+      return error.userMessage;
+    }
+
+    const message = error.message.toLowerCase();
+
+    if (message.includes('timeout')) return '请求超时，请重试';
+    if (message.includes('network') || message.includes('http') || message.includes('fetch')) {
+      return '网络连接失败，请检查网络设置';
+    }
+    if (message.includes('parse') || message.includes('json')) {
+      return '数据解析失败，请重试';
+    }
+    if (message.includes('database') || message.includes('sql')) {
+      return '数据库操作失败，请重试';
+    }
+    if (message.includes('file') || message.includes('permission')) {
+      return '文件操作失败，请检查文件权限';
+    }
+
+    return '发生未知错误，请重试';
+  }
+
+  static createNetworkError(message: string, code: string = ''): AppError {
+    return new AppError(ErrorType.NETWORK, message, code);
+  }
+
+  static createTimeoutError(message: string, code: string = ''): AppError {
+    return new AppError(ErrorType.TIMEOUT, message, code);
+  }
+
+  static createParseError(message: string, code: string = ''): AppError {
+    return new AppError(ErrorType.PARSE, message, code);
+  }
+
+  static createAuthError(message: string, code: string = ''): AppError {
+    return new AppError(ErrorType.AUTH, message, code);
+  }
+
+  static createNotFoundError(message: string, code: string = ''): AppError {
+    return new AppError(ErrorType.NOT_FOUND, message, code);
+  }
+
+  static createServerError(message: string, code: string = ''): AppError {
+    return new AppError(ErrorType.SERVER, message, code);
+  }
+}

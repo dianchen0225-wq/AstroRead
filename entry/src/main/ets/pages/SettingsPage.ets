@@ -1,13 +1,24 @@
 import { themeManager, ThemeMode } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { NavigationManager } from '../common/NavigationManager';
-import { CommonNavBar, SectionHeader } from '../components/CommonNavBar';
+import { AppNavBar, SectionHeader } from '../components/AppNavigation';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { showToast } from '../utils/ToastUtils';
 import { floatingNavManager, FloatingNavConfig, FloatingNavPosition } from '../common/FloatingNavManager';
+import display from '@ohos.display';
+
+// 设置存储键
+const SETTINGS_STORAGE_KEY = 'app_settings';
+
+// 应用设置接口
+interface AppSettings {
+  autoUpdate: boolean;
+  cacheSize: string;
+  readBackground: string;
+}
 
 interface SettingItem {
   id: string;
@@ -48,10 +59,15 @@ export struct SettingsPage {
   @Local filteredGroups: SettingGroup[] = [];
   @Local floatingNavConfig: FloatingNavConfig = floatingNavManager.getConfig();
   @Local showFloatingNavSettings: boolean = false;
+  @Local showThemeModeSheet: boolean = false;
+  @Local showReadBackgroundSheet: boolean = false;
+  @Local showFeedbackSheet: boolean = false;
+  @Local screenWidth: number = 360;
+  @Local screenHeight: number = 780;
+  @Local isTablet: boolean = false;
   @Param safeAreaTop: number = 0;
   @Param safeAreaBottom: number = 0;
   
-  private isComponentActive: boolean = false;
   private settingGroups: SettingGroup[] = [];
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
@@ -63,19 +79,51 @@ export struct SettingsPage {
   };
 
   aboutToAppear(): void {
-    this.isComponentActive = true;
+    // Component initialized
     this.isLightMode = themeManager.isLightTheme();
     this.themeModeIndex = this.getThemeModeIndex();
     themeManager.addListener(this.themeListener);
     floatingNavManager.addConfigChangeListener(this.floatingNavListener);
     
+    this.updateScreenSize();
+    this.loadSettings();
     this.loadReadConfig();
     this.initSettingGroups();
     this.filteredGroups = this.settingGroups.slice();
   }
 
+  // 更新屏幕尺寸和响应式状态
+  private updateScreenSize(): void {
+    try {
+      const displayInfo = display.getDefaultDisplaySync();
+      this.screenWidth = displayInfo.width;
+      this.screenHeight = displayInfo.height;
+      // 平板判断：宽度大于600vp认为是平板
+      this.isTablet = this.screenWidth > 600;
+      Logger.info('SettingsPage', `屏幕尺寸: ${this.screenWidth}x${this.screenHeight}, 是否平板: ${this.isTablet}`);
+    } catch (error) {
+      Logger.error('SettingsPage', `获取屏幕尺寸失败: ${error}`);
+    }
+  }
+
+  // 获取响应式内容宽度
+  private getContentWidth(): string {
+    if (this.isTablet) {
+      return '70%';
+    }
+    return '100%';
+  }
+
+  // 获取响应式最大内容宽度
+  private getMaxContentWidth(): number {
+    if (this.isTablet) {
+      return 600;
+    }
+    return Infinity;
+  }
+
   aboutToDisappear(): void {
-    this.isComponentActive = false;
+    // Component destroyed
     themeManager.removeListener(this.themeListener);
     floatingNavManager.removeConfigChangeListener(this.floatingNavListener);
   }
@@ -102,6 +150,36 @@ export struct SettingsPage {
       this.lineSpacing = this.readConfig.lineSpacing;
     } catch (error) {
       Logger.error('SettingsPage', `加载阅读配置失败: ${error}`);
+    }
+  }
+
+  // 加载应用设置
+  private loadSettings(): void {
+    try {
+      const settingsStr = AppStorage.get<string>(SETTINGS_STORAGE_KEY);
+      if (settingsStr) {
+        const settings: AppSettings = JSON.parse(settingsStr);
+        this.autoUpdate = settings.autoUpdate !== undefined ? settings.autoUpdate : true;
+        this.cacheSize = settings.cacheSize || '128MB';
+        Logger.info('SettingsPage', '设置加载成功');
+      }
+    } catch (error) {
+      Logger.error('SettingsPage', `加载设置失败: ${error}`);
+    }
+  }
+
+  // 保存应用设置
+  private saveSettings(): void {
+    try {
+      const settings: AppSettings = {
+        autoUpdate: this.autoUpdate,
+        cacheSize: this.cacheSize,
+        readBackground: '默认'
+      };
+      AppStorage.set(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+      Logger.info('SettingsPage', '设置保存成功');
+    } catch (error) {
+      Logger.error('SettingsPage', `保存设置失败: ${error}`);
     }
   }
 
@@ -146,7 +224,8 @@ export struct SettingsPage {
             title: '阅读背景',
             subtitle: '默认',
             icon: '🖼️',
-            type: 'navigation'
+            type: 'navigation',
+            route: 'ReadBackgroundSheet'
           }
         ]
       },
@@ -203,7 +282,7 @@ export struct SettingsPage {
             route: 'PerformanceMonitorPage'
           },
           {
-            id: 'booksource_repair',
+            id: 'book_source_repair',
             title: '书源诊断修复',
             subtitle: '诊断并修复书源访问问题',
             icon: '🔧',
@@ -229,7 +308,8 @@ export struct SettingsPage {
             title: '意见反馈',
             subtitle: '帮助我们改进',
             icon: '💬',
-            type: 'navigation'
+            type: 'navigation',
+            route: 'FeedbackSheet'
           }
         ]
       }
@@ -280,6 +360,8 @@ export struct SettingsPage {
 
   private async toggleAutoUpdate(): Promise<void> {
     this.autoUpdate = !this.autoUpdate;
+    this.saveSettings();
+    this.initSettingGroups();
     showToast({
       message: this.autoUpdate ? '已开启自动更新' : '已关闭自动更新'
     });
@@ -289,8 +371,11 @@ export struct SettingsPage {
     this.isClearingCache = true;
     
     try {
+      // 模拟清除缓存操作
       await new Promise<void>(resolve => setTimeout(resolve, 1000));
       this.cacheSize = '0MB';
+      this.saveSettings();
+      this.initSettingGroups();
       showToast({
         message: '缓存已清除'
       });
@@ -350,6 +435,12 @@ export struct SettingsPage {
         this.showAboutSheet = true;
       } else if (item.route === 'FloatingNavSettings') {
         this.showFloatingNavSettings = true;
+      } else if (item.route === 'ThemeModeSheet') {
+        this.showThemeModeSheet = true;
+      } else if (item.route === 'ReadBackgroundSheet') {
+        this.showReadBackgroundSheet = true;
+      } else if (item.route === 'FeedbackSheet') {
+        this.showFeedbackSheet = true;
       }
     } else if (item.type === 'action' && item.action) {
       item.action();
@@ -359,35 +450,47 @@ export struct SettingsPage {
   }
 
   build() {
-    Column() {
-      CommonNavBar({
-        title: $r('app.string.settings'),
-        showBack: true,
-        safeAreaTop: this.safeAreaTop
-      })
+    Stack() {
+      Column() {
+        AppNavBar({
+          title: $r('app.string.settings'),
+          showBack: true,
+          safeAreaTop: this.safeAreaTop
+        })
 
-      this.buildSearchBar()
+        this.buildSearchBar()
 
-      Scroll() {
-        Column() {
-          ForEach(this.filteredGroups, (group: SettingGroup) => {
-            this.buildSettingGroup(group)
-          })
+        Scroll() {
+          Column() {
+            ForEach(this.filteredGroups, (group: SettingGroup) => {
+              this.buildSettingGroup(group)
+            })
 
-          if (this.filteredGroups.length === 0) {
-            this.buildEmptySearchResult()
+            if (this.filteredGroups.length === 0) {
+              this.buildEmptySearchResult()
+            }
           }
+          .width(this.getContentWidth())
+          .padding({ bottom: DesignSystem.Spacing.xxl + this.safeAreaBottom })
         }
         .width('100%')
-        .padding({ bottom: DesignSystem.Spacing.xxl + this.safeAreaBottom })
+        .constraintSize({ maxWidth: this.getMaxContentWidth() })
+        .layoutWeight(1)
+        .scrollBar(BarState.Auto)
       }
       .width('100%')
-      .layoutWeight(1)
-      .scrollBar(BarState.Auto)
+      .height('100%')
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+      .alignItems(this.isTablet ? HorizontalAlign.Center : HorizontalAlign.Start)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+    .onAreaChange((oldArea: Area, newArea: Area) => {
+      // 监听区域变化，更新屏幕尺寸
+      if (newArea.width !== oldArea.width || newArea.height !== oldArea.height) {
+        this.updateScreenSize();
+      }
+    })
     .bindSheet($$this.showClearCacheConfirm, this.buildClearCacheSheet(), {
       height: 'auto',
       backgroundColor: Color.Transparent,
@@ -402,6 +505,21 @@ export struct SettingsPage {
       height: '90%',
       backgroundColor: Color.Transparent,
       dragBar: true
+    })
+    .bindSheet($$this.showThemeModeSheet, this.buildThemeModeSheet(), {
+      height: 'auto',
+      backgroundColor: Color.Transparent,
+      dragBar: false
+    })
+    .bindSheet($$this.showReadBackgroundSheet, this.buildReadBackgroundSheet(), {
+      height: 'auto',
+      backgroundColor: Color.Transparent,
+      dragBar: false
+    })
+    .bindSheet($$this.showFeedbackSheet, this.buildFeedbackSheet(), {
+      height: 'auto',
+      backgroundColor: Color.Transparent,
+      dragBar: false
     })
   }
 
@@ -634,7 +752,7 @@ export struct SettingsPage {
               LoadingProgress()
                 .width(20)
                 .height(20)
-                .color('#FFFFFF')
+                .color(('sys.color.ohos_id_color_text_primary_contrary'))
             } else {
               Text('确定')
                 .fontSize(DesignSystem.Typography.size.base)
@@ -1124,5 +1242,138 @@ export struct SettingsPage {
       .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
     }
     .width('100%')
+  }
+
+  @Builder
+  buildThemeModeSheet(): void {
+    Column() {
+      Column() {
+        Text('主题模式')
+          .fontSize(DesignSystem.Typography.size.lg)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+          .margin({ bottom: DesignSystem.Spacing.lg })
+
+        Column({ space: DesignSystem.Spacing.sm }) {
+          ForEach(['浅色模式', '深色模式', '跟随系统'], (mode: string, index: number) => {
+            Row() {
+              Text(mode)
+                .fontSize(DesignSystem.Typography.size.base)
+                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                .layoutWeight(1)
+
+              if (this.themeModeIndex === index) {
+                Text('✓')
+                  .fontSize(DesignSystem.Typography.size.base)
+                  .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+              }
+            }
+            .width('100%')
+            .padding(DesignSystem.Spacing.md)
+            .borderRadius(DesignSystem.BorderRadius.md)
+            .backgroundColor(this.themeModeIndex === index 
+              ? DesignSystem.getHoverColor(this.isLightMode) 
+              : Color.Transparent)
+            .onClick(() => {
+              this.setThemeMode(index);
+              this.showThemeModeSheet = false;
+            })
+          })
+        }
+        .width('100%')
+
+        Button('取消')
+          .width('100%')
+          .margin({ top: DesignSystem.Spacing.lg })
+          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .onClick(() => {
+            this.showThemeModeSheet = false;
+          })
+      }
+      .width('100%')
+      .padding(DesignSystem.Spacing.lg)
+      .borderRadius(DesignSystem.BorderRadius.lg)
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+    }
+    .width('100%')
+    .padding({ bottom: this.safeAreaBottom })
+  }
+
+  @Builder
+  buildReadBackgroundSheet(): void {
+    Column() {
+      Column() {
+        Text('阅读背景')
+          .fontSize(DesignSystem.Typography.size.lg)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+          .margin({ bottom: DesignSystem.Spacing.lg })
+
+        Text('阅读背景设置功能即将上线')
+          .fontSize(DesignSystem.Typography.size.base)
+          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+          .margin({ bottom: DesignSystem.Spacing.lg })
+
+        Button('知道了')
+          .width('100%')
+          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+          .fontColor(('sys.color.ohos_id_color_text_primary_contrary'))
+          .onClick(() => {
+            this.showReadBackgroundSheet = false;
+          })
+      }
+      .width('100%')
+      .padding(DesignSystem.Spacing.lg)
+      .borderRadius(DesignSystem.BorderRadius.lg)
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+    }
+    .width('100%')
+    .padding({ bottom: this.safeAreaBottom })
+  }
+
+  @Builder
+  buildFeedbackSheet(): void {
+    Column() {
+      Column() {
+        Text('意见反馈')
+          .fontSize(DesignSystem.Typography.size.lg)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.semibold)
+          .margin({ bottom: DesignSystem.Spacing.lg })
+
+        TextArea({ placeholder: '请输入您的意见和建议...' })
+          .width('100%')
+          .height(120)
+          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .placeholderColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+          .margin({ bottom: DesignSystem.Spacing.md })
+
+        Button('提交反馈')
+          .width('100%')
+          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+          .fontColor(('sys.color.ohos_id_color_text_primary_contrary'))
+          .onClick(() => {
+            showToast({ message: '感谢您的反馈！' });
+            this.showFeedbackSheet = false;
+          })
+
+        Button('取消')
+          .width('100%')
+          .margin({ top: DesignSystem.Spacing.sm })
+          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .onClick(() => {
+            this.showFeedbackSheet = false;
+          })
+      }
+      .width('100%')
+      .padding(DesignSystem.Spacing.lg)
+      .borderRadius(DesignSystem.BorderRadius.lg)
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+    }
+    .width('100%')
+    .padding({ bottom: this.safeAreaBottom })
   }
 }

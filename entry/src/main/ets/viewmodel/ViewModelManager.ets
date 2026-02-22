@@ -47,7 +47,7 @@ export class ViewModelManager {
   
   getBookSourceViewModel(): BookSourceViewModel {
     if (this.bookSourceViewModel === null) {
-      this.bookSourceViewModel = new BookSourceViewModel();
+      this.bookSourceViewModel = BookSourceViewModel.getInstance();
       if (this.context) {
         this.bookSourceViewModel.setContext(this.context);
       }

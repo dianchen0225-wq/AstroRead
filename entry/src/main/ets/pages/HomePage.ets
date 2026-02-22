@@ -1,7 +1,7 @@
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { NavigationManager } from '../common/NavigationManager';
-import { PageHeader } from '../components/CommonNavBar';
+import { PageHeader } from '../components/AppNavigation';
 
 interface GradientColorItem {
   color: string;

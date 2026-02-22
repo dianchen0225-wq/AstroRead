@@ -16,7 +16,6 @@ export * from './ParserFacade';
 
 export { EntityDecoder } from './utils/EntityDecoder';
 export { PositionTracker } from './utils/PositionTracker';
-export { TextCleaner } from './utils/TextCleaner';
 
 export { JSONParserAdapter } from './adapters/JSONParserAdapter';
 export { XMLParserAdapter } from './adapters/XMLParserAdapter';

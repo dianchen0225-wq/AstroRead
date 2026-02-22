@@ -6,8 +6,9 @@ import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
-import { CommonNavBar, NavBarAction } from '../components/CommonNavBar';
-import { AppButton, AppLoading, AppEmpty } from '../components/UIComponents';
+import { AppNavBar, NavBarAction } from '../components/AppNavigation';
+import { AppButton } from '../components/AppButton';
+import { AppLoading, AppEmpty } from '../components/AppComponents';
 import common from '@ohos.app.ability.common';
 
 @Entry
@@ -183,7 +184,7 @@ struct BookDetailPage {
 
   build() {
     Column() {
-      CommonNavBar({
+      AppNavBar({
         title: '书籍详情',
         showBack: true,
         rightActions: [
@@ -211,7 +212,7 @@ struct BookDetailPage {
             this.buildActionButtons()
 
             if (this.isLoadingChapters) {
-              AppLoading({ loadingText: '加载章节中...' })
+              AppLoading({ text: '加载章节中...' })
                 .margin({ top: DesignSystem.Spacing.xl })
             } else if (this.chapters.length > 0) {
               this.buildChapterList()
@@ -225,9 +226,9 @@ struct BookDetailPage {
         .scrollBar(BarState.Auto)
       } else {
         AppEmpty({
-          emptyIcon: '📖',
-          emptyTitle: '未找到书籍',
-          emptyDescription: '该书籍可能已被删除'
+          icon: '📖',
+          title: '未找到书籍',
+          description: '该书籍可能已被删除'
         })
       }
     }
@@ -340,7 +341,7 @@ struct BookDetailPage {
   buildActionButtons() {
     Row({ space: DesignSystem.Spacing.md }) {
       AppButton({
-        buttonText: this.chapters.length > 0 ? '开始阅读' : '加载章节',
+        text: this.chapters.length > 0 ? '开始阅读' : '加载章节',
         variant: 'primary',
         fullWidth: true,
         loading: this.isLoadingChapters,
@@ -349,7 +350,7 @@ struct BookDetailPage {
 
       if (this.chapters.length > 0) {
         AppButton({
-          buttonText: '目录',
+          text: '目录',
           variant: 'secondary',
           fullWidth: true,
           onClicked: this.handleShowChapterSheet

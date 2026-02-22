@@ -52,6 +52,13 @@ export struct WebReader {
     try {
       // 清理资源
       Logger.debug(this.TAG, 'WebReader destroying...');
+      // 释放 WebviewController 资源
+      if (this.webController) {
+        this.webController.stop();
+        this.webController.clearHistory();
+        this.webController.clearSslCache();
+        Logger.debug(this.TAG, 'WebviewController resources cleared');
+      }
     } catch (error) {
       Logger.error(this.TAG, `销毁失败: ${error}`);
     }

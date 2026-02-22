@@ -8,6 +8,7 @@ import { DesignSystem } from '../common/DesignSystem';
 import { FileManager, FileInfo } from '../utils/FileManager';
 import { TXTParser } from '../utils/TXTParser';
 import { EPUBParser } from '../utils/EPUBParser';
+import { AsyncTXTParser, asyncTXTParser } from '../utils/AsyncTXTParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book, Chapter } from '../models/Book';
 import { Logger } from '../utils/Logger';
@@ -27,6 +28,7 @@ struct ImportPage {
 
   private fileManager = FileManager.getInstance();
   private txtParser = TXTParser.getInstance();
+  private asyncTXTParser = asyncTXTParser;
   private epubParser = EPUBParser.getInstance();
 
   aboutToAppear() {
@@ -83,9 +85,16 @@ struct ImportPage {
     }
   }
 
-  // 解析并保存TXT
+  // 解析并保存TXT（使用异步解析器）
   async parseAndSaveTXT(filePath: string) {
-    const parseResult = await this.txtParser.parse(filePath);
+    // 使用异步解析器，避免主线程阻塞
+    const parseResult = await this.asyncTXTParser.parse(
+      filePath,
+      undefined,
+      (progress: number) => {
+        this.importProgress = `解析进度: ${progress}%`;
+      }
+    );
 
     if (parseResult.success && parseResult.book && parseResult.chapters) {
       // 保存到数据库

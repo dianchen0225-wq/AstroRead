@@ -4,13 +4,19 @@ import { themeManager } from '../common/ThemeManager';
 export type BadgeVariant = 'default' | 'success' | 'warning' | 'error' | 'info';
 export type BadgeSize = 'sm' | 'md' | 'lg';
 
+interface BadgeSizeConfig {
+  height: number;
+  fontSize: number;
+  padding: number;
+}
+
 @ComponentV2
 export struct AppBadge {
   @Local isLightMode: boolean = true;
   
   @Param text: string = '';
   @Param variant: BadgeVariant = 'default';
-  @Param size: BadgeSize = 'md';
+  @Param badgeSize: BadgeSize = 'md';
   @Param dot: boolean = false;
   @Param count: number = 0;
   
@@ -42,8 +48,8 @@ export struct AppBadge {
     }
   }
 
-  private getSize(): { height: number; fontSize: number; padding: number } {
-    switch (this.size) {
+  private getBadgeSize(): BadgeSizeConfig {
+    switch (this.badgeSize) {
       case 'sm':
         return { height: 16, fontSize: 10, padding: 4 };
       case 'lg':
@@ -63,25 +69,25 @@ export struct AppBadge {
     } else if (this.count > 0) {
       Row() {
         Text(this.count > 99 ? '99+' : this.count.toString())
-          .fontSize(this.getSize().fontSize)
+          .fontSize(this.getBadgeSize().fontSize)
           .fontColor('#FFFFFF')
           .fontWeight(DesignSystem.Typography.weight.medium)
       }
-      .height(this.getSize().height)
-      .padding({ left: this.getSize().padding, right: this.getSize().padding })
-      .borderRadius(this.getSize().height / 2)
+      .height(this.getBadgeSize().height)
+      .padding({ left: this.getBadgeSize().padding, right: this.getBadgeSize().padding })
+      .borderRadius(this.getBadgeSize().height / 2)
       .backgroundColor(this.getBackgroundColor())
       .justifyContent(FlexAlign.Center)
     } else if (this.text) {
       Row() {
         Text(this.text)
-          .fontSize(this.getSize().fontSize)
+          .fontSize(this.getBadgeSize().fontSize)
           .fontColor('#FFFFFF')
           .fontWeight(DesignSystem.Typography.weight.medium)
       }
-      .height(this.getSize().height)
-      .padding({ left: this.getSize().padding, right: this.getSize().padding })
-      .borderRadius(this.getSize().height / 2)
+      .height(this.getBadgeSize().height)
+      .padding({ left: this.getBadgeSize().padding, right: this.getBadgeSize().padding })
+      .borderRadius(this.getBadgeSize().height / 2)
       .backgroundColor(this.getBackgroundColor())
       .justifyContent(FlexAlign.Center)
     }
@@ -92,7 +98,7 @@ export struct AppBadge {
 export struct AppLoading {
   @Local isLightMode: boolean = true;
   
-  @Param size: number = 40;
+  @Param loadingSize: number = 40;
   @Param text: string = '';
   @Param fullScreen: boolean = false;
   
@@ -112,8 +118,8 @@ export struct AppLoading {
   build() {
     Column() {
       LoadingProgress()
-        .width(this.size)
-        .height(this.size)
+        .width(this.loadingSize)
+        .height(this.loadingSize)
         .color(DesignSystem.getPrimaryColor(this.isLightMode))
       
       if (this.text) {
@@ -138,8 +144,7 @@ export struct AppEmpty {
   @Param title: string = '暂无数据';
   @Param description: string = '';
   @Param actionText: string = '';
-  
-  private onActionHandler?: () => void;
+  @Param onAction: () => void = () => {};
   
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
@@ -174,7 +179,7 @@ export struct AppEmpty {
           .margin({ bottom: DesignSystem.Spacing.lg })
       }
       
-      if (this.actionText && this.onActionHandler) {
+      if (this.actionText && this.onAction) {
         Row() {
           Text(this.actionText)
             .fontSize(DesignSystem.Typography.size.sm)
@@ -185,8 +190,8 @@ export struct AppEmpty {
         .borderRadius(DesignSystem.BorderRadius.md)
         .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
         .onClick(() => {
-          if (this.onActionHandler) {
-            this.onActionHandler();
+          if (this.onAction) {
+            this.onAction();
           }
         })
       }
@@ -196,11 +201,6 @@ export struct AppEmpty {
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }
-
-  onAction(handler: () => void): AppEmpty {
-    this.onActionHandler = handler;
-    return this;
-  }
 }
 
 @ComponentV2
@@ -209,7 +209,7 @@ export struct AppDivider {
   
   @Param vertical: boolean = false;
   @Param dashed: boolean = false;
-  @Param margin: number = DesignSystem.Spacing.md;
+  @Param dividerMargin: number = DesignSystem.Spacing.md;
   
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
@@ -228,7 +228,7 @@ export struct AppDivider {
     Row()
       .width(this.vertical ? 1 : '100%')
       .height(this.vertical ? '100%' : 1)
-      .margin(this.vertical ? 0 : { top: this.margin, bottom: this.margin })
+      .margin(this.vertical ? 0 : { top: this.dividerMargin, bottom: this.dividerMargin })
       .backgroundColor(DesignSystem.getBorderColor(this.isLightMode))
   }
 }
@@ -237,9 +237,9 @@ export struct AppDivider {
 export struct AppToast {
   @Local isLightMode: boolean = true;
   @Local visible: boolean = false;
+  @Local toastMessage: string = '';
+  @Local toastType: 'info' | 'success' | 'warning' | 'error' = 'info';
   
-  @Param message: string = '';
-  @Param type: 'info' | 'success' | 'warning' | 'error' = 'info';
   @Param duration: number = 2000;
   
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
@@ -256,8 +256,8 @@ export struct AppToast {
   }
 
   show(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
-    this.message = message;
-    this.type = type;
+    this.toastMessage = message;
+    this.toastType = type;
     this.visible = true;
     
     setTimeout(() => {
@@ -266,7 +266,7 @@ export struct AppToast {
   }
 
   private getBackgroundColor(): string {
-    switch (this.type) {
+    switch (this.toastType) {
       case 'success':
         return DesignSystem.getSuccessColor(this.isLightMode);
       case 'warning':
@@ -279,13 +279,13 @@ export struct AppToast {
   }
 
   private getTextColor(): string {
-    return this.type === 'info' ? '#FFFFFF' : '#FFFFFF';
+    return this.toastType === 'info' ? '#FFFFFF' : '#FFFFFF';
   }
 
   build() {
     if (this.visible) {
       Column() {
-        Text(this.message)
+        Text(this.toastMessage)
           .fontSize(DesignSystem.Typography.size.sm)
           .fontColor(this.getTextColor())
           .fontWeight(DesignSystem.Typography.weight.medium)
@@ -305,5 +305,108 @@ export struct AppToast {
         curve: DesignSystem.AnimationCurve.easeOut
       })
     }
+  }
+}
+
+@ComponentV2
+export struct AppListItem {
+  @Local isLightMode: boolean = true;
+  @Local isPressed: boolean = false;
+  
+  @Param title: string = '';
+  @Param subtitle: string = '';
+  @Param icon: string = '';
+  @Param showArrow: boolean = false;
+  @Param showDivider: boolean = true;
+  @Param onItemClick: () => void = () => {};
+  
+  @BuilderParam trailing: () => void;
+  
+  private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
+    this.isLightMode = !isDark;
+  };
+
+  aboutToAppear(): void {
+    this.isLightMode = themeManager.isLightTheme();
+    themeManager.addListener(this.themeListener);
+  }
+
+  aboutToDisappear(): void {
+    themeManager.removeListener(this.themeListener);
+  }
+
+  build() {
+    Column() {
+      Row() {
+        if (this.icon) {
+          Row() {
+            Text(this.icon)
+              .fontSize(DesignSystem.IconSize.md)
+          }
+          .width(32)
+          .height(32)
+          .borderRadius(DesignSystem.BorderRadius.md)
+          .backgroundColor(DesignSystem.getHoverColor(this.isLightMode))
+          .justifyContent(FlexAlign.Center)
+          .margin({ right: DesignSystem.Spacing.md })
+        }
+
+        Column() {
+          Text(this.title)
+            .fontSize(DesignSystem.Typography.size.base)
+            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+            .fontWeight(DesignSystem.Typography.weight.medium)
+
+          if (this.subtitle) {
+            Text(this.subtitle)
+              .fontSize(DesignSystem.Typography.size.xs)
+              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              .margin({ top: 2 })
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        this.trailing()
+
+        if (this.showArrow) {
+          Text('›')
+            .fontSize(DesignSystem.Typography.size.xl)
+            .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+            .margin({ left: DesignSystem.Spacing.sm })
+        }
+      }
+      .width('100%')
+      .padding(DesignSystem.Spacing.md)
+      .backgroundColor(this.isPressed ?
+        DesignSystem.getActiveColor(this.isLightMode) :
+        Color.Transparent)
+      .scale({ x: this.isPressed ? 0.98 : 1, y: this.isPressed ? 0.98 : 1 })
+      .animation({
+        duration: DesignSystem.AnimationDuration.fast,
+        curve: DesignSystem.AnimationCurve.easeOut
+      })
+      .onClick(() => {
+        if (this.onItemClick) {
+          this.onItemClick();
+        }
+      })
+      .onTouch((event: TouchEvent) => {
+        if (event.type === TouchType.Down) {
+          this.isPressed = true;
+        } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+          this.isPressed = false;
+        }
+      })
+
+      if (this.showDivider) {
+        Row()
+          .width('100%')
+          .height(1)
+          .backgroundColor(DesignSystem.getBorderColor(this.isLightMode))
+          .margin({ left: this.icon ? 48 + DesignSystem.Spacing.md : DesignSystem.Spacing.md })
+      }
+    }
+    .width('100%')
   }
 }

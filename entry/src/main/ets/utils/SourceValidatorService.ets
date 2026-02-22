@@ -1,10 +1,10 @@
 import { Book, SourceStatus, SourceValidationResult } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from './Logger';
-import { sourceHealthManager } from './SourceHealthManager';
+import { enhancedSourceHealthManager } from './EnhancedSourceHealthManager';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { NetworkManager } from './NetworkManager';
-import { smartSourceSelector } from './SmartSourceSelector';
+import { SmartSourceSelector } from './SmartSourceSelector';
 import { errorHandlingService, ErrorType, ErrorContext } from './ErrorHandlingService';
 
 export interface BatchValidationProgress {
@@ -111,7 +111,7 @@ export class SourceValidatorService {
       }
 
       // 初始化智能书源选择器
-      smartSourceSelector.initializeSources(sources);
+      SmartSourceSelector.getInstance().initializeSources(sources);
 
       Logger.info(this.TAG, `已加载 ${this.sourceCache.size} 个书源到缓存`);
     } catch (error) {
@@ -163,7 +163,7 @@ export class SourceValidatorService {
 
     // 健康度检查
     if (this.validationConfig.enableHealthCheck) {
-      const healthScore = sourceHealthManager.getSourceScore(book.bookSourceId);
+      const healthScore = enhancedSourceHealthManager.getSourceScore(book.bookSourceId);
       if (healthScore < 10) {
         result.status = SourceStatus.INVALID;
         result.errorMessage = '书源健康度过低';
@@ -171,8 +171,7 @@ export class SourceValidatorService {
       }
     }
 
-    // 智能书源选择器检查
-    const metrics = smartSourceSelector.getMetrics(book.bookSourceId);
+    const metrics = SmartSourceSelector.getInstance().getMetrics(book.bookSourceId);
     if (metrics && metrics.isBlacklisted) {
       result.status = SourceStatus.INVALID;
       result.errorMessage = '书源已被列入黑名单';
@@ -204,15 +203,12 @@ export class SourceValidatorService {
       const response = await NetworkManager.getInstance().get(source.url, undefined, 1024);
       const responseTime = Date.now() - startTime;
 
-      // 记录成功
-      smartSourceSelector.recordSuccess(source.id, responseTime);
+      SmartSourceSelector.getInstance().recordSuccess(source.id, responseTime);
 
       return true;
     } catch (error) {
-      // 记录失败
-      smartSourceSelector.recordFailure(source.id, error instanceof Error ? error.message : String(error));
+      SmartSourceSelector.getInstance().recordFailure(source.id, error instanceof Error ? error.message : String(error));
 
-      // 错误处理
       const errorContext: ErrorContext = {
         sourceId: source.id,
         sourceName: source.name,
@@ -463,7 +459,8 @@ export class SourceValidatorService {
    */
   generateReport(): string {
     const stats = this.getValidationStats();
-    const smartStats = smartSourceSelector.getAllMetrics();
+    const selector = SmartSourceSelector.getInstance();
+    const smartStats = selector.getAllMetrics();
 
     let report = '=== 书源验证报告 ===\n\n';
 
@@ -474,7 +471,7 @@ export class SourceValidatorService {
     report += `未知状态: ${stats.unknownSources}\n\n`;
 
     report += '【智能选择器统计】\n';
-    report += `健康书源: ${smartSourceSelector.getHealthySourceCount()}\n`;
+    report += `健康书源: ${selector.getHealthySourceCount()}\n`;
     report += `黑名单书源: ${smartStats.filter(m => m.isBlacklisted).length}\n\n`;
 
     if (smartStats.length > 0) {

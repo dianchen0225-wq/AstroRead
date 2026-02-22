@@ -15,14 +15,11 @@ export class StringUtils {
    * 检查字符串是否不为空
    */
   static isNotEmpty(str: string | null | undefined): boolean {
-    return !this.isEmpty(str);
+    return !StringUtils.isEmpty(str);
   }
 
-  /**
-   * 安全地获取字符串，如果为空则返回默认值
-   */
   static defaultIfEmpty(str: string | null | undefined, defaultValue: string): string {
-    return this.isEmpty(str) ? defaultValue : str!;
+    return StringUtils.isEmpty(str) ? defaultValue : str!;
   }
 
   /**
@@ -49,8 +46,8 @@ export class StringUtils {
   static toCamelCase(str: string): string {
     if (!str) return '';
     return str
-      .replace(/[-_\s]+(.)?/g, (_, char) => char ? char.toUpperCase() : '')
-      .replace(/^[A-Z]/, char => char.toLowerCase());
+      .replace(/[-_\s]+(.)?/g, (_match: string, char: string): string => char ? char.toUpperCase() : '')
+      .replace(/^[A-Z]/, (char: string): string => char.toLowerCase());
   }
 
   /**
@@ -58,7 +55,7 @@ export class StringUtils {
    */
   static toPascalCase(str: string): string {
     if (!str) return '';
-    const camelCase = this.toCamelCase(str);
+    const camelCase = StringUtils.toCamelCase(str);
     return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
   }
 
@@ -230,7 +227,7 @@ export class StringUtils {
   /**
    * 安全的JSON字符串化
    */
-  static safeJsonStringify(obj: unknown, defaultValue: string = '{}'): string {
+  static safeJsonStringify(obj: Object | null | undefined, defaultValue: string = '{}'): string {
     try {
       return JSON.stringify(obj);
     } catch {

@@ -1,9 +1,17 @@
-
 /**
  * HttpError - 统一 HTTP 错误处理
+ * 继承自 AppError，提供 HTTP 特有的错误信息
  */
 
-import { HttpErrorCode, HttpError, HttpHeaders, HttpRequestConfig, HttpResponse } from './interfaces/IHttpClient';
+import { HttpErrorCode, HttpHeaders, HttpRequestConfig, HttpResponse } from './interfaces/IHttpClient';
+import {
+  AppError,
+  AppErrorCode,
+  ErrorCategory,
+  ErrorSeverity,
+  AppErrorOptions
+} from '../core/AppError';
+
 interface HttpErrorOptions {
   status?: number;
   statusText?: string;
@@ -40,8 +48,23 @@ interface HttpErrorJSON {
   url?: string;
 }
 
-export class HttpErrorImpl extends Error implements HttpError {
-  readonly code: HttpErrorCode;
+function mapHttpErrorCode(code: HttpErrorCode): AppErrorCode {
+  const mapping: Record<string, AppErrorCode> = {
+    [HttpErrorCode.TIMEOUT]: AppErrorCode.TIMEOUT,
+    [HttpErrorCode.NETWORK_ERROR]: AppErrorCode.NETWORK_ERROR,
+    [HttpErrorCode.CONNECTION_ERROR]: AppErrorCode.CONNECTION_ERROR,
+    [HttpErrorCode.SSL_ERROR]: AppErrorCode.SSL_ERROR,
+    [HttpErrorCode.ABORTED]: AppErrorCode.ABORTED,
+    [HttpErrorCode.INVALID_URL]: AppErrorCode.INVALID_URL,
+    [HttpErrorCode.HTTP_ERROR]: AppErrorCode.HTTP_ERROR,
+    [HttpErrorCode.REDIRECT_ERROR]: AppErrorCode.REDIRECT_ERROR,
+    [HttpErrorCode.CACHE_ERROR]: AppErrorCode.CACHE_ERROR
+  };
+  return mapping[code] ?? AppErrorCode.UNKNOWN;
+}
+
+export class HttpErrorImpl extends AppError {
+  readonly httpCode: HttpErrorCode;
   readonly status?: number;
   readonly statusText?: string;
   readonly headers?: HttpHeaders;
@@ -49,49 +72,81 @@ export class HttpErrorImpl extends Error implements HttpError {
   readonly response?: HttpResponse;
   readonly request?: HttpRequestConfig;
   readonly isRetryable: boolean;
-  readonly timestamp: number;
-  cause?: Error;
+
   constructor(
     code: HttpErrorCode,
     message: string,
     options?: HttpErrorOptions
   ) {
-    super(message);
+    const appCode = mapHttpErrorCode(code);
+    const appOptions: AppErrorOptions = {
+      category: ErrorCategory.NETWORK,
+      severity: HttpErrorImpl.inferSeverityFromCode(code, options?.status),
+      recoverable: HttpErrorImpl.inferRecoverableFromCode(code),
+      retryable: HttpErrorImpl.checkRetryable(code, options?.status),
+      cause: options?.cause
+    };
+
+    super(appCode, message, appOptions);
+    
+    this.httpCode = code;
     this.name = 'HttpError';
-    this.code = code;
     this.status = options?.status;
     this.statusText = options?.statusText;
     this.headers = options?.headers;
     this.config = options?.config;
     this.response = options?.response;
     this.request = options?.request;
-    this.timestamp = Date.now();
-    this.isRetryable = this.checkRetryable();
-    if (options?.cause) {
-      this.cause = options.cause;
-    }
+    this.isRetryable = this.retryable;
   }
 
-  private checkRetryable(): boolean {
-    if (this.code === HttpErrorCode.ABORTED || this.code === HttpErrorCode.CANCELLED) {
+  private static inferSeverityFromCode(code: HttpErrorCode, status?: number): ErrorSeverity {
+    if (code === HttpErrorCode.SSL_ERROR) return ErrorSeverity.CRITICAL;
+    if (code === HttpErrorCode.TIMEOUT || code === HttpErrorCode.NETWORK_ERROR) {
+      return ErrorSeverity.HIGH;
+    }
+    if (code === HttpErrorCode.HTTP_ERROR && status) {
+      if (status >= 500) return ErrorSeverity.HIGH;
+      if (status >= 400) return ErrorSeverity.MEDIUM;
+    }
+    return ErrorSeverity.MEDIUM;
+  }
+
+  private static inferRecoverableFromCode(code: HttpErrorCode): boolean {
+    const unrecoverableCodes = [
+      HttpErrorCode.INVALID_URL,
+      HttpErrorCode.ABORTED,
+      HttpErrorCode.CANCELLED
+    ];
+    return !unrecoverableCodes.includes(code);
+  }
+
+  private static checkRetryable(code: HttpErrorCode, status?: number): boolean {
+    if (code === HttpErrorCode.ABORTED || code === HttpErrorCode.CANCELLED) {
       return false;
     }
 
-    if (this.code === HttpErrorCode.TIMEOUT || this.code === HttpErrorCode.NETWORK_ERROR) {
+    if (code === HttpErrorCode.TIMEOUT || code === HttpErrorCode.NETWORK_ERROR) {
       return true;
     }
 
-    if (this.code === HttpErrorCode.HTTP_ERROR && this.status) {
+    if (code === HttpErrorCode.HTTP_ERROR && status) {
       const retryableStatusCodes = [408, 429, 500, 502, 503, 504];
-      return retryableStatusCodes.includes(this.status);
+      return retryableStatusCodes.includes(status);
     }
 
     return false;
   }
+
+  get code(): AppErrorCode {
+    return super.code;
+  }
+
   static timeout(message: string = 'Request timeout', config?: HttpRequestConfig): HttpErrorImpl {
     const options: HttpErrorOptions = { config: config };
     return new HttpErrorImpl(HttpErrorCode.TIMEOUT, message, options);
   }
+
   static networkError(message: string = 'Network error', config?: HttpRequestConfig): HttpErrorImpl {
     const options: HttpErrorOptions = { config: config };
     return new HttpErrorImpl(HttpErrorCode.NETWORK_ERROR, message, options);
@@ -131,6 +186,7 @@ export class HttpErrorImpl extends Error implements HttpError {
     const options: HttpErrorOptions = { config: config };
     return new HttpErrorImpl(HttpErrorCode.PARSE_ERROR, `Parse error: ${message}`, options);
   }
+
   static tooLarge(size: number, maxSize: number, config?: HttpRequestConfig): HttpErrorImpl {
     const options: HttpErrorOptions = { config: config };
     return new HttpErrorImpl(
@@ -139,6 +195,7 @@ export class HttpErrorImpl extends Error implements HttpError {
       options
     );
   }
+
   static httpError(
     status: number,
     statusText: string,
@@ -187,10 +244,11 @@ export class HttpErrorImpl extends Error implements HttpError {
 
     return new HttpErrorImpl(HttpErrorCode.UNKNOWN, error.message, new HttpErrorOptionsImpl(config, error));
   }
+
   toJSON(): HttpErrorJSON {
     const jsonObj: HttpErrorJSON = {
       name: this.name,
-      code: this.code,
+      code: this.httpCode,
       message: this.message,
       status: this.status,
       statusText: this.statusText,
@@ -202,7 +260,7 @@ export class HttpErrorImpl extends Error implements HttpError {
   }
 
   toString(): string {
-    let str = `HttpError [${this.code}]: ${this.message}`;
+    let str = `HttpError [${this.httpCode}]: ${this.message}`;
     if (this.status) {
       str += ` (status: ${this.status})`;
     }

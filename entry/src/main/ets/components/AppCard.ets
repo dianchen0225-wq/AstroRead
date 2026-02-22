@@ -7,16 +7,16 @@ export struct AppCard {
   @Local isPressed: boolean = false;
   @Local isFocused: boolean = false;
   
-  @Param padding: number = DesignSystem.Spacing.lg;
-  @Param margin: number = 0;
-  @Param borderRadius: number = DesignSystem.BorderRadius.lg;
+  @Param cardPadding: number = DesignSystem.Spacing.lg;
+  @Param cardMargin: number = 0;
+  @Param cardBorderRadius: number = DesignSystem.BorderRadius.lg;
   @Param elevation: 'none' | 'sm' | 'md' | 'lg' = 'sm';
   @Param clickable: boolean = false;
   @Param accessibilityLabel: string = '';
+  @Param onCardClick: () => void = () => {};
   
-  @BuilderParam content: () => void = () => {};
-  
-  private onClickHandler?: () => void;
+  @BuilderParam content: () => void;
+
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -48,9 +48,9 @@ export struct AppCard {
       this.content();
     }
     .width('100%')
-    .padding(this.padding)
-    .margin(this.margin)
-    .borderRadius(this.borderRadius)
+    .padding(this.cardPadding)
+    .margin(this.cardMargin)
+    .borderRadius(this.cardBorderRadius)
     .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
     .border({
       width: 1,
@@ -69,8 +69,8 @@ export struct AppCard {
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      if (this.clickable && this.onClickHandler) {
-        this.onClickHandler();
+      if (this.clickable && this.onCardClick) {
+        this.onCardClick();
       }
     })
     .onTouch((event: TouchEvent) => {
@@ -88,10 +88,5 @@ export struct AppCard {
     .onBlur(() => {
       this.isFocused = false;
     })
-  }
-
-  onClick(handler: () => void): AppCard {
-    this.onClickHandler = handler;
-    return this;
   }
 }

@@ -1,6 +1,7 @@
 import { BookSource, SearchRule, ChapterRule } from '../models/BookSource';
 import { RuleEngine } from './RuleEngine';
 import { CssSelectorParser } from './CssSelectorParser';
+import { AsyncCssSelectorParser } from './AsyncCssSelectorParser';
 import { Logger } from './Logger';
 import { EntityDecoder } from '../core/utils/EntityDecoder';
 
@@ -37,6 +38,7 @@ export type JsonValue = JsonData | JsonArray | string | number | boolean | null 
 
 export class ContentParser {
   private static readonly TAG = 'ContentParser';
+  private static asyncParser = AsyncCssSelectorParser.getInstance();
 
   static parseSearchResult(html: string, bookSource: BookSource): ParsedBookItem[] {
     if (!html || !bookSource || !bookSource.searchRule) {
@@ -616,6 +618,7 @@ export class ContentParser {
 
       Logger.info(ContentParser.TAG, `XPath解析 - listRule: ${listRule}`);
 
+      // 使用异步解析器（降级到同步）
       const listElements = CssSelectorParser.selectElements(html, listRule);
       Logger.info(ContentParser.TAG, `XPath解析 - 找到 ${listElements.length} 个列表元素`);
 

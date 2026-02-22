@@ -1,5 +1,6 @@
 import { Logger } from './Logger';
 import { EntityDecoder } from '../core/utils/EntityDecoder';
+import { StringBuilderPool } from './ObjectPool';
 
 export class CssSelectorParser {
   private static readonly TAG = 'CssSelectorParser';
@@ -186,30 +187,33 @@ export class CssSelectorParser {
         const className = compoundMatch[3] || '';
         const id = compoundMatch[5] || '';
 
-        let pattern = '<';
-        if (tagName) {
-          pattern += CssSelectorParser.escapeRegex(tagName);
-        } else {
-          pattern += '([a-zA-Z][a-zA-Z0-9]*)';
-        }
-        pattern += '[^>]*';
+        // 使用 StringBuilderPool 优化字符串拼接
+        const pattern = StringBuilderPool.build((builder) => {
+          builder.append('<');
+          if (tagName) {
+            builder.append(CssSelectorParser.escapeRegex(tagName));
+          } else {
+            builder.append('([a-zA-Z][a-zA-Z0-9]*)');
+          }
+          builder.append('[^>]*');
 
-        if (id) {
-          pattern += `id=["']${CssSelectorParser.escapeRegex(id)}["'][^>]*`;
-        }
+          if (id) {
+            builder.append(`id=["']${CssSelectorParser.escapeRegex(id)}["'][^>]*`);
+          }
 
-        if (className) {
-          pattern += `class=["'][^"']*\\b${CssSelectorParser.escapeRegex(className)}\\b[^"']*["'][^>]*`;
-        }
+          if (className) {
+            builder.append(`class=["'][^"']*\\b${CssSelectorParser.escapeRegex(className)}\\b[^"']*["'][^>]*`);
+          }
 
-        pattern += '>([\\s\\S]*?)<\\/';
+          builder.append('>([\\s\\S]*?)<\\/');
 
-        if (tagName) {
-          pattern += CssSelectorParser.escapeRegex(tagName);
-        } else {
-          pattern += '\\1';
-        }
-        pattern += '>';
+          if (tagName) {
+            builder.append(CssSelectorParser.escapeRegex(tagName));
+          } else {
+            builder.append('\\1');
+          }
+          builder.append('>');
+        });
 
         const regex = new RegExp(pattern, 'gi');
         const matches = html.matchAll(regex);

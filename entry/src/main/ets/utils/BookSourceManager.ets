@@ -2,9 +2,10 @@
  * BookSourceManager - 书源管理器
  * 集成解析、搜索、调试功能
  * 支持 yck.email 等第三方书源格式
+ * 作为书源数据的唯一可信源
  */
 
-import { BookSource } from '../models/BookSource';
+import { BookSource, SearchRule, ChapterRule, ContentRule } from '../models/BookSource';
 import { Book } from '../models/Book';
 import BookSourceParser, { BookSourceParser as BookSourceParserClass } from './BookSourceParser';
 import { BookSourceSearchEngine, SearchOptions, SearchResult } from './BookSourceSearchEngine';
@@ -13,36 +14,29 @@ import { Logger } from './Logger';
 import http from '@ohos.net.http';
 import { databaseManager } from './DatabaseManager';
 import { enhancedSourceHealthManager } from './EnhancedSourceHealthManager';
-
-type JsonObject = Record<string, string | number | boolean | object | null | undefined>;
+import { NetworkManager } from './NetworkManager';
+import SourceImportManager from './SourceImportManager';
+import SourceValidator from './SourceValidator';
+import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from './SourceSandbox';
+import { PagedBookSourcesResult } from './database/BookSourceRepository';
+import common from '@ohos.app.ability.common';
+import fs from '@ohos.file.fs';
+import fileio from '@ohos.fileio';
+import { util } from '@kit.ArkTS';
 
 export interface YCKRuleSearch {
   bookList?: string;
   name?: string;
   author?: string;
-  kind?: string;
-  lastChapter?: string;
-  introduce?: string;
   coverUrl?: string;
+  introduce?: string;
   bookUrl?: string;
-}
-
-export interface YCKRuleBookInfo {
-  init?: string;
-  name?: string;
-  author?: string;
-  kind?: string;
-  lastChapter?: string;
-  introduce?: string;
-  coverUrl?: string;
-  tocUrl?: string;
 }
 
 export interface YCKRuleToc {
   chapterList?: string;
   chapterName?: string;
   chapterUrl?: string;
-  nextTocUrl?: string;
 }
 
 export interface YCKRuleContent {
@@ -55,10 +49,46 @@ export class YCKSourceData {
   bookSourceUrl: string = '';
   searchUrl: string = '';
   ruleSearch?: YCKRuleSearch;
-  ruleBookInfo?: YCKRuleBookInfo;
   ruleToc?: YCKRuleToc;
   ruleContent?: YCKRuleContent;
   header?: string = '';
+}
+
+export interface BatchUpdateResult {
+  success: boolean;
+  message: string;
+  count?: number;
+}
+
+export interface ImportResult {
+  success: boolean;
+  message: string;
+  count?: number;
+}
+
+export interface ValidateResultItem {
+  source: BookSource;
+  isAvailable: boolean;
+  responseTime: number;
+  error?: string;
+}
+
+export interface ExportResult {
+  success: boolean;
+  message: string;
+  filePath?: string;
+  count?: number;
+}
+
+export interface ExportBookSourceData {
+  bookSourceName: string;
+  bookSourceUrl: string;
+  ruleSearch: SearchRule;
+  ruleToc: ChapterRule;
+  ruleContent: ContentRule;
+  ruleType: string;
+  enabled: boolean;
+  customOrder: number;
 }
 
 export class BookSourceManager {
@@ -67,6 +97,7 @@ export class BookSourceManager {
   private searchEngine: BookSourceSearchEngine;
   private debuggerInstance: BookSourceDebugger;
   private sources: BookSource[] = [];
+  private context: common.UIAbilityContext | null = null;
   private readonly TAG = 'BookSourceManager';
   private constructor() {
     this.parser = BookSourceParser;
@@ -81,177 +112,152 @@ export class BookSourceManager {
     return BookSourceManager.instance;
   }
 
-  /**
-   * 导入书源
-   * 支持 JSON、URL、yck.email 格式
-   */
-  async importSources(input: string): Promise<BookSource[]> {
+  setContext(context: common.UIAbilityContext): void {
+    this.context = context;
+  }
+
+  async loadAllBookSources(): Promise<BookSource[]> {
     try {
-      // 1. 如果是 URL，先获取内容
-      if (input.startsWith('http')) {
-        const httpRequest = http.createHttp();
-        const response = await httpRequest.request(input, {
-          method: http.RequestMethod.GET,
-          header: {
-            'User-Agent': 'Mozilla/5.0'
-          }
-        });
-        input = response.result as string;
-        httpRequest.destroy();
-      }
-
-      // 2. 尝试解析为 JSON
-      let data: JsonObject;
-      try {
-        data = JSON.parse(input) as JsonObject;
-      } catch (e) {
-        // 不是 JSON，尝试其他格式
-        return this.parser.parseSources(input, 'txt');
-      }
-
-      // 3. 判断格式类型
-      if (Array.isArray(data)) {
-        // 可能是标准格式或 YCK 格式
-        const firstItem = (data as JsonObject[])[0];
-        if (firstItem && this.isYCKFormat(firstItem)) {
-          return this.parseYCKSources(data as YCKSourceData[]);
-        }
-        return this.parser.parseSources(input, 'json');
-      }
-
-      // 单个书源
-      if (this.isYCKFormat(data)) {
-        return this.parseYCKSources([this.convertToYCKSourceData(data)]);
-      }
-
-      return this.parser.parseSources(input, 'json');
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      this.sources = await bookSourceRepository.getAllBookSources();
+      return [...this.sources];
     } catch (error) {
-      Logger.error(this.TAG, `导入书源失败: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(this.TAG, `加载所有书源失败: ${error}`);
       return [];
     }
   }
 
-  /**
-   * 判断是否为 YCK 格式
-   */
-  private isYCKFormat(data: JsonObject): boolean {
-    return data !== null && typeof data === 'object' && (
-      data.bookSourceName !== undefined ||
-      (data.searchUrl !== undefined && data.ruleSearch !== undefined)
-    );
+  async loadEnabledBookSources(): Promise<BookSource[]> {
+    try {
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      this.sources = await bookSourceRepository.getAllEnabledBookSources();
+      return [...this.sources];
+    } catch (error) {
+      Logger.error(this.TAG, `加载启用的书源失败: ${error}`);
+      return [];
+    }
   }
 
-  /**
-   * 将 JsonObject 转换为 YCKSourceData
-   */
-  private convertToYCKSourceData(data: JsonObject): YCKSourceData {
-    const result = new YCKSourceData();
-    result.bookSourceName = (data.bookSourceName as string) || '';
-    result.bookSourceUrl = (data.bookSourceUrl as string) || '';
-    result.searchUrl = (data.searchUrl as string) || '';
-    result.header = (data.header as string) || '';
-
-    if (data.ruleSearch && typeof data.ruleSearch === 'object') {
-      const ruleSearch = data.ruleSearch as Record<string, string | number | boolean | object | null | undefined>;
-      result.ruleSearch = {
-        bookList: ruleSearch.bookList as string | undefined,
-        name: ruleSearch.name as string | undefined,
-        author: ruleSearch.author as string | undefined,
-        kind: ruleSearch.kind as string | undefined,
-        lastChapter: ruleSearch.lastChapter as string | undefined,
-        introduce: ruleSearch.introduce as string | undefined,
-        coverUrl: ruleSearch.coverUrl as string | undefined,
-        bookUrl: ruleSearch.bookUrl as string | undefined
-      };
+  async getBookSourceById(id: string): Promise<BookSource | null> {
+    try {
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      return await bookSourceRepository.getBookSourceById(id);
+    } catch (error) {
+      Logger.error(this.TAG, `获取书源失败: ${error}`);
+      return null;
     }
-
-    if (data.ruleBookInfo && typeof data.ruleBookInfo === 'object') {
-      const ruleBookInfo = data.ruleBookInfo as Record<string, string | number | boolean | object | null | undefined>;
-      result.ruleBookInfo = {
-        init: ruleBookInfo.init as string | undefined,
-        name: ruleBookInfo.name as string | undefined,
-        author: ruleBookInfo.author as string | undefined,
-        kind: ruleBookInfo.kind as string | undefined,
-        lastChapter: ruleBookInfo.lastChapter as string | undefined,
-        introduce: ruleBookInfo.introduce as string | undefined,
-        coverUrl: ruleBookInfo.coverUrl as string | undefined,
-        tocUrl: ruleBookInfo.tocUrl as string | undefined
-      };
-    }
-
-    if (data.ruleToc && typeof data.ruleToc === 'object') {
-      const ruleToc = data.ruleToc as Record<string, string | number | boolean | object | null | undefined>;
-      result.ruleToc = {
-        chapterList: ruleToc.chapterList as string | undefined,
-        chapterName: ruleToc.chapterName as string | undefined,
-        chapterUrl: ruleToc.chapterUrl as string | undefined,
-        nextTocUrl: ruleToc.nextTocUrl as string | undefined
-      };
-    }
-
-    if (data.ruleContent && typeof data.ruleContent === 'object') {
-      const ruleContent = data.ruleContent as Record<string, string | number | boolean | object | null | undefined>;
-      result.ruleContent = {
-        content: ruleContent.content as string | undefined,
-        nextContentUrl: ruleContent.nextContentUrl as string | undefined
-      };
-    }
-
-    return result;
   }
 
-  /**
-   * 解析 YCK 格式书源
-   * https://www.yck.email/yuedu/tools/index/id/shuyuan.html
-   */
-  private parseYCKSources(yckData: YCKSourceData[]): BookSource[] {
-    const sources: BookSource[] = [];
-
-    for (const data of yckData) {
-      try {
-        const source: BookSource = {
-          id: this.generateId(),
-          name: data.bookSourceName || '未命名书源',
-          url: data.bookSourceUrl || '',
-          enabled: true,
-          header: data.header || undefined,
-          searchUrl: data.searchUrl || '',
-          searchRule: {
-            bookList: data.ruleSearch?.bookList || '',
-            name: data.ruleSearch?.name || '',
-            author: data.ruleSearch?.author || '',
-            cover: data.ruleSearch?.coverUrl || '',
-            intro: data.ruleSearch?.introduce || '',
-            bookUrl: data.ruleSearch?.bookUrl || '',
-            nextUrl: ''
-          },
-          findRule: undefined,
-          chapterRule: {
-            chapterList: data.ruleToc?.chapterList || '',
-            chapterName: data.ruleToc?.chapterName || '',
-            chapterUrl: data.ruleToc?.chapterUrl || '',
-            nextUrl: data.ruleToc?.nextTocUrl || ''
-          },
-          contentRule: {
-            content: data.ruleContent?.content || '',
-            nextUrl: data.ruleContent?.nextContentUrl || '',
-            prevUrl: undefined,
-            replaceRule: undefined
-          },
-          ruleType: 'xpath',
-          sort: 1,
-          lastUpdateTime: Date.now(),
-          addTime: Date.now()
-        };
-
-        sources.push(source);
-      } catch (error) {
-        Logger.warn(this.TAG, `解析 YCK 书源失败: ${error instanceof Error ? error.message : String(error)}`);
+  async upsertBookSource(source: BookSource): Promise<void> {
+    try {
+      if (!source.id || source.id.trim() === '') {
+        source.id = util.generateRandomUUID(true);
       }
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      await bookSourceRepository.upsertBookSource(source);
+      const index = this.sources.findIndex((s: BookSource) => s.id === source.id);
+      if (index !== -1) {
+        this.sources[index] = source;
+      } else {
+        this.sources.push(source);
+      }
+    } catch (error) {
+      Logger.error(this.TAG, `添加或更新书源失败: ${error}`);
+      throw new Error(`添加或更新书源失败: ${error}`);
     }
+  }
 
-    Logger.info(this.TAG, `成功解析 ${sources.length} 个 YCK 格式书源`);
-    return sources;
+  async batchUpsertBookSources(sources: BookSource[]): Promise<void> {
+    try {
+      for (const source of sources) {
+        if (!source.id || source.id.trim() === '') {
+          source.id = util.generateRandomUUID(true);
+        }
+      }
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      await bookSourceRepository.batchUpsertBookSources(sources);
+      await this.loadAllBookSources();
+    } catch (error) {
+      Logger.error(this.TAG, `批量添加/更新书源失败: ${error}`);
+      throw new Error(`批量添加/更新书源失败: ${error}`);
+    }
+  }
+
+  async toggleBookSource(id: string, enabled: boolean): Promise<void> {
+    const source = this.sources.find((s: BookSource) => s.id === id);
+    if (source) {
+      source.enabled = enabled;
+      await this.upsertBookSource(source);
+    }
+  }
+
+  async testBookSource(bookSource: BookSource): Promise<boolean> {
+    try {
+      if (!bookSource || !bookSource.searchUrl) {
+        return false;
+      }
+
+      const networkManager = NetworkManager.getInstance();
+      if (this.context) {
+        networkManager.setContext(this.context);
+      }
+
+      const testKeywords = ['斗罗大陆', 'test', 'a'];
+      const headers: Map<string, string> | undefined = bookSource.header
+        ? this.parseHeadersToMap(bookSource.header)
+        : undefined;
+
+      for (const testKeyword of testKeywords) {
+        let searchUrl = bookSource.searchUrl
+          .replace(/\{\{key\}\}/g, encodeURIComponent(testKeyword))
+          .replace(/\{\{page\}\}/g, '1')
+          .replace(/\{key\}/g, encodeURIComponent(testKeyword))
+          .replace(/\{page\}/g, '1');
+
+        if (!searchUrl.startsWith('http')) continue;
+
+        try {
+          const response = await networkManager.get(searchUrl, headers);
+          if (response && response.length > 50) {
+            return true;
+          }
+        } catch {
+          continue;
+        }
+      }
+      return false;
+    } catch (error) {
+      Logger.error(this.TAG, `测试书源有效性失败: ${error}`);
+      return false;
+    }
+  }
+
+  private parseHeadersToMap(header: string): Map<string, string> | undefined {
+    try {
+      const headers = JSON.parse(header) as Record<string, string>;
+      const map = new Map<string, string>();
+      const keys = Object.keys(headers);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        map.set(key, String(headers[key]));
+      }
+      return map;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 导入书源（已废弃，请使用 importBookSource）
+   * 内部委托给 importBookSource 实现安全导入
+   * @deprecated 请使用 importBookSource 方法获取更详细的导入结果
+   */
+  async importSources(input: string): Promise<BookSource[]> {
+    const result = await this.importBookSource(input);
+    if (result.success && result.count && result.count > 0) {
+      return this.sources;
+    }
+    return [];
   }
 
   /**
@@ -468,6 +474,263 @@ export class BookSourceManager {
    */
   clearCache(): void {
     this.searchEngine.clearCache();
+  }
+
+  /**
+   * 分页加载书源
+   */
+  async getBookSourcesPaged(page: number, pageSize: number): Promise<PagedBookSourcesResult> {
+    try {
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      return await bookSourceRepository.getBookSourcesPaged(page, pageSize);
+    } catch (error) {
+      Logger.error(this.TAG, `分页加载书源失败: ${error}`);
+      return { sources: [], total: 0 };
+    }
+  }
+
+  /**
+   * 获取书源总数
+   */
+  async getBookSourcesCount(): Promise<number> {
+    try {
+      const bookSourceRepository = databaseManager.getBookSourceRepo();
+      return await bookSourceRepository.getBookSourcesCount();
+    } catch (error) {
+      Logger.error(this.TAG, `获取书源数量失败: ${error}`);
+      return 0;
+    }
+  }
+
+  /**
+   * 批量更新书源状态
+   */
+  async batchUpdateBookSourcesStatus(ids: string[], enabled: boolean): Promise<BatchUpdateResult> {
+    try {
+      if (!ids || ids.length === 0) {
+        const result: BatchUpdateResult = { success: false, message: '没有选择任何书源' };
+        return result;
+      }
+
+      let updatedCount = 0;
+      for (const id of ids) {
+        const source = this.sources.find((s: BookSource) => s.id === id);
+        if (source) {
+          source.enabled = enabled;
+          await this.upsertBookSource(source);
+          updatedCount++;
+        }
+      }
+
+      const result: BatchUpdateResult = {
+        success: true,
+        message: `成功更新 ${updatedCount} 个书源状态`,
+        count: updatedCount
+      };
+      return result;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      Logger.error(this.TAG, `批量更新书源状态失败: ${errorMsg}`);
+      const result: BatchUpdateResult = { success: false, message: errorMsg };
+      return result;
+    }
+  }
+
+  /**
+   * 增强版书源导入功能
+   */
+  async importBookSource(input: string, format?: string, skipSafetyCheck: boolean = false): Promise<ImportResult> {
+    try {
+      Logger.info(this.TAG, '开始导入书源');
+
+      if (!input || input.trim().length === 0) {
+        throw new Error('书源内容不能为空');
+      }
+
+      if (input.length > 10 * 1024 * 1024) {
+        throw new Error('书源内容过大，最大支持10MB');
+      }
+
+      let content = input.trim();
+
+      if (this.isValidUrl(content)) {
+        Logger.debug(this.TAG, '从URL下载书源内容');
+        const networkManager = NetworkManager.getInstance();
+        if (this.context) {
+          networkManager.setContext(this.context);
+        }
+        content = await networkManager.get(content);
+        if (!content || content.trim().length === 0) {
+          throw new Error('从URL获取的书源内容为空');
+        }
+      }
+
+      const result = await SourceImportManager.importSources(content, format, skipSafetyCheck);
+      await this.loadAllBookSources();
+
+      const importResult: ImportResult = {
+        success: result.success,
+        message: result.message,
+        count: result.importedCount
+      };
+      return importResult;
+    } catch (error) {
+      Logger.error(this.TAG, `导入书源失败: ${error}`);
+      const importResult: ImportResult = {
+        success: false,
+        message: error instanceof Error ? error.message : '导入失败'
+      };
+      return importResult;
+    }
+  }
+
+  /**
+   * 批量验证书源可用性
+   */
+  async validateBookSources(sources: BookSource[]): Promise<ValidateResultItem[]> {
+    try {
+      if (!sources || sources.length === 0) {
+        return [];
+      }
+
+      if (sources.length > 50) {
+        throw new Error('一次最多验证50个书源');
+      }
+
+      Logger.info(this.TAG, `开始批量验证${sources.length}个书源`);
+      const results = await SourceValidator.validateSourcesBatch(sources);
+
+      for (const result of results) {
+        result.source.enabled = result.isAvailable;
+        await this.upsertBookSource(result.source);
+      }
+
+      Logger.info(this.TAG, '书源验证完成');
+      return results;
+    } catch (error) {
+      Logger.error(this.TAG, `批量验证书源失败: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * 检测书源格式
+   */
+  detectSourceFormat(content: string): string {
+    return BookSourceParser.detectFormat(content);
+  }
+
+  /**
+   * 扫描书源安全
+   */
+  scanSourceSecurity(content: string): SecurityScanResult {
+    return SourceSandbox.scanSourceContent(content);
+  }
+
+  /**
+   * 扫描书源安全
+   */
+  scanBookSourceSecurity(source: BookSource): SecurityScanResult {
+    return SourceSandbox.scanBookSource(source);
+  }
+
+  /**
+   * 批量扫描书源安全
+   */
+  scanSourcesSecurityBatch(sources: BookSource[]): Map<string, SecurityScanResult> {
+    return SourceSandbox.scanSourcesBatch(sources);
+  }
+
+  /**
+   * 获取安全风险等级文本
+   */
+  getSecurityRiskLevelText(level: SecurityRiskLevel): string {
+    return SourceSandbox.getRiskLevelText(level);
+  }
+
+  /**
+   * 获取安全风险等级颜色
+   */
+  getSecurityRiskLevelColor(level: SecurityRiskLevel): string {
+    return SourceSandbox.getRiskLevelColor(level);
+  }
+
+  /**
+   * 导出书源到文件
+   */
+  async exportBookSources(fileName: string = 'book_sources.json'): Promise<ExportResult> {
+    try {
+      if (!this.context) {
+        throw new Error('上下文未设置，无法导出文件');
+      }
+
+      const allSources = await this.loadAllBookSources();
+
+      if (allSources.length === 0) {
+        const result: ExportResult = { success: false, message: '没有可导出的书源' };
+        return result;
+      }
+
+      const exportData: ExportBookSourceData[] = allSources.map((source: BookSource): ExportBookSourceData => {
+        const item: ExportBookSourceData = {
+          bookSourceName: source.name,
+          bookSourceUrl: source.url,
+          ruleSearch: source.searchRule,
+          ruleToc: source.chapterRule,
+          ruleContent: source.contentRule,
+          ruleType: source.ruleType,
+          enabled: source.enabled,
+          customOrder: source.sort
+        };
+        return item;
+      });
+
+      const filesDir = this.context.filesDir;
+      const exportDir = filesDir + '/exports/';
+
+      try {
+        await fs.access(exportDir);
+      } catch {
+        await fs.mkdir(exportDir);
+      }
+
+      const filePath = exportDir + fileName;
+      const jsonContent = JSON.stringify(exportData, null, 2);
+
+      const fd = await fileio.open(filePath, 0o2 | 0o100);
+      await fileio.write(fd, jsonContent);
+      await fileio.close(fd);
+
+      const result: ExportResult = {
+        success: true,
+        message: `导出成功：${allSources.length}个书源`,
+        filePath: filePath,
+        count: allSources.length
+      };
+      return result;
+    } catch (error) {
+      Logger.error(this.TAG, `导出书源失败: ${error}`);
+      const result: ExportResult = {
+        success: false,
+        message: error instanceof Error ? error.message : '导出失败'
+      };
+      return result;
+    }
+  }
+
+  private isValidUrl(input: string): boolean {
+    try {
+      if (!input || input.length > 2048) {
+        return false;
+      }
+      const urlPattern = /^https?:\/\/([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d{1,5})?(\/[a-zA-Z0-9-._~:/?#[\]@!$&'()*+,;=]*)?$/;
+      if (!urlPattern.test(input)) {
+        return false;
+      }
+      return input.startsWith('http://') || input.startsWith('https://');
+    } catch {
+      return false;
+    }
   }
 }
 

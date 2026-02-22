@@ -1,18 +1,11 @@
 /**
  * RequestCache - 请求缓存管理器
- * 支持内存缓存和磁盘缓存
+ * 继承自 BaseCache，缓存 HTTP 响应
  */
 
-import { RequestCacheConfig, CacheStats, HttpResponse } from './interfaces/IHttpClient';
+import { CacheStats, HttpResponse } from './interfaces/IHttpClient';
+import { BaseCache, CacheConfig } from '../core/BaseCache';
 import { Logger } from '../utils/Logger';
-interface CacheEntry {
-  key: string;
-  response: HttpResponse;
-  timestamp: number;
-  ttl: number;
-  hits: number;
-  size: number;
-}
 
 interface CacheEntryInfo {
   key: string;
@@ -21,18 +14,15 @@ interface CacheEntryInfo {
   hits: number;
 }
 
-export class RequestCache {
+export class RequestCache extends BaseCache<HttpResponse> {
   private static instance: RequestCache | null = null;
+  protected readonly TAG = 'RequestCache';
 
-  private memoryCache: Map<string, CacheEntry> = new Map();
-  private maxSize: number = 100;
   private defaultTTL: number = 5 * 60 * 1000;
-  private hits: number = 0;
-  private misses: number = 0;
 
-  private readonly TAG = 'RequestCache';
-
-  private constructor() {}
+  private constructor(config?: Partial<CacheConfig>) {
+    super({ maxSize: 100, ttl: 5 * 60 * 1000, ...config });
+  }
 
   static getInstance(): RequestCache {
     if (!RequestCache.instance) {
@@ -40,20 +30,22 @@ export class RequestCache {
     }
     return RequestCache.instance;
   }
-  generateKey(url: string, method: string, params?: Map<string, string>, body?: string): string {
+
+  /**
+   * 生成缓存键
+   */
+  protected generateKey(
+    url: string,
+    method: string,
+    params?: Record<string, string>,
+    body?: string
+  ): string {
     const parts = [method.toUpperCase(), url];
 
-    if (params && params.size > 0) {
-      const sortedParams: string[] = [];
-      const keys: string[] = [];
-      params.forEach((_, key) => keys.push(key));
-      keys.sort();
-      for (const k of keys) {
-        const v = params.get(k);
-        if (v !== undefined) {
-          sortedParams.push(`${k}=${v}`);
-        }
-      }
+    if (params && Object.keys(params).length > 0) {
+      const sortedParams = Object.keys(params)
+        .sort()
+        .map(k => `${k}=${params[k]}`);
       parts.push(sortedParams.join('&'));
     }
 
@@ -65,102 +57,38 @@ export class RequestCache {
     return this.hashString(parts.join('|'));
   }
 
-  private hashString(str: string): string {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(36);
+  /**
+   * 静态方法：生成缓存键（兼容旧接口）
+   */
+  static generateKey(
+    url: string,
+    method: string,
+    params?: Record<string, string>,
+    body?: string
+  ): string {
+    return RequestCache.getInstance().generateKey(url, method, params, body);
   }
 
+  /**
+   * 获取缓存的响应
+   */
   get(key: string): HttpResponse | null {
-    const entry = this.memoryCache.get(key);
-
-    if (!entry) {
-      this.misses++;
-      return null;
-    }
-
-    if (this.isExpired(entry)) {
-      this.memoryCache.delete(key);
-      this.misses++;
-      Logger.debug(this.TAG, `Cache expired: ${key}`);
-      return null;
-    }
-
-    entry.hits++;
-    this.hits++;
-    Logger.debug(this.TAG, `Cache hit: ${key}`);
-    return entry.response;
+    return super.get(key);
   }
 
+  /**
+   * 设置缓存
+   */
   set(key: string, response: HttpResponse, ttl?: number): void {
-    if (this.memoryCache.size >= this.maxSize) {
-      this.evictLRU();
-    }
-
-    const responseSize = this.estimateSize(response);
-
-    const entry: CacheEntry = {
-      key,
-      response,
-      timestamp: Date.now(),
-      ttl: ttl ?? this.defaultTTL,
-      hits: 0,
-      size: responseSize
-    };
-
-    this.memoryCache.set(key, entry);
-    Logger.debug(this.TAG, `Cache set: ${key}, size: ${responseSize} bytes`);
+    const actualTTL = ttl ?? this.defaultTTL;
+    super.set(key, response, actualTTL);
+    Logger.debug(this.TAG, `Cache set: ${key}, size: ${this.estimateValueSize(response)} bytes`);
   }
 
-  delete(key: string): boolean {
-    return this.memoryCache.delete(key);
-  }
-
-  has(key: string): boolean {
-    const entry = this.memoryCache.get(key);
-    if (!entry) return false;
-
-    if (this.isExpired(entry)) {
-      this.memoryCache.delete(key);
-      return false;
-    }
-
-    return true;
-  }
-
-  clear(): void {
-    this.memoryCache.clear();
-    this.hits = 0;
-    this.misses = 0;
-    Logger.info(this.TAG, 'Cache cleared');
-  }
-
-  private isExpired(entry: CacheEntry): boolean {
-    return Date.now() - entry.timestamp > entry.ttl;
-  }
-
-  private evictLRU(): void {
-    let lruKey: string | null = null;
-    let lruHits = Infinity;
-
-    this.memoryCache.forEach((entry, key) => {
-      if (entry.hits < lruHits) {
-        lruHits = entry.hits;
-        lruKey = key;
-      }
-    });
-
-    if (lruKey) {
-      this.memoryCache.delete(lruKey);
-      Logger.debug(this.TAG, `Evicted LRU cache entry: ${lruKey}`);
-    }
-  }
-
-  private estimateSize(response: HttpResponse): number {
+  /**
+   * 估算响应大小
+   */
+  protected estimateValueSize(response: HttpResponse): number {
     try {
       const dataStr = typeof response.data === 'string'
         ? response.data
@@ -170,65 +98,59 @@ export class RequestCache {
       return 1000;
     }
   }
+
+  /**
+   * 获取缓存统计（扩展版）
+   */
   getStats(): CacheStats {
-    const entries: CacheEntryInfo[] = Array.from(this.memoryCache.entries()).map((entryPair) => {
-      const key = entryPair[0];
-      const entry = entryPair[1];
+    const baseStats = super.getStats();
+
+    const entries: CacheEntryInfo[] = this.keys().map(key => {
+      const entry = this.cache.get(key);
       return {
         key,
-        size: entry.size,
-        age: Date.now() - entry.timestamp,
-        hits: entry.hits
-      } as CacheEntryInfo;
+        size: entry?.size ?? 0,
+        age: Date.now() - (entry?.timestamp ?? 0),
+        hits: entry?.accessCount ?? 0
+      };
     });
 
-    const totalRequests = this.hits + this.misses;
-
     return {
-      size: this.memoryCache.size,
-      maxSize: this.maxSize,
-      hitRate: totalRequests > 0 ? this.hits / totalRequests : 0,
-      missRate: totalRequests > 0 ? this.misses / totalRequests : 0,
+      ...baseStats,
       entries
     };
   }
 
+  /**
+   * 设置最大缓存大小
+   */
   setMaxSize(size: number): void {
-    this.maxSize = size;
-
-    while (this.memoryCache.size > this.maxSize) {
-      this.evictLRU();
-    }
+    this.setConfig({ maxSize: size });
   }
 
+  /**
+   * 设置默认 TTL
+   */
   setDefaultTTL(ttl: number): void {
     this.defaultTTL = ttl;
+    this.setConfig({ ttl });
   }
 
-  cleanup(): void {
-    const expiredKeys: string[] = [];
-
-    this.memoryCache.forEach((entry, key) => {
-      if (this.isExpired(entry)) {
-        expiredKeys.push(key);
-      }
-    });
-
-    for (const key of expiredKeys) {
-      this.memoryCache.delete(key);
-    }
-
-    if (expiredKeys.length > 0) {
-      Logger.debug(this.TAG, `Cleaned up ${expiredKeys.length} expired entries`);
-    }
-  }
-
+  /**
+   * 判断是否应该缓存
+   */
   shouldCache(method: string, status: number): boolean {
     if (method.toUpperCase() !== 'GET') {
       return false;
     }
-
     return status >= 200 && status < 300;
+  }
+
+  /**
+   * 清理过期缓存
+   */
+  cleanup(): void {
+    this.cleanupExpired();
   }
 }
 

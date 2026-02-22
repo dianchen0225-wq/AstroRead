@@ -23,7 +23,7 @@ export struct BookSourceRepairPage {
   private diagnosticTool: BookSourceDiagnosticTool = BookSourceDiagnosticTool.getInstance();
   private sourceManager: BookSourceManager = BookSourceManager.getInstance();
   private healthManager: EnhancedSourceHealthManager = EnhancedSourceHealthManager.getInstance();
-  private viewModel: BookSourceViewModel = new BookSourceViewModel();
+  private viewModel: BookSourceViewModel = BookSourceViewModel.getInstance();
 
   aboutToAppear(): void {
     // 初始化上下文

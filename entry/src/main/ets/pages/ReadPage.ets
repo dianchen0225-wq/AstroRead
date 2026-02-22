@@ -5,7 +5,7 @@ import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
-import { AppLoading, AppEmpty } from '../components/UIComponents';
+import { AppLoading, AppEmpty } from '../components/index';
 import { AppButton } from '../components/AppButton';
 import common from '@ohos.app.ability.common';
 
@@ -74,6 +74,10 @@ struct ReadPage {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
     this.saveReadingProgress();
+    // 清理内存，释放大型对象
+    this.chapterContent = '';
+    this.book = null;
+    this.chapters = [];
   }
 
   async loadBookInfo(): Promise<void> {
@@ -217,7 +221,7 @@ struct ReadPage {
   buildContent() {
     Column() {
       if (this.isLoading) {
-        AppLoading({ loadingText: '加载中...' })
+        AppLoading({ text: '加载中...' })
       } else if (this.chapterContent) {
         Scroll() {
           Column() {
@@ -247,9 +251,9 @@ struct ReadPage {
         this.buildBottomNavigation()
       } else {
         AppEmpty({
-          emptyIcon: '📖',
-          emptyTitle: '内容加载失败',
-          emptyDescription: '请检查网络连接后重试'
+          icon: '📖',
+          title: '内容加载失败',
+          description: '请检查网络连接后重试'
         })
       }
     }

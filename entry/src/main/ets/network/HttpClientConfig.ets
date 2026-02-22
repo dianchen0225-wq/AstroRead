@@ -12,6 +12,7 @@ import {
   RequestCacheConfig,
   RetryConfig
 } from './interfaces/IHttpClient';
+import { DEFAULT_USER_AGENT, USER_AGENT_POOL } from './UserAgentPool';
 
 /**
  * 状态码文本映射
@@ -53,7 +54,7 @@ const DEFAULTS: DefaultConfig = {
   CACHE_TTL: 5 * 60 * 1000,
   MAX_RETRIES: 3,
   MAX_METRICS: 100,
-  DEFAULT_USER_AGENT: 'AstroRead/1.0.0'
+  DEFAULT_USER_AGENT: DEFAULT_USER_AGENT
 };
 
 /**
@@ -108,7 +109,7 @@ export class ConfigManager {
       retry: config?.retry ?? { maxRetries: DEFAULTS.MAX_RETRIES },
       enableLogging: config?.enableLogging ?? true,
       enableMetrics: config?.enableMetrics ?? true,
-      userAgentPool: config?.userAgentPool ?? [],
+      userAgentPool: config?.userAgentPool ?? USER_AGENT_POOL,
       refererPool: config?.refererPool ?? []
     };
   }
