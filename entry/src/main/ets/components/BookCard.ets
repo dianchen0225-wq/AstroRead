@@ -1,7 +1,7 @@
 import { DesignSystem } from '../common/DesignSystem';
 import { themeManager } from '../common/ThemeManager';
 import { Book, SourceStatus } from '../models/Book';
-import { purifyIntro } from '../utils/ContentPurifier';
+import { purifyContent } from '../utils/ContentPurifier';
 
 @ComponentV2
 export struct BookCard {
@@ -124,7 +124,7 @@ export struct BookCard {
           }
 
           if (!this.compact && this.book.intro) {
-            Text(purifyIntro(this.book.intro))
+            Text(purifyContent(this.book.intro))
               .fontSize(DesignSystem.Typography.size.xs)
               .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
               .margin({ top: DesignSystem.Spacing.xs })

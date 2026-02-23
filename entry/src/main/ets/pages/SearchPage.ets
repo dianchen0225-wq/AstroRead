@@ -8,7 +8,7 @@
   import { NavigationManager, NavigationParams, GenericNavParams } from '../common/NavigationManager';
   import { common } from '@kit.AbilityKit';
   import { NetworkManager } from '../utils/NetworkManager';
-  import { purifyIntro } from '../utils/ContentPurifier';
+  import { purifyContent } from '../utils/ContentPurifier';
   import { sourceValidatorService, BatchValidationProgress } from '../utils/SourceValidatorService';
   import { BookListDataSource } from '../components/OptimizedList';
 
@@ -889,7 +889,7 @@
           }
 
           if (book.intro) {
-            Text(purifyIntro(book.intro))
+            Text(purifyContent(book.intro))
               .fontSize(DesignSystem.Typography.size.xs)
               .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
               .margin({ top: DesignSystem.Spacing.xs })
