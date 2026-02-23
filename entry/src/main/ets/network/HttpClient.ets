@@ -158,6 +158,9 @@ export class HttpClient implements IHttpClient {
       let abortController: AbortControllerImpl;
       if (processedConfig.abortController instanceof AbortControllerImpl) {
         abortController = processedConfig.abortController;
+        if (processedConfig.timeout && processedConfig.timeout > 0) {
+          abortController.setTimeout(processedConfig.timeout);
+        }
       } else {
         abortController = AbortManager.getInstance().createController(requestId, processedConfig.timeout ?? DEFAULTS.TIMEOUT);
       }

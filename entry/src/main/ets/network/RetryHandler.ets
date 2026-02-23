@@ -6,6 +6,10 @@
 import { RetryConfig, HttpRequestConfig, HttpError, HttpErrorCode } from './interfaces/IHttpClient';
 import { Logger } from '../utils/Logger';
 
+interface ExtendedRetryConfig extends RetryConfig {
+  retryableErrorPatterns?: RegExp[];
+}
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
   retryDelay: 1000,
@@ -92,9 +96,19 @@ export class RetryHandler {
     }
 
     const errorMessage = error.message.toLowerCase();
+    
     if (config.retryableErrors) {
       for (const retryableError of config.retryableErrors) {
-        if (errorMessage.includes(retryableError.toLowerCase())) {
+        if (errorMessage === retryableError.toLowerCase()) {
+          return true;
+        }
+      }
+    }
+
+    if ((config as ExtendedRetryConfig).retryableErrorPatterns) {
+      const patterns = (config as ExtendedRetryConfig).retryableErrorPatterns!;
+      for (const pattern of patterns) {
+        if (pattern.test(errorMessage)) {
           return true;
         }
       }

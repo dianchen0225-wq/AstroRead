@@ -63,6 +63,7 @@ export struct SourcePage {
   @Local pendingImportContent: string = '';
   @Local pendingImportFormat: string = '';
   @Local riskConfirmCount: number = 0;
+  @Local isConfirmingRisk: boolean = false;
   @Local totalCount: number = 0;
   @Local currentPage: number = 1;
   @Local isLoadingMore: boolean = false;
@@ -371,12 +372,17 @@ export struct SourcePage {
   }
 
   async confirmImportWithRisk(): Promise<void> {
+    if (this.isConfirmingRisk) {
+      return;
+    }
+    
     if (this.riskConfirmCount < 1) {
       this.riskConfirmCount++;
       Logger.info('SourcePage', '请再次点击确认导入（安全风险）');
       return;
     }
     
+    this.isConfirmingRisk = true;
     this.showSecurityWarning = false;
     this.isImporting = true;
     this.riskConfirmCount = 0;
@@ -400,6 +406,7 @@ export struct SourcePage {
       Logger.error('SourcePage', '导入失败: ' + (error instanceof Error ? error.message : '未知错误'));
     } finally {
       this.isImporting = false;
+      this.isConfirmingRisk = false;
       this.pendingImportContent = '';
       this.pendingImportFormat = '';
       this.securityScanResult = null;

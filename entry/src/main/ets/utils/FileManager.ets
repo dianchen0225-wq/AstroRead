@@ -35,6 +35,12 @@ export interface EncodingDetectionResult {
   bomType?: string;
 }
 
+export interface BOMDetectionResult {
+  hasBOM: boolean;
+  encoding: string;
+  bomType?: string;
+}
+
 export class FileManager {
   private static instance: FileManager | null = null;
   private readonly TAG = 'FileManager';
@@ -201,15 +207,20 @@ export class FileManager {
       return gbResult;
     }
 
-    return {
+    const defaultResult: EncodingDetectionResult = {
       encoding: 'gb18030',
       confidence: 0.5,
       hasBOM: false
     };
+    return defaultResult;
   }
 
-  private detectBOM(data: Uint8Array): { hasBOM: boolean; encoding: string; bomType?: string } {
-    for (const [encoding, bom] of this.BOM_PATTERNS) {
+  private detectBOM(data: Uint8Array): BOMDetectionResult {
+    const entries = Array.from(this.BOM_PATTERNS.entries());
+    for (let idx = 0; idx < entries.length; idx++) {
+      const entry = entries[idx];
+      const encoding = entry[0];
+      const bom = entry[1];
       if (data.length >= bom.length) {
         let match = true;
         for (let i = 0; i < bom.length; i++) {
@@ -219,11 +230,17 @@ export class FileManager {
           }
         }
         if (match) {
-          return { hasBOM: true, encoding: encoding.toLowerCase(), bomType: encoding };
+          const result: BOMDetectionResult = {
+            hasBOM: true,
+            encoding: encoding.toLowerCase(),
+            bomType: encoding
+          };
+          return result;
         }
       }
     }
-    return { hasBOM: false, encoding: '' };
+    const result: BOMDetectionResult = { hasBOM: false, encoding: '' };
+    return result;
   }
 
   private isValidUTF8(data: Uint8Array): boolean {

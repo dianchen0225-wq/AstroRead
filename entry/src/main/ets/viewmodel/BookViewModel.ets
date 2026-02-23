@@ -38,6 +38,10 @@ export class BookViewModel {
   
   private searchHistory: string[] = [];
   private paginationConfig: SearchPaginationConfig = DEFAULT_PAGINATION_CONFIG;
+  
+  private isLoading: boolean = false;
+  private loadingLock: Promise<void> = Promise.resolve();
+  private loadingLockResolver: (() => void) | null = null;
 
   setContext(context: common.UIAbilityContext): void {
     this.context = context;
@@ -201,6 +205,16 @@ export class BookViewModel {
    * 搜索书籍（从网络书源）- 增强版
    */
   async searchBooks(keyword: string, bookSources: BookSource[]): Promise<Book[]> {
+    if (this.isLoading) {
+      Logger.warn('BookViewModel', '搜索正在进行中，请等待完成');
+      return [];
+    }
+    
+    this.isLoading = true;
+    this.loadingLock = new Promise<void>((resolve) => {
+      this.loadingLockResolver = resolve;
+    });
+    
     const startTime = Date.now();
     
     try {
@@ -233,6 +247,12 @@ export class BookViewModel {
     } catch (error) {
       Logger.error('BookViewModel', `搜索书籍失败：${error}`);
       throw (error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      this.isLoading = false;
+      if (this.loadingLockResolver) {
+        this.loadingLockResolver();
+        this.loadingLockResolver = null;
+      }
     }
   }
 

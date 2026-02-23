@@ -29,11 +29,11 @@ export class AbortControllerImpl {
   private _reason: string | null = null;
   private _listeners: Set<(ev: CustomEvent) => void> = new Set();
   private _timeoutId: number | null = null;
+  private _completed: boolean = false;
 
   get signal(): AbortSignal {
     const self = this;
     
-    // 使用类来实现信号对象，避免对象字面量问题
     class SignalImpl implements AbortSignal {
       get aborted(): boolean { return self._aborted; }
       get reason(): string | null { return self._reason; }
@@ -83,13 +83,21 @@ export class AbortControllerImpl {
     });
   }
 
+  complete(): void {
+    this._completed = true;
+    if (this._timeoutId !== null) {
+      clearTimeout(this._timeoutId);
+      this._timeoutId = null;
+    }
+  }
+
   setTimeout(timeout: number): void {
     if (this._timeoutId !== null) {
       clearTimeout(this._timeoutId);
     }
 
     this._timeoutId = setTimeout(() => {
-      if (!this._aborted) {
+      if (!this._aborted && !this._completed) {
         this.abort(`Request timeout after ${timeout}ms`);
       }
     }, timeout);

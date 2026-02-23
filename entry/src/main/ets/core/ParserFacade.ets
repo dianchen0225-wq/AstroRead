@@ -46,6 +46,7 @@ export interface ParseResultCache {
   result: ParseResult<object>;
   timestamp: number;
   hits: number;
+  lastAccessTime: number;
 }
 
 // 缓存统计条目接口
@@ -244,6 +245,53 @@ export class ParserFacade implements ParserRegistry {
     return parser.parseSync(content, options) as ParseResult<T>;
   }
   async parseJSON<T extends object = JsonObject>(content: string, options?: ParseOptions): Promise<ParseResult<T>> {
+    if (typeof content !== 'string') {
+      const errorInfo: ParseErrorInfo = {
+        code: ParserErrorCode.INVALID_INPUT,
+        message: 'JSON parse requires string input',
+        severity: 'error'
+      };
+      const metadata: ParseMetadata = {
+        parserType: ParserType.JSON,
+        parseTime: 0,
+        dataSize: 0,
+        cached: false,
+        timestamp: Date.now(),
+        version: '1.0.0'
+      };
+      return {
+        data: null as T,
+        status: ParseStatus.FAILED,
+        errors: [errorInfo],
+        warnings: [],
+        metadata
+      };
+    }
+    
+    const trimmed = content.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      const errorInfo: ParseErrorInfo = {
+        code: ParserErrorCode.INVALID_FORMAT,
+        message: 'Content does not appear to be valid JSON',
+        severity: 'error'
+      };
+      const metadata: ParseMetadata = {
+        parserType: ParserType.JSON,
+        parseTime: 0,
+        dataSize: content.length,
+        cached: false,
+        timestamp: Date.now(),
+        version: '1.0.0'
+      };
+      return {
+        data: null as T,
+        status: ParseStatus.FAILED,
+        errors: [errorInfo],
+        warnings: [],
+        metadata
+      };
+    }
+    
     return this.parse<T>(content, ParserType.JSON, options);
   }
 
@@ -339,7 +387,8 @@ export class ParserFacade implements ParserRegistry {
     const str = typeof content === 'string' ? content : new util.TextDecoder('utf-8').decodeToString(new Uint8Array(content));
     
     let contentHash = 0;
-    for (let i = 0; i < Math.min(str.length, 1000); i++) {
+    const step = Math.max(1, Math.floor(str.length / 2000));
+    for (let i = 0; i < str.length; i += step) {
       const char = str.charCodeAt(i);
       contentHash = ((contentHash << 5) - contentHash) + char;
       contentHash = contentHash & contentHash;
@@ -349,18 +398,25 @@ export class ParserFacade implements ParserRegistry {
     if (options?.customRules) {
       try {
         const customRules = options.customRules;
-        customRules.forEach((value: string, key: string) => {
-          for (let i = 0; i < Math.min(key.length, 50); i++) {
-            const char = key.charCodeAt(i);
-            optionsHash = ((optionsHash << 5) - optionsHash) + char;
+        const keys: string[] = [];
+        customRules.forEach((_, key: string) => keys.push(key));
+        keys.sort();
+        
+        for (const key of keys) {
+          const value = customRules.get(key) || '';
+          for (let i = 0; i < key.length; i++) {
+            optionsHash = ((optionsHash << 5) - optionsHash) + key.charCodeAt(i);
             optionsHash = optionsHash & optionsHash;
           }
-          for (let i = 0; i < Math.min(value.length, 100); i++) {
-            const char = value.charCodeAt(i);
-            optionsHash = ((optionsHash << 5) - optionsHash) + char;
+          optionsHash = ((optionsHash << 5) - optionsHash) + 58;
+          optionsHash = optionsHash & optionsHash;
+          for (let i = 0; i < value.length; i++) {
+            optionsHash = ((optionsHash << 5) - optionsHash) + value.charCodeAt(i);
             optionsHash = optionsHash & optionsHash;
           }
-        });
+          optionsHash = ((optionsHash << 5) - optionsHash) + 124;
+          optionsHash = optionsHash & optionsHash;
+        }
       } catch (e) {
         Logger.warn(this.TAG, `Failed to hash customRules: ${e}`);
       }
@@ -381,6 +437,7 @@ export class ParserFacade implements ParserRegistry {
     }
 
     cached.hits++;
+    cached.lastAccessTime = Date.now();
     return cached.result;
   }
 
@@ -389,22 +446,24 @@ export class ParserFacade implements ParserRegistry {
       this.evictLRU();
     }
 
+    const now = Date.now();
     const cacheEntry: ParseResultCache = {
       key,
       result,
-      timestamp: Date.now(),
-      hits: 0
+      timestamp: now,
+      hits: 0,
+      lastAccessTime: now
     };
     this.cache.set(key, cacheEntry);
   }
 
   private evictLRU(): void {
     let lruKey: string | null = null;
-    let lruHits = Infinity;
+    let oldestAccess = Infinity;
 
     this.cache.forEach((value, key) => {
-      if (value.hits < lruHits) {
-        lruHits = value.hits;
+      if (value.lastAccessTime < oldestAccess) {
+        oldestAccess = value.lastAccessTime;
         lruKey = key;
       }
     });
@@ -515,16 +574,25 @@ export class ParserFacade implements ParserRegistry {
     options?: ParseOptions
   ): Promise<ParseResult<T>> {
     const errors: Error[] = [];
+    const startTime = Date.now();
+    let lastSuccessfulParser: ParserType | null = null;
 
     for (const type of types) {
       try {
         const result = await this.parse<T>(content, type, options);
         if (result.status !== ParseStatus.FAILED) {
+          lastSuccessfulParser = type;
           return result;
+        }
+        if (result.errors && result.errors.length > 0) {
+          const errorMsg = result.errors.map((e: ParseErrorInfo) => e.message).join('; ');
+          errors.push(new Error(`[${type}] ${errorMsg}`));
         }
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
+        err.message = `[${type}] ${err.message}`;
         errors.push(err);
+        Logger.debug(this.TAG, `Fallback parser ${type} failed: ${err.message}`);
       }
     }
 
@@ -535,16 +603,18 @@ export class ParserFacade implements ParserRegistry {
     }));
 
     const metadata: ParseMetadata = {
-      parserType: ParserType.TEXT,
-      parseTime: 0,
-      dataSize: 0,
+      parserType: lastSuccessfulParser ?? ParserType.TEXT,
+      parseTime: Date.now() - startTime,
+      dataSize: typeof content === 'string' ? content.length : content.byteLength,
       cached: false,
       timestamp: Date.now(),
       version: '1.0.0'
     };
 
+    Logger.warn(this.TAG, `All fallback parsers failed for content, tried ${types.length} parsers`);
+    
     const failedResult: ParseResult<T> = {
-      data: new Object() as T,
+      data: null as T,
       status: ParseStatus.FAILED,
       errors: errorInfos,
       warnings: [],

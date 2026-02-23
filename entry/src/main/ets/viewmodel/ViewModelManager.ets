@@ -8,6 +8,7 @@ import common from '@ohos.app.ability.common';
 
 export class ViewModelManager {
   private static instance: ViewModelManager | null = null;
+  private static isDestroyed: boolean = false;
   
   private bookViewModel: BookViewModel | null = null;
   private bookSourceViewModel: BookSourceViewModel | null = null;
@@ -21,10 +22,24 @@ export class ViewModelManager {
   private constructor() {}
   
   static getInstance(): ViewModelManager {
-    if (ViewModelManager.instance === null) {
+    if (ViewModelManager.instance === null || ViewModelManager.isDestroyed) {
       ViewModelManager.instance = new ViewModelManager();
+      ViewModelManager.isDestroyed = false;
     }
     return ViewModelManager.instance;
+  }
+  
+  static destroyInstance(): void {
+    if (ViewModelManager.instance !== null) {
+      ViewModelManager.instance.clearAll();
+      ViewModelManager.instance.context = null;
+      ViewModelManager.isDestroyed = true;
+      ViewModelManager.instance = null;
+    }
+  }
+  
+  static isInstanceAlive(): boolean {
+    return ViewModelManager.instance !== null && !ViewModelManager.isDestroyed;
   }
   
   setContext(context: common.UIAbilityContext): void {

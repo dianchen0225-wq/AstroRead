@@ -264,6 +264,8 @@ struct ReadPage {
                 .width(100)
                 .height(40)
                 .margin({ right: 16 })
+                .enabled(this.showRetryCount < this.MAX_RETRY_COUNT)
+                .opacity(this.showRetryCount >= this.MAX_RETRY_COUNT ? 0.5 : 1)
                 .onClick(() => {
                   this.retryLoadChapter();
                 })
@@ -281,6 +283,15 @@ struct ReadPage {
             }
             .width('100%')
             .justifyContent(FlexAlign.Center)
+            
+            if (this.showRetryCount >= this.MAX_RETRY_COUNT) {
+              Text('已达到最大重试次数，请检查网络连接或书源配置')
+                .fontSize(12)
+                .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+                .margin({ top: 16 })
+                .textAlign(TextAlign.Center)
+                .width('80%')
+            }
           }
           .width('100%')
           .height('100%')

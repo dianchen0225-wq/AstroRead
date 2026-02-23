@@ -49,6 +49,7 @@ function createDefaultRuleContext(): RuleContext {
 
 export class AnalyzeRule {
   private static readonly TAG = 'AnalyzeRule';
+  private static readonly MAX_REGEX_CACHE_SIZE = 100;
   
   private content: string = '';
   private baseUrl: string = '';
@@ -474,6 +475,12 @@ export class AnalyzeRule {
     let regex = this.regexCache.get(cacheKey);
     
     if (!regex) {
+      if (this.regexCache.size >= AnalyzeRule.MAX_REGEX_CACHE_SIZE) {
+        const keys = Array.from(this.regexCache.keys());
+        for (let i = 0; i < Math.floor(keys.length / 2); i++) {
+          this.regexCache.delete(keys[i]);
+        }
+      }
       regex = new RegExp(pattern, flags);
       this.regexCache.set(cacheKey, regex);
     }

@@ -121,19 +121,13 @@ class BookSourceParser {
   private buildBookSourceFromAstroRead(data: AstroReadSourceData): BookSource | null {
     try {
       const name = data.bookSourceName || '';
-      let url = data.bookSourceUrl || '';  // 改为let以支持URL处理
+      let url = data.bookSourceUrl || '';
       
       if (!name || !url) {
         Logger.warn(this.TAG, '书源缺少必要字段：bookSourceName或bookSourceUrl');
         return null;
       }
       
-      // 处理URL中的##注释（阅读APP格式支持在URL后添加注释）
-      if (url.includes('##')) {
-        url = url.split('##')[0];
-      }
-      
-      // 处理URL中的##注释（阅读APP格式支持在URL后添加注释）
       if (url.includes('##')) {
         url = url.split('##')[0];
       }

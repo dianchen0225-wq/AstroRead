@@ -8,7 +8,8 @@ import {
   ResponseInterceptor,
   HttpRequestConfig,
   HttpResponse,
-  HttpError
+  HttpError,
+  HttpErrorCode
 } from './interfaces/IHttpClient';
 
 type RequestInterceptorHandler = (config: HttpRequestConfig) => HttpRequestConfig | Promise<HttpRequestConfig>;
@@ -94,13 +95,16 @@ export class InterceptorManager {
     let processedConfig = config;
     for (const interceptor of sortedInterceptors) {
       try {
-        processedConfig = await Promise.resolve(interceptor.handler(processedConfig));
+        const result = interceptor.handler(processedConfig);
+        processedConfig = result instanceof Promise ? await result : result;
       } catch (error) {
         if (interceptor.errorHandler) {
-          const httpError = error as HttpError;
-          await Promise.resolve(interceptor.errorHandler(httpError));
+          const httpError = this.toHttpError(error);
+          const errorResult = interceptor.errorHandler(httpError);
+          const processedError = errorResult instanceof Promise ? await errorResult : errorResult;
+          throw processedError;
         }
-        throw new Error(String(error));
+        throw this.toHttpError(error);
       }
     }
 
@@ -113,17 +117,40 @@ export class InterceptorManager {
     let processedResponse: HttpResponse<ESObject> = response as HttpResponse<ESObject>;
     for (const interceptor of sortedInterceptors) {
       try {
-        processedResponse = await Promise.resolve(interceptor.handler(processedResponse));
+        const result = interceptor.handler(processedResponse);
+        if (result instanceof Promise) {
+          processedResponse = await result;
+        } else {
+          processedResponse = result;
+        }
       } catch (error) {
         if (interceptor.errorHandler) {
-          const httpError = error as HttpError;
-          await Promise.resolve(interceptor.errorHandler(httpError));
+          const httpError = this.toHttpError(error as Error);
+          const errorResult = interceptor.errorHandler(httpError);
+          if (errorResult instanceof Promise) {
+            const processedError = await errorResult;
+            throw processedError;
+          } else {
+            throw errorResult;
+          }
         }
-        throw new Error(String(error));
+        throw this.toHttpError(error as Error);
       }
     }
 
     return processedResponse as HttpResponse<T>;
+  }
+
+  private toHttpError(error: Error): HttpError {
+    const message = error.message;
+    const httpError: HttpError = {
+      code: 'INTERCEPTOR_ERROR' as HttpErrorCode,
+      message,
+      name: 'InterceptorError',
+      isRetryable: false,
+      timestamp: Date.now()
+    };
+    return httpError;
   }
 
   async applyRequestErrorInterceptors(error: HttpError): Promise<HttpError> {
@@ -134,9 +161,14 @@ export class InterceptorManager {
     for (const interceptor of sortedInterceptors) {
       if (interceptor.errorHandler) {
         try {
-          processedError = await Promise.resolve(interceptor.errorHandler(processedError));
-        } catch (e) {
-          processedError = e as HttpError;
+          const result = interceptor.errorHandler(processedError);
+          if (result instanceof Promise) {
+            processedError = await result;
+          } else {
+            processedError = result;
+          }
+        } catch (err) {
+          processedError = err as HttpError;
         }
       }
     }
@@ -152,9 +184,14 @@ export class InterceptorManager {
     for (const interceptor of sortedInterceptors) {
       if (interceptor.errorHandler) {
         try {
-          processedError = await Promise.resolve(interceptor.errorHandler(processedError));
-        } catch (e) {
-          processedError = e as HttpError;
+          const result = interceptor.errorHandler(processedError);
+          if (result instanceof Promise) {
+            processedError = await result;
+          } else {
+            processedError = result;
+          }
+        } catch (err) {
+          processedError = err as HttpError;
         }
       }
     }

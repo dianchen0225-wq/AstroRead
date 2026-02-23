@@ -43,7 +43,7 @@
         "reason": "$string:permission_read_storage_reason",
         "usedScene": {
           "abilities": ["EntryAbility"],
-          "when": "always"
+          "when": "inuse"
         }
       },
       {
@@ -51,7 +51,7 @@
         "reason": "$string:permission_write_storage_reason",
         "usedScene": {
           "abilities": ["EntryAbility"],
-          "when": "always"
+          "when": "inuse"
         }
       }
     ]

@@ -296,10 +296,19 @@ export class AstroReadFacade {
     this.sourceManager.clearCache();
     this.searchEngine.clearCache();
     RuleEngine.clearContext();
+    if (this.htmlParser && typeof this.htmlParser.clearCache === 'function') {
+      this.htmlParser.clearCache();
+    }
   }
 
   destroy(): void {
     this.clearCache();
+    if (this.sourceManager && typeof this.sourceManager.destroy === 'function') {
+      this.sourceManager.destroy();
+    }
+    if (this.searchEngine && typeof this.searchEngine.destroy === 'function') {
+      this.searchEngine.destroy();
+    }
     AstroReadFacade.instance = null;
   }
 }

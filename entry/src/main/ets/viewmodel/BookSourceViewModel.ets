@@ -1,5 +1,5 @@
 
-import { BookSource, SearchRule, ChapterRule, ContentRule } from '../models/BookSource';
+import { BookSource, SearchRule, ChapterRule, ContentRule, BookSourceValidation } from '../models/BookSource';
 import { databaseManager } from '../utils/DatabaseManager';
 import { PagedBookSourcesResult } from '../utils/database/BookSourceRepository';
 import { NetworkManager } from '../utils/NetworkManager';
@@ -40,6 +40,11 @@ export interface DeleteResult {
   success: boolean;
   message: string;
   count?: number;
+}
+
+interface TestKeyword {
+  keyword: string;
+  priority: number;
 }
 
 /**
@@ -188,6 +193,13 @@ interface ValidationResult {
   error?: string;
 }
 
+interface TestBookSourceResult {
+  isAvailable: boolean;
+  responseTime: number;
+  successKeyword: string;
+  failureReason: string;
+}
+
 /**
  * 书源视图模型
  * 负责管理书源相关的业务逻辑和状态
@@ -203,6 +215,10 @@ export class BookSourceViewModel {
   private readonly MAX_URL_LENGTH = 2048;
   private readonly MAX_FILE_NAME_LENGTH = 255;
   private readonly ALLOWED_FILE_EXTENSIONS = ['json', 'txt'];
+  
+  private testDebounceTimer: number | null = null;
+  private readonly TEST_DEBOUNCE_DELAY = 500;
+  private pendingTestRequests: Map<string, Promise<TestBookSourceResult>> = new Map();
 
   /**
    * 设置上下文
@@ -450,13 +466,27 @@ export class BookSourceViewModel {
     return result.isAvailable;
   }
 
-  async testBookSourceWithDetails(bookSource: BookSource, adaptiveTimeout: boolean = true): Promise<{
-    isAvailable: boolean;
-    responseTime: number;
-    successKeyword: string;
-    failureReason: string;
-  }> {
-    const defaultResult = {
+  async testBookSourceWithDetails(bookSource: BookSource, adaptiveTimeout: boolean = true): Promise<TestBookSourceResult> {
+    const sourceId = bookSource.id || bookSource.url || '';
+    
+    if (this.pendingTestRequests.has(sourceId)) {
+      Logger.debug('BookSourceViewModel', `复用正在进行的测试请求: ${sourceId}`);
+      return this.pendingTestRequests.get(sourceId)!;
+    }
+
+    const testPromise = this.executeTestBookSource(bookSource, adaptiveTimeout);
+    this.pendingTestRequests.set(sourceId, testPromise);
+
+    try {
+      const result = await testPromise;
+      return result;
+    } finally {
+      this.pendingTestRequests.delete(sourceId);
+    }
+  }
+
+  private async executeTestBookSource(bookSource: BookSource, _adaptiveTimeout: boolean): Promise<TestBookSourceResult> {
+    const defaultResult: TestBookSourceResult = {
       isAvailable: false,
       responseTime: 0,
       successKeyword: '',
@@ -466,12 +496,22 @@ export class BookSourceViewModel {
     try {
       if (!bookSource) {
         Logger.warn('BookSourceViewModel', '书源数据为空');
-        return { ...defaultResult, failureReason: '书源数据为空' };
+        return {
+          isAvailable: false,
+          responseTime: 0,
+          successKeyword: '',
+          failureReason: '书源数据为空'
+        };
       }
 
       if (!bookSource.searchUrl) {
         Logger.warn('BookSourceViewModel', '书源没有配置搜索URL');
-        return { ...defaultResult, failureReason: '书源没有配置搜索URL' };
+        return {
+          isAvailable: false,
+          responseTime: 0,
+          successKeyword: '',
+          failureReason: '书源没有配置搜索URL'
+        };
       }
 
       const networkManager = NetworkManager.getInstance();
@@ -479,7 +519,7 @@ export class BookSourceViewModel {
         networkManager.setContext(this.context);
       }
 
-      const testKeywords = [
+      const testKeywords: TestKeyword[] = [
         { keyword: '斗罗大陆', priority: 1 },
         { keyword: '斗破苍穹', priority: 1 },
         { keyword: '凡人修仙传', priority: 1 },
@@ -505,7 +545,8 @@ export class BookSourceViewModel {
 
       const sortedKeywords = testKeywords.sort((a, b) => a.priority - b.priority);
 
-      for (const { keyword: testKeyword } of sortedKeywords) {
+      for (let i = 0; i < sortedKeywords.length; i++) {
+        const testKeyword = sortedKeywords[i].keyword;
         let searchUrl = bookSource.searchUrl;
 
         searchUrl = searchUrl
@@ -569,7 +610,13 @@ export class BookSourceViewModel {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '未知错误';
       Logger.error('BookSourceViewModel', `测试书源有效性失败: ${errorMsg}`);
-      return { ...defaultResult, failureReason: errorMsg };
+      const errorResult: TestBookSourceResult = {
+        isAvailable: false,
+        responseTime: 0,
+        successKeyword: '',
+        failureReason: errorMsg
+      };
+      return errorResult;
     }
   }
 
@@ -582,12 +629,13 @@ export class BookSourceViewModel {
   ): Promise<void> {
     try {
       bookSource.status = isAvailable ? 'available' : 'unavailable';
-      bookSource.validation = {
+      const validation: BookSourceValidation = {
         lastValidationTime: Date.now(),
         responseTime: responseTime,
         successKeyword: successKeyword,
         failureReason: failureReason
       };
+      bookSource.validation = validation;
       await this.databaseManager.upsertBookSource(bookSource);
     } catch (error) {
       Logger.error('BookSourceViewModel', `更新书源验证状态失败: ${error}`);
@@ -610,8 +658,9 @@ export class BookSourceViewModel {
         Logger.info('BookSourceViewModel', `书源 ${source.name} 已手动标记为 ${status}`);
       }
     } catch (error) {
-      Logger.error('BookSourceViewModel', `手动设置书源状态失败: ${error}`);
-      throw error;
+      const err = error instanceof Error ? error : new Error(String(error));
+      Logger.error('BookSourceViewModel', `手动设置书源状态失败: ${err.message}`);
+      throw err;
     }
   }
 

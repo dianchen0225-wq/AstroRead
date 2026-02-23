@@ -18,15 +18,22 @@ export interface PagedChaptersResult {
 
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_CHAPTERS_PER_SAVE = 500;
+const MAX_CONTENT_CACHE_SIZE = 50;
 
-/**
- * 章节视图模型
- */
+interface ContentCacheEntry {
+  content: ChapterContent;
+  timestamp: number;
+  accessCount: number;
+}
+
 export class ChapterViewModel {
   private readonly databaseManager = DatabaseManager.getInstance();
   private readonly networkManager = NetworkManager.getInstance();
   private context: common.UIAbilityContext | null = null;
   private static readonly TAG = 'ChapterViewModel';
+  
+  private contentCache: Map<string, ContentCacheEntry> = new Map();
+  private readonly cacheTTL: number = 30 * 60 * 1000;
 
   setContext(context: common.UIAbilityContext): void {
     this.context = context;
@@ -153,11 +160,25 @@ export class ChapterViewModel {
       const batchNum = Math.floor(i / MAX_CHAPTERS_PER_SAVE) + 1;
       
       Logger.debug(ChapterViewModel.TAG, `保存第${batchNum}/${totalBatches}批, ${batch.length}个章节`);
-      await this.batchUpsertChapters(batch);
       
-      // 让出主线程
+      try {
+        await this.batchUpsertChapters(batch);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        Logger.error(ChapterViewModel.TAG, `第${batchNum}批章节保存失败: ${err.message}`);
+        throw err;
+      }
+      
       if (i + MAX_CHAPTERS_PER_SAVE < chapters.length) {
-        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        await new Promise<void>((resolve, reject) => {
+          setTimeout(() => {
+            if (!this.context) {
+              reject(new Error('Context已销毁'));
+              return;
+            }
+            resolve();
+          }, 0);
+        });
       }
     }
   }
@@ -206,10 +227,29 @@ export class ChapterViewModel {
       Logger.info(ChapterViewModel.TAG, `传入的chapterUrl: ${chapterUrl}`);
       Logger.info(ChapterViewModel.TAG, `书源baseUrl: ${bookSource.url}`);
 
+      const cachedContent = this.getFromContentCache(chapterId);
+      if (cachedContent) {
+        Logger.info(ChapterViewModel.TAG, `从缓存获取章节内容: ${chapterId}`);
+        return cachedContent;
+      }
+
       let finalChapterUrl = chapterUrl;
-      if (chapterUrl && !chapterUrl.startsWith('http')) {
-        finalChapterUrl = this.resolveChapterUrl(bookSource.url, chapterUrl);
-        Logger.info(ChapterViewModel.TAG, `相对路径转换: ${chapterUrl} -> ${finalChapterUrl}`);
+      if (chapterUrl) {
+        if (chapterUrl.startsWith('http://') || chapterUrl.startsWith('https://')) {
+          finalChapterUrl = chapterUrl;
+          Logger.info(ChapterViewModel.TAG, `使用原始绝对路径: ${finalChapterUrl}`);
+        } else if (chapterUrl.startsWith('//')) {
+          const protocol = bookSource.url.startsWith('https') ? 'https:' : 'http:';
+          finalChapterUrl = protocol + chapterUrl;
+          Logger.info(ChapterViewModel.TAG, `协议相对路径转换: ${chapterUrl} -> ${finalChapterUrl}`);
+        } else {
+          finalChapterUrl = this.resolveChapterUrl(bookSource.url, chapterUrl);
+          Logger.info(ChapterViewModel.TAG, `相对路径转换: ${chapterUrl} -> ${finalChapterUrl}`);
+        }
+      }
+
+      if (!finalChapterUrl) {
+        throw new Error('章节URL为空，无法获取内容');
       }
 
       Logger.info(ChapterViewModel.TAG, `最终请求URL: ${finalChapterUrl}`);
@@ -219,17 +259,75 @@ export class ChapterViewModel {
       Logger.info(ChapterViewModel.TAG, `获取内容成功，长度: ${content.length}`);
       Logger.info(ChapterViewModel.TAG, `========== 章节内容获取完成 ==========`);
       
-      return {
+      const result: ChapterContent = {
         chapterId: chapterId,
         content: content,
         nextUrl: undefined,
         prevUrl: undefined
       };
+      
+      this.setToContentCache(chapterId, result);
+      
+      return result;
     } catch (error) {
       Logger.error(ChapterViewModel.TAG, `========== 获取章节内容失败 ==========`);
       Logger.error(ChapterViewModel.TAG, `错误: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to get chapter content: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private getFromContentCache(chapterId: string): ChapterContent | null {
+    const entry = this.contentCache.get(chapterId);
+    if (!entry) {
+      return null;
+    }
+
+    if (Date.now() - entry.timestamp > this.cacheTTL) {
+      this.contentCache.delete(chapterId);
+      return null;
+    }
+
+    entry.accessCount++;
+    return entry.content;
+  }
+
+  private setToContentCache(chapterId: string, content: ChapterContent): void {
+    if (this.contentCache.size >= MAX_CONTENT_CACHE_SIZE) {
+      this.evictContentCache();
+    }
+
+    this.contentCache.set(chapterId, {
+      content: content,
+      timestamp: Date.now(),
+      accessCount: 1
+    });
+  }
+
+  private evictContentCache(): void {
+    let lruKey: string | null = null;
+    let lowestScore = Infinity;
+    const now = Date.now();
+
+    this.contentCache.forEach((entry, key) => {
+      const ageScore = (now - entry.timestamp) / this.cacheTTL;
+      const accessScore = 1 / (entry.accessCount + 1);
+      const score = ageScore * 0.3 + accessScore * 0.7;
+
+      if (score < lowestScore) {
+        lowestScore = score;
+        lruKey = key;
+      }
+    });
+
+    if (lruKey) {
+      this.contentCache.delete(lruKey);
+      Logger.debug(ChapterViewModel.TAG, `清理章节内容缓存: ${lruKey}`);
+    }
+  }
+
+  clearContentCache(): void {
+    this.contentCache.clear();
+    Logger.info(ChapterViewModel.TAG, '章节内容缓存已清空');
   }
 
   private resolveChapterUrl(baseUrl: string, relativeUrl: string): string {

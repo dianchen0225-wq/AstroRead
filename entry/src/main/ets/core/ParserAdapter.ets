@@ -23,6 +23,8 @@ import { util } from '@kit.ArkTS';
 interface CacheEntry<T> {
   result: ParseResult<T>;
   timestamp: number;
+  lastAccessTime: number;
+  accessCount: number;
 }
 
 interface CacheStats {
@@ -224,7 +226,7 @@ export abstract class ParserAdapter<T> implements IParserAdapter<T> {
     };
 
     return {
-      data: new Object() as T,
+      data: null as T,
       status: ParseStatus.FAILED,
       errors: [errorInfo],
       warnings: [],
@@ -257,7 +259,7 @@ export abstract class ParserAdapter<T> implements IParserAdapter<T> {
 
 export abstract class CachingParserAdapter<T> extends ParserAdapter<T> {
   private cache: Map<string, CacheEntry<T>> = new Map();
-  private readonly cacheTTL: number = 5 * 60 * 1000; // 5 minutes
+  private readonly cacheTTL: number = 5 * 60 * 1000;
   private readonly maxCacheSize: number = 100;
 
   override async parse(content: string | ArrayBuffer, options?: ParseOptions): Promise<ParseResult<T>> {
@@ -282,13 +284,21 @@ export abstract class CachingParserAdapter<T> extends ParserAdapter<T> {
 
   protected generateCacheKey(content: string | ArrayBuffer): string {
     const str: string = typeof content === 'string' ? content : this.toStringContent(content);
-    let hash: number = 0;
-    for (let i = 0; i < Math.min(str.length, 1000); i++) {
+    let hash1: number = 5381;
+    let hash2: number = 2166136261;
+    
+    const len = str.length;
+    const step = Math.max(1, Math.floor(len / 2000));
+    
+    for (let i = 0; i < len; i += step) {
       const char: number = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
+      hash1 = ((hash1 << 5) + hash1) ^ char;
+      hash2 ^= char;
+      hash2 = Math.imul(hash2, 16777619);
     }
-    return `${this.type}_${hash}_${str.length}`;
+    
+    const combinedHash = (hash1 >>> 0).toString(36) + '_' + (hash2 >>> 0).toString(36);
+    return `${this.type}_${combinedHash}_${len}`;
   }
 
   protected getFromCache(key: string): ParseResult<T> | null {
@@ -302,33 +312,45 @@ export abstract class CachingParserAdapter<T> extends ParserAdapter<T> {
       return null;
     }
 
+    cached.lastAccessTime = Date.now();
+    cached.accessCount++;
     return cached.result;
   }
 
   protected setCache(key: string, result: ParseResult<T>): void {
     if (this.cache.size >= this.maxCacheSize) {
-      this.evictOldest();
+      this.evictLRU();
     }
 
+    const now = Date.now();
     this.cache.set(key, {
       result,
-      timestamp: Date.now()
+      timestamp: now,
+      lastAccessTime: now,
+      accessCount: 0
     });
   }
 
-  private evictOldest(): void {
-    let oldestKey: string | null = null;
-    let oldestTime: number = Infinity;
+  private evictLRU(): void {
+    let lruKey: string | null = null;
+    let lowestScore: number = Infinity;
+    const now = Date.now();
 
     this.cache.forEach((value: CacheEntry<T>, key: string) => {
-      if (value.timestamp < oldestTime) {
-        oldestTime = value.timestamp;
-        oldestKey = key;
+      const ageWeight = 0.3;
+      const accessWeight = 0.7;
+      const normalizedAge = (now - value.lastAccessTime) / this.cacheTTL;
+      const normalizedAccess = 1 / (value.accessCount + 1);
+      const score = ageWeight * normalizedAge + accessWeight * normalizedAccess;
+
+      if (score < lowestScore) {
+        lowestScore = score;
+        lruKey = key;
       }
     });
 
-    if (oldestKey) {
-      this.cache.delete(oldestKey);
+    if (lruKey) {
+      this.cache.delete(lruKey);
     }
   }
 

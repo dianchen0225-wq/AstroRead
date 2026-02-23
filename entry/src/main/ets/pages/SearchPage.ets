@@ -190,9 +190,17 @@ export struct SearchPage {
       const bookFoundCallback = (newBooks: Book[], _progress: SearchProgress): void => {
         if (this.isComponentActive && page === 1) {
           for (const book of newBooks) {
-            const exists = this.searchResults.some(b => 
-              b.name === book.name && (b.author || '') === (book.author || '')
-            );
+            const exists = this.searchResults.some(b => {
+              if (b.bookSourceId && book.bookSourceId) {
+                return b.name === book.name && 
+                       (b.author || '') === (book.author || '') && 
+                       b.bookSourceId === book.bookSourceId;
+              }
+              if (b.bookUrl && book.bookUrl) {
+                return b.bookUrl === book.bookUrl;
+              }
+              return b.name === book.name && (b.author || '') === (book.author || '');
+            });
             if (!exists) {
               this.searchResults = this.addBookToArray(this.searchResults, book);
             }

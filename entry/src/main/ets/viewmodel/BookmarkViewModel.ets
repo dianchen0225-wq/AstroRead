@@ -72,15 +72,16 @@ export class BookmarkViewModel {
       await this.databaseManager.addBookmark(bookmark);
       
       if (this.syncConfig.enabled) {
-        this.syncBookmarkToCloud(bookmark).catch((error) => {
-          Logger.warn(BookmarkViewModel.TAG, `书签云同步失败: ${error}`);
+        this.syncBookmarkToCloud(bookmark).catch((err: Error) => {
+          Logger.warn(BookmarkViewModel.TAG, `书签云同步失败: ${err.message}`);
         });
       }
       
       return bookmark;
     } catch (error) {
-      Logger.error(BookmarkViewModel.TAG, `添加书签失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw (error instanceof Error ? error : new Error(String(error)));
+      const err = error instanceof Error ? error : new Error(String(error));
+      Logger.error(BookmarkViewModel.TAG, `添加书签失败: ${err.message}`);
+      throw err;
     }
   }
 
@@ -89,22 +90,44 @@ export class BookmarkViewModel {
       await this.databaseManager.deleteBookmark(bookmarkId);
       
       if (this.syncConfig.enabled) {
-        this.deleteBookmarkFromCloud(bookmarkId).catch((error) => {
-          Logger.warn(BookmarkViewModel.TAG, `删除书签云同步失败: ${error}`);
+        this.deleteBookmarkFromCloud(bookmarkId).catch((err: Error) => {
+          Logger.warn(BookmarkViewModel.TAG, `删除书签云同步失败: ${err.message}`);
         });
       }
     } catch (error) {
-      Logger.error(BookmarkViewModel.TAG, `删除书签失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw (error instanceof Error ? error : new Error(String(error)));
+      const err = error instanceof Error ? error : new Error(String(error));
+      Logger.error(BookmarkViewModel.TAG, `删除书签失败: ${err.message}`);
+      throw err;
     }
   }
 
   getSyncConfig(): SyncConfig {
-    return { ...this.syncConfig };
+    const config: SyncConfig = {
+      enabled: this.syncConfig.enabled,
+      lastSyncTime: this.syncConfig.lastSyncTime,
+      syncInterval: this.syncConfig.syncInterval,
+      serverUrl: this.syncConfig.serverUrl,
+      userId: this.syncConfig.userId
+    };
+    return config;
   }
 
   setSyncConfig(config: Partial<SyncConfig>): void {
-    this.syncConfig = { ...this.syncConfig, ...config };
+    if (config.enabled !== undefined) {
+      this.syncConfig.enabled = config.enabled;
+    }
+    if (config.lastSyncTime !== undefined) {
+      this.syncConfig.lastSyncTime = config.lastSyncTime;
+    }
+    if (config.syncInterval !== undefined) {
+      this.syncConfig.syncInterval = config.syncInterval;
+    }
+    if (config.serverUrl !== undefined) {
+      this.syncConfig.serverUrl = config.serverUrl;
+    }
+    if (config.userId !== undefined) {
+      this.syncConfig.userId = config.userId;
+    }
     Logger.info(BookmarkViewModel.TAG, `云同步配置已更新: enabled=${this.syncConfig.enabled}`);
   }
 
@@ -181,12 +204,14 @@ export class BookmarkViewModel {
         const localBookmark = await this.getBookmarkById(cloudBookmark.id);
         
         if (!localBookmark) {
-          await this.databaseManager.addBookmark(cloudBookmark);
+          const bookmark = this.convertSyncDataToBookmark(cloudBookmark);
+          await this.databaseManager.addBookmark(bookmark);
           syncedCount++;
         } else {
           const localSyncData = this.convertToSyncData(localBookmark, '', 0);
           if (cloudBookmark.syncVersion > localSyncData.syncVersion) {
-            await this.databaseManager.addBookmark(cloudBookmark);
+            const bookmark = this.convertSyncDataToBookmark(cloudBookmark);
+            await this.databaseManager.addBookmark(bookmark);
             syncedCount++;
           } else {
             conflictCount++;
@@ -252,5 +277,31 @@ export class BookmarkViewModel {
   private async downloadBookmarksFromCloud(): Promise<BookmarkSyncData[]> {
     Logger.debug(BookmarkViewModel.TAG, '从云端下载书签');
     return [];
+  }
+
+  private convertToSyncData(bookmark: Bookmark, deviceId: string, syncVersion: number): BookmarkSyncData {
+    const syncData: BookmarkSyncData = {
+      id: bookmark.id,
+      bookId: bookmark.bookId,
+      chapterId: bookmark.chapterId,
+      chapterTitle: bookmark.chapterTitle,
+      content: bookmark.content,
+      createTime: bookmark.createTime,
+      deviceId: deviceId,
+      syncVersion: syncVersion
+    };
+    return syncData;
+  }
+
+  private convertSyncDataToBookmark(syncData: BookmarkSyncData): Bookmark {
+    const bookmark: Bookmark = {
+      id: syncData.id,
+      bookId: syncData.bookId,
+      chapterId: syncData.chapterId,
+      chapterTitle: syncData.chapterTitle,
+      content: syncData.content,
+      createTime: syncData.createTime
+    };
+    return bookmark;
   }
 }
