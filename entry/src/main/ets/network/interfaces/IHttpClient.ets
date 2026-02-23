@@ -215,7 +215,7 @@ export interface HttpResponse<T = void> {
 }
 
 export interface HttpError extends Error {
-  code: HttpErrorCode;
+  code: HttpErrorCode | AppErrorCode;
   message: string;
   status?: number;
   statusText?: string;

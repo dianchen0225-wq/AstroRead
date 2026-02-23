@@ -99,7 +99,8 @@ export class HttpErrorImpl extends AppError implements HttpError {
     this.response = options?.response;
     this.request = options?.request;
     this.isRetryable = this.retryable;
-  }
+    }
+
 
   private static inferSeverityFromCode(code: HttpErrorCode, status?: number): ErrorSeverity {
     if (code === HttpErrorCode.SSL_ERROR) return ErrorSeverity.CRITICAL;
