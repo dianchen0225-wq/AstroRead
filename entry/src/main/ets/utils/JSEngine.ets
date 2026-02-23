@@ -102,6 +102,8 @@ export class JSEngine {
   private isInitialized: boolean = false;
   private readonly TAG = 'JSEngine';
   private securityConfig: SecurityConfig;
+  private pendingOperations: Set<Promise<JSExecutionResult>> = new Set();
+  private isDestroying: boolean = false;
 
   private constructor(config: Partial<SecurityConfig> = {}) {
     this.securityConfig = {
@@ -121,6 +123,11 @@ export class JSEngine {
   async initialize(): Promise<boolean> {
     if (this.isInitialized) {
       return true;
+    }
+
+    if (this.isDestroying) {
+      Logger.warn(this.TAG, '引擎正在销毁中，无法初始化');
+      return false;
     }
 
     try {
@@ -217,6 +224,14 @@ export class JSEngine {
       await this.initialize();
     }
 
+    if (this.isDestroying) {
+      return {
+        success: false,
+        result: '',
+        error: '引擎正在销毁中'
+      };
+    }
+
     const validation = this.validateScript(script);
     if (!validation.valid) {
       return {
@@ -228,7 +243,7 @@ export class JSEngine {
 
     const actualTimeout = Math.min(timeout, this.securityConfig.maxExecutionTime);
 
-    return new Promise<JSExecutionResult>((resolve) => {
+    const operationPromise = new Promise<JSExecutionResult>((resolve) => {
       let resolved = false;
       
       try {
@@ -332,6 +347,15 @@ export class JSEngine {
         }
       }
     });
+
+    this.pendingOperations.add(operationPromise);
+
+    try {
+      const result = await operationPromise;
+      return result;
+    } finally {
+      this.pendingOperations.delete(operationPromise);
+    }
   }
 
   async executeSearchUrlScript(script: string, keyword: string, page: number = 1, baseUrl: string = ''): Promise<string> {
@@ -472,9 +496,62 @@ export class JSEngine {
            script.includes('</js>');
   }
 
-  destroy(): void {
-    this.webController = null;
-    this.isInitialized = false;
-    Logger.info(this.TAG, 'JavaScript引擎已销毁');
+  async destroy(): Promise<void> {
+    if (this.isDestroying) {
+      Logger.warn(this.TAG, '引擎正在销毁中，请勿重复调用');
+      return;
+    }
+
+    this.isDestroying = true;
+    Logger.info(this.TAG, '开始销毁JavaScript引擎...');
+
+    try {
+      if (this.pendingOperations.size > 0) {
+        Logger.info(this.TAG, `等待 ${this.pendingOperations.size} 个操作完成...`);
+        
+        const timeout = new Promise<void>((resolve) => {
+          setTimeout(() => {
+            Logger.warn(this.TAG, '等待操作超时，强制销毁');
+            resolve();
+          }, 3000);
+        });
+
+        await Promise.race([
+          Promise.allSettled(Array.from(this.pendingOperations)),
+          timeout
+        ]);
+      }
+
+      if (this.webController) {
+        try {
+          this.webController.stop();
+          Logger.debug(this.TAG, 'WebView 已停止');
+        } catch (e) {
+          Logger.warn(this.TAG, `停止 WebView 失败: ${e}`);
+        }
+      }
+
+      this.webController = null;
+      this.isInitialized = false;
+      this.pendingOperations.clear();
+      JSEngine.instance = null;
+
+      Logger.info(this.TAG, 'JavaScript引擎已销毁');
+    } catch (error) {
+      Logger.error(this.TAG, `销毁JavaScript引擎时发生错误: ${error}`);
+      this.webController = null;
+      this.isInitialized = false;
+      JSEngine.instance = null;
+    } finally {
+      this.isDestroying = false;
+    }
+  }
+
+  isEngineReady(): boolean {
+    return this.isInitialized && !this.isDestroying && this.webController !== null;
+  }
+
+  getPendingOperationsCount(): number {
+    return this.pendingOperations.size;
   }
 }

@@ -96,15 +96,13 @@ export class InterceptorManager {
     for (const interceptor of sortedInterceptors) {
       try {
         const result = interceptor.handler(processedConfig);
-        processedConfig = result instanceof Promise ? await result : result;
-      } catch (error) {
-        if (interceptor.errorHandler) {
-          const httpError = this.toHttpError(error);
-          const errorResult = interceptor.errorHandler(httpError);
-          const processedError = errorResult instanceof Promise ? await errorResult : errorResult;
-          throw processedError;
+        if (result instanceof Promise) {
+          processedConfig = await result;
+        } else {
+          processedConfig = result;
         }
-        throw this.toHttpError(error);
+      } catch (error) {
+        throw await this.handleInterceptorError(error, interceptor.errorHandler);
       }
     }
 
@@ -117,28 +115,31 @@ export class InterceptorManager {
     let processedResponse: HttpResponse<ESObject> = response as HttpResponse<ESObject>;
     for (const interceptor of sortedInterceptors) {
       try {
-        const result = interceptor.handler(processedResponse);
+        const result: HttpResponse<ESObject> | Promise<HttpResponse<ESObject>> = interceptor.handler(processedResponse);
         if (result instanceof Promise) {
           processedResponse = await result;
         } else {
           processedResponse = result;
         }
       } catch (error) {
-        if (interceptor.errorHandler) {
-          const httpError = this.toHttpError(error as Error);
-          const errorResult = interceptor.errorHandler(httpError);
-          if (errorResult instanceof Promise) {
-            const processedError = await errorResult;
-            throw processedError;
-          } else {
-            throw errorResult;
-          }
-        }
-        throw this.toHttpError(error as Error);
+        throw await this.handleInterceptorError(error, interceptor.errorHandler);
       }
     }
 
     return processedResponse as HttpResponse<T>;
+  }
+
+  private async handleInterceptorError(error: ESObject, errorHandler?: RequestErrorHandler | ResponseErrorHandler): Promise<HttpError> {
+    const typedError = this.normalizeError(error);
+    if (errorHandler) {
+      const httpError = this.toHttpError(typedError);
+      const result = errorHandler(httpError);
+      if (result instanceof Promise) {
+        return await result;
+      }
+      return result;
+    }
+    return this.toHttpError(typedError);
   }
 
   private toHttpError(error: Error): HttpError {
@@ -151,6 +152,13 @@ export class InterceptorManager {
       timestamp: Date.now()
     };
     return httpError;
+  }
+
+  private normalizeError(error: ESObject): Error {
+    if (error instanceof Error) {
+      return error;
+    }
+    return new Error(String(error));
   }
 
   async applyRequestErrorInterceptors(error: HttpError): Promise<HttpError> {

@@ -465,53 +465,109 @@ class SourceValidator {
   }
   
   /**
-   * URL安全性验证 - 新增SSRF防护
+   * URL安全性验证 - 增强SSRF防护
    */
   private isSafeUrl(url: string): boolean {
     try {
-      // 防止SSRF攻击，限制本地地址和内部地址
-      // HarmonyOS不支持URL类，使用正则表达式验证
-      const urlPattern = /^(https?:\/\/)([^\/:]+)(:\d+)?(\/.*)?$/;
-      const match = url.match(urlPattern);
+      if (!url || url.length > this.MAX_URL_LENGTH) {
+        return false;
+      }
+
+      let decodedUrl = url;
+      try {
+        decodedUrl = decodeURIComponent(url);
+      } catch (e) {
+        // URL解码失败，使用原始URL
+      }
+
+      const urlPattern = /^(https?:\/\/)([^\/:]+)(:\d+)?(\/.*)?$/i;
+      const match = decodedUrl.match(urlPattern);
       
       if (!match) {
         return false;
       }
       
-      const hostname = match[2];
+      let hostname = match[2].toLowerCase();
       
-      // 禁止的域名和IP地址
+      try {
+        hostname = decodeURIComponent(hostname);
+      } catch (e) {
+        // 解码失败，使用原始hostname
+      }
+
+      hostname = hostname.replace(/\[\]/g, '').replace(/\s+/g, '');
+
+      if (hostname.startsWith('[') && hostname.endsWith(']')) {
+        hostname = hostname.slice(1, -1);
+      }
+
+      if (this.isInternalIPv6(hostname)) {
+        return false;
+      }
+
+      if (this.isDecimalIP(hostname)) {
+        return false;
+      }
+
+      if (this.isHexIP(hostname)) {
+        return false;
+      }
+
+      if (this.isOctalIP(hostname)) {
+        return false;
+      }
+
       const forbiddenHosts = [
-        'localhost', '127.0.0.1', '0.0.0.0', '::1',
-        '169.254.169.254', 'metadata.google.internal' // 云服务元数据地址
-      ];
-      
-      // 禁止的内部网络地址
-      const internalNetworks = [
-        '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', 
-        '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.',
-        '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.'
+        'localhost', '127.0.0.1', '0.0.0.0', '::1', '0:0:0:0:0:0:0:1',
+        '169.254.169.254', 'metadata.google.internal', 'metadata.azure.internal',
+        '100.100.100.200', 'alibaba.metadata', 'kubernetes.default',
+        'kubernetes.default.svc'
       ];
       
       if (forbiddenHosts.includes(hostname)) {
         return false;
       }
+
+      if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+        if (this.isPrivateIP(hostname)) {
+          return false;
+        }
+      }
+      
+      const internalNetworks = [
+        '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', 
+        '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.',
+        '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.',
+        '127.', '169.254.', '0.0.', '224.', '225.', '226.', '227.', '228.',
+        '229.', '230.', '231.', '232.', '233.', '234.', '235.', '236.',
+        '237.', '238.', '239.', '240.', '255.'
+      ];
       
       for (const network of internalNetworks) {
         if (hostname.startsWith(network)) {
           return false;
         }
       }
-      
-      // 检查是否为公共可访问域名
+
+      if (hostname.includes('.local') || hostname.includes('.internal') ||
+          hostname.includes('.localhost') || hostname.includes('.localdomain') ||
+          hostname.includes('localtest.me') || hostname.includes('127.0.0.1.nip.io')) {
+        return false;
+      }
+
+      if (/^0x[0-9a-f]+$/i.test(hostname) || /^[0-9a-f]+$/i.test(hostname)) {
+        return false;
+      }
+
       const tld = hostname.split('.').pop();
       const commonTlds = ['com', 'org', 'net', 'edu', 'gov', 'cn', 'io', 'dev',
                            'cc', 'co', 'info', 'biz', 'me', 'tv', 'xyz', 'top',
                            'vip', 'site', 'online', 'store', 'app', 'pro', 'tech',
                            'fun', 'club', 'shop', 'ltd', 'work', 'live', 'world',
-                           'asia', 'mobi', 'name', 'tel', 'travel', 'int', 'mil'];
+                           'asia', 'mobi', 'name', 'tel', 'travel', 'int', 'mil',
+                           'jp', 'kr', 'tw', 'hk', 'uk', 'de', 'fr', 'ru', 'in',
+                           'br', 'au', 'ca', 'mx', 'es', 'it', 'nl', 'pl', 'tr'];
       if (!tld || !commonTlds.includes(tld)) {
-        // 非常见顶级域名，需要额外检查
         return this.isPublicDomain(hostname);
       }
 
@@ -520,14 +576,106 @@ class SourceValidator {
       return false;
     }
   }
+
+  /**
+   * 检查是否为私有IP地址
+   */
+  private isPrivateIP(ip: string): boolean {
+    const parts = ip.split('.').map(Number);
+    if (parts.length !== 4) return false;
+    
+    if (parts[0] === 10) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 127) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    if (parts[0] === 0) return true;
+    if (parts[0] >= 224) return true;
+    
+    return false;
+  }
+
+  /**
+   * 检查是否为内部IPv6地址
+   */
+  private isInternalIPv6(hostname: string): boolean {
+    const lowerHostname = hostname.toLowerCase();
+    
+    if (lowerHostname === '::1' || lowerHostname === '0:0:0:0:0:0:0:1') {
+      return true;
+    }
+    
+    if (lowerHostname.startsWith('::') || lowerHostname.startsWith('0:0:')) {
+      return true;
+    }
+    
+    if (lowerHostname.startsWith('fc') || lowerHostname.startsWith('fd')) {
+      return true;
+    }
+    
+    if (lowerHostname.startsWith('fe80:')) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * 检查是否为十进制IP格式
+   */
+  private isDecimalIP(hostname: string): boolean {
+    if (/^\d{8,}$/.test(hostname)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 检查是否为十六进制IP格式
+   */
+  private isHexIP(hostname: string): boolean {
+    if (/^0x[0-9a-f]{8}$/i.test(hostname)) {
+      return true;
+    }
+    if (/^[0-9a-f]{8}$/i.test(hostname)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 检查是否为八进制IP格式
+   */
+  private isOctalIP(hostname: string): boolean {
+    const parts = hostname.split('.');
+    if (parts.length === 4) {
+      for (const part of parts) {
+        if (part.startsWith('0') && part.length > 1 && /^[0-7]+$/.test(part)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   
   /**
-   * 检查是否为公共域名 - 新增SSRF防护
+   * 检查是否为公共域名 - 增强SSRF防护
    */
   private isPublicDomain(hostname: string): boolean {
-    // 这里可以添加更复杂的公共域名验证逻辑
-    // 目前简单实现为允许所有非内部地址
-    return !hostname.includes('.local') && !hostname.includes('.internal');
+    const suspiciousPatterns = [
+      /\.local$/i, /\.internal$/i, /\.localhost$/i, /\.localdomain$/i,
+      /\.test$/i, /\.example$/i, /\.invalid$/i,
+      /127\.0\.0\.1/i, /localhost/i, /localtest\.me/i, /nip\.io$/i,
+      /sslip\.io$/i, /xip\.io$/i, /\.home$/i, /\.lan$/i
+    ];
+    
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(hostname)) {
+        return false;
+      }
+    }
+    
+    return true;
   }
   
   /**

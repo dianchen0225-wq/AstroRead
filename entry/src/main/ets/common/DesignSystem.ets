@@ -98,6 +98,23 @@ export interface AccessibilityConfig {
   focusRingOffset: number;
 }
 
+export interface GradientStop {
+  color: string;
+  position: number;
+}
+
+export interface GradientVariant {
+  light: Array<[string, number]>;
+  dark: Array<[string, number]>;
+}
+
+export interface GradientsConfig {
+  primary: GradientVariant;
+  accent: GradientVariant;
+  warm: GradientVariant;
+  cool: GradientVariant;
+}
+
 export interface IconSizeConfig {
   xs: number;
   sm: number;
@@ -495,23 +512,23 @@ export class DesignSystem {
   };
 
   // 渐变色配置 - 用于卡片和按钮装饰
-  static readonly Gradients = {
+  static readonly Gradients: GradientsConfig = {
     primary: {
-      light: [['#B8860B', 0], ['#D4A017', 1]] as Array<[string, number]>,
-      dark: [['#E8C547', 0], ['#F0D060', 1]] as Array<[string, number]>
-    },
+      light: [['#B8860B', 0], ['#D4A017', 1]],
+      dark: [['#E8C547', 0], ['#F0D060', 1]]
+    } as GradientVariant,
     accent: {
-      light: [['#667eea', 0], ['#764ba2', 1]] as Array<[string, number]>,
-      dark: [['#7C8FE8', 0], ['#8B5FB8', 1]] as Array<[string, number]>
-    },
+      light: [['#667eea', 0], ['#764ba2', 1]],
+      dark: [['#7C8FE8', 0], ['#8B5FB8', 1]]
+    } as GradientVariant,
     warm: {
-      light: [['#f5af19', 0], ['#f12711', 1]] as Array<[string, number]>,
-      dark: [['#F5C842', 0], ['#F04830', 1]] as Array<[string, number]>
-    },
+      light: [['#f5af19', 0], ['#f12711', 1]],
+      dark: [['#F5C842', 0], ['#F04830', 1]]
+    } as GradientVariant,
     cool: {
-      light: [['#4facfe', 0], ['#00f2fe', 1]] as Array<[string, number]>,
-      dark: [['#5FB8FF', 0], ['#20F5FF', 1]] as Array<[string, number]>
-    }
+      light: [['#4facfe', 0], ['#00f2fe', 1]],
+      dark: [['#5FB8FF', 0], ['#20F5FF', 1]]
+    } as GradientVariant
   };
 
   static getSuccessColor(isLightMode: boolean): string {

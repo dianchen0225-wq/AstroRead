@@ -67,8 +67,8 @@ export struct WebReader {
   /**
    * 构建阅读器 HTML 模板
    */
-  private buildReaderHtml(content: string): string {
-    const safeContent = this.escapeHtml(content);
+  private buildReaderHtml(content: string, isHtml: boolean = true): string {
+    const safeContent = this.processContent(content, isHtml);
     const themeStyles = this.getThemeStyles();
 
     return `<!DOCTYPE html>
@@ -257,7 +257,7 @@ export struct WebReader {
   }
 
   /**
-   * HTML 转义
+   * HTML 转义 - 基础版本
    */
   private escapeHtml(text: string): string {
     if (!text) return '';
@@ -270,11 +270,110 @@ export struct WebReader {
   }
 
   /**
+   * 深度清理 HTML 内容，防止 XSS 攻击
+   */
+  private sanitizeHtml(html: string): string {
+    if (!html) return '';
+
+    let sanitized = html;
+
+    const dangerousTags = [
+      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+      /<script\b[^>]*>/gi,
+      /<\/script>/gi,
+      /<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi,
+      /<iframe\b[^>]*>/gi,
+      /<\/iframe>/gi,
+      /<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi,
+      /<object\b[^>]*>/gi,
+      /<\/object>/gi,
+      /<embed\b[^>]*>/gi,
+      /<applet\b[^<]*(?:(?!<\/applet>)<[^<]*)*<\/applet>/gi,
+      /<applet\b[^>]*>/gi,
+      /<\/applet>/gi,
+      /<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi,
+      /<form\b[^>]*>/gi,
+      /<\/form>/gi,
+      /<input\b[^>]*>/gi,
+      /<button\b[^>]*>/gi,
+      /<\/button>/gi,
+      /<select\b[^>]*>/gi,
+      /<\/select>/gi,
+      /<textarea\b[^>]*>/gi,
+      /<\/textarea>/gi,
+      /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
+      /<link\b[^>]*>/gi,
+      /<meta\b[^>]*>/gi,
+      /<base\b[^>]*>/gi,
+    ];
+
+    for (const pattern of dangerousTags) {
+      sanitized = sanitized.replace(pattern, '');
+    }
+
+    const eventHandlers = [
+      'onload', 'onerror', 'onclick', 'onmouseover', 'onmouseout', 'onmouseenter',
+      'onmouseleave', 'onmousedown', 'onmouseup', 'onmousemove', 'onkeydown',
+      'onkeyup', 'onkeypress', 'onfocus', 'onblur', 'onchange', 'onsubmit',
+      'onreset', 'onselect', 'onabort', 'oncanplay', 'oncanplaythrough',
+      'ondurationchange', 'onemptied', 'onended', 'oninput', 'oninvalid',
+      'onloadstart', 'onloadeddata', 'onloadedmetadata', 'onpause', 'onplay',
+      'onplaying', 'onprogress', 'onratechange', 'onseeked', 'onseeking',
+      'onstalled', 'onsuspend', 'ontimeupdate', 'onvolumechange', 'onwaiting',
+      'oncopy', 'oncut', 'onpaste', 'ondrag', 'ondragend', 'ondragenter',
+      'ondragleave', 'ondragover', 'ondragstart', 'ondrop', 'onscroll',
+      'onwheel', 'ontouchstart', 'ontouchmove', 'ontouchend', 'ontouchcancel',
+      'onanimationstart', 'onanimationend', 'onanimationiteration',
+      'ontransitionend', 'oncontextmenu', 'onpointerdown', 'onpointermove',
+      'onpointerup', 'onpointercancel', 'onpointerover', 'onpointerout',
+      'onpointerenter', 'onpointerleave', 'ongotpointercapture', 'onlostpointercapture'
+    ];
+
+    for (const handler of eventHandlers) {
+      const patterns = [
+        new RegExp(`\\s+${handler}\\s*=\\s*"[^"]*"`, 'gi'),
+        new RegExp(`\\s+${handler}\\s*=\\s*'[^']*'`, 'gi'),
+        new RegExp(`\\s+${handler}\\s*=\\s*[^\\s>]+`, 'gi'),
+      ];
+      for (const pattern of patterns) {
+        sanitized = sanitized.replace(pattern, '');
+      }
+    }
+
+    sanitized = sanitized.replace(/javascript\s*:/gi, 'blocked:');
+    sanitized = sanitized.replace(/vbscript\s*:/gi, 'blocked:');
+    sanitized = sanitized.replace(/data\s*:\s*text\/html/gi, 'blocked:');
+    sanitized = sanitized.replace(/expression\s*\(/gi, 'blocked(');
+
+    sanitized = sanitized.replace(/src\s*=\s*["']?\s*javascript:/gi, 'src="blocked:"');
+    sanitized = sanitized.replace(/href\s*=\s*["']?\s*javascript:/gi, 'href="blocked:"');
+    sanitized = sanitized.replace(/action\s*=\s*["']?\s*javascript:/gi, 'action="blocked:"');
+    sanitized = sanitized.replace(/formaction\s*=\s*["']?\s*javascript:/gi, 'formaction="blocked:"');
+
+    sanitized = sanitized.replace(/<\s*!--[\s\S]*?--\s*>/g, '');
+
+    return sanitized;
+  }
+
+  /**
+   * 安全处理内容 - 根据内容类型选择处理方式
+   */
+  private processContent(content: string, isHtml: boolean = false): string {
+    if (!content) return '';
+
+    if (isHtml) {
+      return this.sanitizeHtml(content);
+    } else {
+      return this.escapeHtml(content);
+    }
+  }
+
+  /**
    * 加载内容
    */
-  public loadContent(title: string, content: string): void {
+  public loadContent(title: string, content: string, isHtml: boolean = true): void {
     try {
-      const html = this.buildReaderHtml(content);
+      const html = this.buildReaderHtml(content, isHtml);
       this.webController.loadData(
         html,
         'text/html',

@@ -354,16 +354,24 @@ export class FileManager {
     if (!this.context) {
       throw new Error('上下文未设置，请先调用 setContext() 方法');
     }
-    const sandboxPath = `${this.context.filesDir}/books/${fileName}`;
+
+    const safeFileName = this.sanitizeFileName(fileName);
+    if (!safeFileName) {
+      throw new Error('文件名无效或包含不安全字符');
+    }
+
+    const sandboxPath = `${this.context.filesDir}/books/${safeFileName}`;
+
+    if (!this.isPathWithinSandbox(sandboxPath)) {
+      throw new Error('文件路径不在安全沙盒范围内');
+    }
 
     try {
-      // 确保目录存在
       const dir = sandboxPath.substring(0, sandboxPath.lastIndexOf('/'));
       if (!fs.accessSync(dir)) {
         fs.mkdirSync(dir, true);
       }
 
-      // 复制文件
       fs.copyFileSync(sourceUri, sandboxPath);
 
       return sandboxPath;
@@ -371,6 +379,94 @@ export class FileManager {
       Logger.error('FileManager', `复制文件到沙盒失败: ${error}`);
       throw new Error(`复制文件失败: ${error}`);
     }
+  }
+
+  /**
+   * 清理文件名，防止路径遍历攻击
+   */
+  private sanitizeFileName(fileName: string): string {
+    if (!fileName || fileName.trim().length === 0) {
+      return '';
+    }
+
+    let sanitized = fileName.trim();
+
+    const dangerousPatterns = [
+      /\.\./g,           // 父目录遍历
+      /\.\.\//g,         // Unix路径遍历
+      /\.\.\\/g,         // Windows路径遍历
+      /\//g,             // Unix路径分隔符
+      /\\/g,             // Windows路径分隔符
+      /:/g,              // Windows驱动器分隔符
+      /\*/g,             // 通配符
+      /\?/g,             // 通配符
+      /"/g,              // 引号
+      /</g,              // 重定向
+      />/g,              // 重定向
+      /\|/g,             // 管道
+      /\0/g,             // 空字节
+      /\x00-\x1f/g,      // 控制字符
+    ];
+
+    for (const pattern of dangerousPatterns) {
+      sanitized = sanitized.replace(pattern, '_');
+    }
+
+    const maxFileNameLength = 255;
+    if (sanitized.length > maxFileNameLength) {
+      const ext = this.getFileExtension(sanitized);
+      const nameWithoutExt = sanitized.substring(0, sanitized.lastIndexOf('.' + ext));
+      const truncatedName = nameWithoutExt.substring(0, maxFileNameLength - ext.length - 1);
+      sanitized = `${truncatedName}.${ext}`;
+    }
+
+    if (sanitized.startsWith('.')) {
+      sanitized = '_' + sanitized.substring(1);
+    }
+
+    if (!/^[\w\u4e00-\u9fa5\-_.]+$/.test(sanitized)) {
+      const ext = this.getFileExtension(sanitized);
+      const timestamp = Date.now();
+      sanitized = `file_${timestamp}.${ext}`;
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * 检查路径是否在沙盒范围内
+   */
+  private isPathWithinSandbox(path: string): boolean {
+    if (!this.context) {
+      return false;
+    }
+
+    let normalizedPath = path.replace(/\\/g, '/');
+    while (normalizedPath.includes('//')) {
+      normalizedPath = normalizedPath.replace(/\/\//g, '/');
+    }
+    while (normalizedPath.includes('/./')) {
+      normalizedPath = normalizedPath.replace(/\/\.\//g, '/');
+    }
+    while (normalizedPath.includes('/../')) {
+      const before = normalizedPath;
+      normalizedPath = normalizedPath.replace(/\/[^\/]+\/\.\.\//g, '/');
+      if (normalizedPath === before) {
+        break;
+      }
+    }
+
+    const sandboxBase = this.context.filesDir.replace(/\\/g, '/');
+    
+    if (!normalizedPath.startsWith(sandboxBase)) {
+      return false;
+    }
+
+    if (normalizedPath.includes('..')) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
