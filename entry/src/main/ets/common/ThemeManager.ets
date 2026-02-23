@@ -26,6 +26,10 @@ export class ThemeManager {
   private initPromise: Promise<void> | null = null;
   private isInitialized: boolean = false;
   private context: common.UIAbilityContext | null = null;
+  private isTransitioning: boolean = false;
+  private transitionDuration: number = 300;
+  private batchUpdateScheduled: boolean = false;
+  private pendingNotify: boolean = false;
 
   private constructor() {
   }
@@ -138,14 +142,58 @@ export class ThemeManager {
   }
 
   private notifyListeners(): void {
-    const listenersCopy = [...this.listeners];
-    listenersCopy.forEach(listener => {
-      try {
-        listener(this.isDarkMode);
-      } catch (error) {
-        Logger.error(ThemeManager.TAG, `通知主题监听器失败: ${error instanceof Error ? error.message : String(error)}`);
+    if (this.batchUpdateScheduled) {
+      this.pendingNotify = true;
+      return;
+    }
+    this.batchUpdateScheduled = true;
+    this.pendingNotify = false;
+    
+    setTimeout(() => {
+      this.batchUpdateScheduled = false;
+      if (this.pendingNotify) {
+        this.pendingNotify = false;
+        this.notifyListeners();
+        return;
       }
-    });
+      
+      const listenersCopy = [...this.listeners];
+      const batchSize = 5;
+      let currentIndex = 0;
+      
+      const processBatch = (): void => {
+        const endIndex = Math.min(currentIndex + batchSize, listenersCopy.length);
+        for (let i = currentIndex; i < endIndex; i++) {
+          try {
+            listenersCopy[i](this.isDarkMode);
+          } catch (error) {
+            Logger.error(ThemeManager.TAG, `通知主题监听器失败: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        currentIndex = endIndex;
+        
+        if (currentIndex < listenersCopy.length) {
+          setTimeout(processBatch, 0);
+        } else {
+          this.isTransitioning = false;
+        }
+      };
+      
+      this.isTransitioning = true;
+      processBatch();
+    }, 16);
+  }
+
+  public isThemeTransitioning(): boolean {
+    return this.isTransitioning;
+  }
+
+  public getTransitionDuration(): number {
+    return this.transitionDuration;
+  }
+
+  public setTransitionDuration(duration: number): void {
+    this.transitionDuration = duration;
   }
 
   private isSystemDarkMode(): boolean {

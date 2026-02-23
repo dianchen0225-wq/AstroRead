@@ -334,81 +334,81 @@ class ResponsiveValue<T> {
 }
 
 export class DesignSystem {
-  // 颜色系统
+  // 颜色系统 - 优化后的现代配色方案
   static readonly Colors: ColorsConfig = new ColorsConfig(
-    // 主色调
-    new ColorTheme('#8B6914', '#d4b483'),
-    // 文本颜色
+    // 主色调 - 温暖的金棕色系，更具书卷气息
+    new ColorTheme('#B8860B', '#E8C547'),
+    // 文本颜色 - 增强对比度，提升可读性
     new TextColors(
-      new ColorTheme('#333333', '#e0d8c9'),
-      new ColorTheme('#666666', '#8a7f6e'),
-      new ColorTheme('#999999', '#5a5a5a')
+      new ColorTheme('#1A1A1A', '#FAF8F5'),
+      new ColorTheme('#4A4A4A', '#B8B0A0'),
+      new ColorTheme('#8A8A8A', '#6A6A6A')
     ),
-    // 背景颜色
+    // 背景颜色 - 更柔和的背景层次
     new BackgroundColors(
-      new ColorTheme('#F5F1E6', '#1a1a1a'),
-      new ColorTheme('#F0EAD6', '#2a2a2a'),
-      new ColorTheme('#FFFFFF', '#1e1e1e')
+      new ColorTheme('#FAF7F2', '#121212'),
+      new ColorTheme('#F5F0E8', '#1E1E1E'),
+      new ColorTheme('#FFFFFF', '#252525')
     ),
-    // 边框颜色
-    new BorderColors('#E0E0E0', '#2a2a2a'),
-    // 状态颜色
+    // 边框颜色 - 更细腻的边框
+    new BorderColors('#E8E4DC', '#333333'),
+    // 状态颜色 - 更丰富的交互反馈
     new StateColors(
-      new ColorTheme('#F8F4E9', '#2f2f2f'),
-      new ColorTheme('#EDE8D9', '#3a3a3a'),
-      new ColorTheme('#E6E1D2', '#444444')
+      new ColorTheme('#FFF8ED', '#2D2D2D'),
+      new ColorTheme('#F0E8D8', '#3A3A3A'),
+      new ColorTheme('#E5DCC8', '#454545')
     )
   );
 
-  // 间距系统 (8px为基准)
+  // 间距系统 (4px为基准，更精细的控制)
   static readonly Spacing: SpacingConfig = new SpacingConfig(
-    4,    // xs: 4px
-    8,    // sm: 8px
-    12,   // md: 12px
-    16,   // lg: 16px
-    20,   // xl: 20px
-    24,   // xxl: 24px
-    32,   // xxxl: 32px
-    40    // xxxxl: 40px
+    2,    // xs: 2px - 极小间距
+    4,    // sm: 4px - 紧凑间距
+    8,    // md: 8px - 标准间距
+    12,   // lg: 12px - 常规间距
+    16,   // xl: 16px - 宽松间距
+    24,   // xxl: 24px - 大间距
+    32,   // xxxl: 32px - 区块间距
+    48    // xxxxl: 48px - 大区块间距
   );
 
-  // 字体系统
+  // 字体系统 - 优化后的排版层级
   static readonly Typography: TypographyConfig = new TypographyConfig(
-    // 字号
+    // 字号 - 更清晰的层级关系
     new FontSizeConfig(
-      12,   // xs: 辅助文字
-      14,   // sm: 正文/描述
-      16,   // base: 正文
-      18,   // lg: 小标题
+      11,   // xs: 辅助文字、标签
+      13,   // sm: 正文/描述
+      15,   // base: 正文
+      17,   // lg: 小标题
       20,   // xl: 标题
       24,   // xxl: 大标题
-      28    // xxxl: 超大标题
+      30    // xxxl: 超大标题/品牌展示
     ),
-    // 字重
+    // 字重 - 更丰富的字重选择
     new FontWeightConfig(
-      300,  // light
-      400,  // regular
-      500,  // medium
-      600,  // semibold
-      700   // bold
+      300,  // light: 辅助信息
+      400,  // regular: 正文
+      500,  // medium: 强调文字
+      600,  // semibold: 小标题
+      700   // bold: 大标题
     ),
-    // 行高
+    // 行高 - 优化阅读体验
     new LineHeightConfig(
-      1.2,  // tight
-      1.4,  // normal
-      1.6,  // relaxed
-      1.8   // loose
+      1.25, // tight: 紧凑标题
+      1.5,  // normal: 正文
+      1.75, // relaxed: 长文本
+      2.0   // loose: 特殊场景
     )
   );
 
-  // 圆角系统
+  // 圆角系统 - 更现代的圆角设计
   static readonly BorderRadius: BorderRadiusConfig = new BorderRadiusConfig(
-    0,    // none
-    4,    // sm
-    8,    // md
-    12,   // lg
-    16,   // xl
-    999   // full
+    0,    // none: 无圆角
+    6,    // sm: 小圆角（按钮、输入框）
+    10,   // md: 中圆角（卡片）
+    14,   // lg: 大圆角（大卡片）
+    20,   // xl: 超大圆角（模态框）
+    999   // full: 完全圆形（头像、徽章）
   );
 
   // 断点系统
@@ -440,11 +440,6 @@ export class DesignSystem {
   // 获取主色调
   static getPrimaryColor(isLightMode: boolean): string {
     return isLightMode ? DesignSystem.Colors.primary.light : DesignSystem.Colors.primary.dark;
-  }
-
-  // 获取按钮文字颜色（白色）
-  static getButtonTextColor(): string {
-    return '#FFFFFF';
   }
 
   // 获取边框颜色
@@ -491,12 +486,32 @@ export class DesignSystem {
     return isLightMode ? DesignSystem.Colors.state.focus.light : DesignSystem.Colors.state.focus.dark;
   }
 
-  // 状态颜色
+  // 状态颜色 - 优化后的语义化颜色
   static readonly StatusColors: StatusColorsConfig = {
-    success: { light: '#4CAF50', dark: '#66BB6A' } as ColorVariant,
-    warning: { light: '#FF9800', dark: '#FFB74D' } as ColorVariant,
-    error: { light: '#F44336', dark: '#EF5350' } as ColorVariant,
-    info: { light: '#2196F3', dark: '#42A5F5' } as ColorVariant
+    success: { light: '#2E7D32', dark: '#4CAF50' } as ColorVariant,
+    warning: { light: '#F57C00', dark: '#FFB74D' } as ColorVariant,
+    error: { light: '#C62828', dark: '#EF5350' } as ColorVariant,
+    info: { light: '#1565C0', dark: '#42A5F5' } as ColorVariant
+  };
+
+  // 渐变色配置 - 用于卡片和按钮装饰
+  static readonly Gradients = {
+    primary: {
+      light: [['#B8860B', 0], ['#D4A017', 1]] as Array<[string, number]>,
+      dark: [['#E8C547', 0], ['#F0D060', 1]] as Array<[string, number]>
+    },
+    accent: {
+      light: [['#667eea', 0], ['#764ba2', 1]] as Array<[string, number]>,
+      dark: [['#7C8FE8', 0], ['#8B5FB8', 1]] as Array<[string, number]>
+    },
+    warm: {
+      light: [['#f5af19', 0], ['#f12711', 1]] as Array<[string, number]>,
+      dark: [['#F5C842', 0], ['#F04830', 1]] as Array<[string, number]>
+    },
+    cool: {
+      light: [['#4facfe', 0], ['#00f2fe', 1]] as Array<[string, number]>,
+      dark: [['#5FB8FF', 0], ['#20F5FF', 1]] as Array<[string, number]>
+    }
   };
 
   static getSuccessColor(isLightMode: boolean): string {
@@ -515,43 +530,33 @@ export class DesignSystem {
     return isLightMode ? DesignSystem.StatusColors.info.light : DesignSystem.StatusColors.info.dark;
   }
 
-  // 获取错误状态覆盖层颜色（带透明度）
-  static getErrorOverlayColor(): string {
-    return 'rgba(244, 67, 54, 0.75)';
-  }
-
-  // 获取检查中状态覆盖层颜色（带透明度）
-  static getCheckingOverlayColor(): string {
-    return 'rgba(158, 158, 158, 0.75)';
-  }
-
-  // 阴影系统
+  // 阴影系统 - 优化后的层次感阴影
   static readonly Shadows: ShadowsConfig = {
-    sm: { light: '0 1px 2px rgba(0, 0, 0, 0.05)', dark: '0 1px 2px rgba(0, 0, 0, 0.3)' } as ShadowVariant,
-    md: { light: '0 4px 6px rgba(0, 0, 0, 0.07)', dark: '0 4px 6px rgba(0, 0, 0, 0.4)' } as ShadowVariant,
-    lg: { light: '0 10px 15px rgba(0, 0, 0, 0.1)', dark: '0 10px 15px rgba(0, 0, 0, 0.5)' } as ShadowVariant,
-    xl: { light: '0 20px 25px rgba(0, 0, 0, 0.15)', dark: '0 20px 25px rgba(0, 0, 0, 0.6)' } as ShadowVariant
+    sm: { light: '0 1px 3px rgba(0, 0, 0, 0.08)', dark: '0 1px 3px rgba(0, 0, 0, 0.4)' } as ShadowVariant,
+    md: { light: '0 4px 12px rgba(0, 0, 0, 0.1)', dark: '0 4px 12px rgba(0, 0, 0, 0.5)' } as ShadowVariant,
+    lg: { light: '0 8px 24px rgba(0, 0, 0, 0.12)', dark: '0 8px 24px rgba(0, 0, 0, 0.6)' } as ShadowVariant,
+    xl: { light: '0 16px 48px rgba(0, 0, 0, 0.15)', dark: '0 16px 48px rgba(0, 0, 0, 0.7)' } as ShadowVariant
   };
 
-  // 动画时长
+  // 动画时长 - 更流畅的动画体验
   static readonly AnimationDuration: AnimationDurationConfig = {
     instant: 0,
-    fast: 100,
-    normal: 200,
-    slow: 300,
-    slower: 500
+    fast: 150,
+    normal: 250,
+    slow: 400,
+    slower: 600
   };
 
-  // 动画曲线
+  // 动画曲线 - 更自然的运动曲线
   static readonly AnimationCurve: AnimationCurveConfig = {
     easeIn: 'ease-in',
     easeOut: 'ease-out',
     easeInOut: 'ease-in-out',
     linear: 'linear',
-    spring: 'spring(1, 100, 10, 0)'
+    spring: 'spring(0.8, 100, 15, 0)'
   };
 
-  // Z-Index层级
+  // Z-Index层级 - 更清晰的层级管理
   static readonly ZIndex: ZIndexConfig = {
     base: 0,
     dropdown: 100,
@@ -570,13 +575,13 @@ export class DesignSystem {
     focusRingOffset: 2
   };
 
-  // 图标尺寸
+  // 图标尺寸 - 更丰富的尺寸选择
   static readonly IconSize: IconSizeConfig = {
-    xs: 12,
-    sm: 16,
-    md: 20,
-    lg: 24,
-    xl: 32,
+    xs: 14,
+    sm: 18,
+    md: 22,
+    lg: 28,
+    xl: 36,
     xxl: 48
   };
 

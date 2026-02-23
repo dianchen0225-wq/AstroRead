@@ -106,4 +106,66 @@ export class BookmarkRepository {
       Logger.error(BookmarkRepository.TAG, `删除书签失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+
+  async getAllBookmarks(): Promise<Bookmark[]> {
+    const predicates = new relationalStore.RdbPredicates('bookmark');
+    try {
+      predicates.orderByDesc('create_time');
+    } catch (error) {
+      Logger.error(BookmarkRepository.TAG, `设置查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
+      const bookmarks: Bookmark[] = [];
+
+      while (resultSet.goToNextRow()) {
+        const bookmark = this.parseBookmark(resultSet);
+        bookmarks.push(bookmark);
+      }
+
+      return bookmarks;
+    } catch (error) {
+      Logger.error(BookmarkRepository.TAG, `查询所有书签失败: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    } finally {
+      if (resultSet) {
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookmarkRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
+      }
+    }
+  }
+
+  async getBookmarkById(id: string): Promise<Bookmark | null> {
+    const predicates = new relationalStore.RdbPredicates('bookmark');
+    try {
+      predicates.equalTo('id', id);
+    } catch (error) {
+      Logger.error(BookmarkRepository.TAG, `设置查询条件失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let resultSet: relationalStore.ResultSet | null = null;
+    try {
+      resultSet = await this.rdbStore.query(predicates, ['*']);
+      if (resultSet.goToNextRow()) {
+        return this.parseBookmark(resultSet);
+      }
+      return null;
+    } catch (error) {
+      Logger.error(BookmarkRepository.TAG, `查询书签失败: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    } finally {
+      if (resultSet) {
+        try {
+          resultSet.close();
+        } catch (e) {
+          Logger.warn(BookmarkRepository.TAG, `关闭resultSet失败: ${e}`);
+        }
+      }
+    }
+  }
 }

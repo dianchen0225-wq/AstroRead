@@ -334,8 +334,121 @@ export interface ListRenderConfig {
 }
 
 /**
- * 默认列表渲染配置
+ * 设备性能等级
  */
+export enum DevicePerformanceLevel {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high'
+}
+
+/**
+ * 设备性能检测器
+ */
+export class DevicePerformanceDetector {
+  private static instance: DevicePerformanceDetector;
+  private performanceLevel: DevicePerformanceLevel = DevicePerformanceLevel.MEDIUM;
+  private cpuCores: number = 4;
+  private totalMemory: number = 2048;
+  private isDetected: boolean = false;
+
+  private constructor() {}
+
+  public static getInstance(): DevicePerformanceDetector {
+    if (!DevicePerformanceDetector.instance) {
+      DevicePerformanceDetector.instance = new DevicePerformanceDetector();
+    }
+    return DevicePerformanceDetector.instance;
+  }
+
+  public async detectDevicePerformance(): Promise<DevicePerformanceLevel> {
+    if (this.isDetected) {
+      return this.performanceLevel;
+    }
+
+    try {
+      this.cpuCores = this.getCPUCoreCount();
+      this.totalMemory = this.getEstimatedMemory();
+      
+      if (this.cpuCores <= 4 || this.totalMemory <= 2048) {
+        this.performanceLevel = DevicePerformanceLevel.LOW;
+      } else if (this.cpuCores >= 8 && this.totalMemory >= 6144) {
+        this.performanceLevel = DevicePerformanceLevel.HIGH;
+      } else {
+        this.performanceLevel = DevicePerformanceLevel.MEDIUM;
+      }
+    } catch (error) {
+      this.performanceLevel = DevicePerformanceLevel.MEDIUM;
+    }
+
+    this.isDetected = true;
+    return this.performanceLevel;
+  }
+
+  private getCPUCoreCount(): number {
+    try {
+      const hardwareInfo = AppStorage.get('cpuCoreCount') as number;
+      return hardwareInfo || 4;
+    } catch {
+      return 4;
+    }
+  }
+
+  private getEstimatedMemory(): number {
+    try {
+      const memoryInfo = AppStorage.get('totalMemoryMB') as number;
+      return memoryInfo || 4096;
+    } catch {
+      return 4096;
+    }
+  }
+
+  public getPerformanceLevel(): DevicePerformanceLevel {
+    return this.performanceLevel;
+  }
+
+  public getCachedCountForPerformance(): number {
+    switch (this.performanceLevel) {
+      case DevicePerformanceLevel.LOW:
+        return 3;
+      case DevicePerformanceLevel.HIGH:
+        return 10;
+      case DevicePerformanceLevel.MEDIUM:
+      default:
+        return 5;
+    }
+  }
+
+  public getCpuCores(): number {
+    return this.cpuCores;
+  }
+
+  public getTotalMemory(): number {
+    return this.totalMemory;
+  }
+}
+
+/**
+ * 动态列表渲染配置生成器
+ */
+export function getDynamicListConfig(): ListRenderConfig {
+  const detector = DevicePerformanceDetector.getInstance();
+  const cachedCount = detector.getCachedCountForPerformance();
+  
+  return {
+    cachedCount: cachedCount,
+    itemSpacing: 12,
+    listPadding: 20
+  };
+}
+
+/**
+ * 默认列表渲染配置（使用动态缓存）
+ */
+export function getDefaultListConfig(): ListRenderConfig {
+  return getDynamicListConfig();
+}
+
 export const DEFAULT_LIST_CONFIG: ListRenderConfig = {
   cachedCount: 5,
   itemSpacing: 12,
@@ -345,6 +458,16 @@ export const DEFAULT_LIST_CONFIG: ListRenderConfig = {
 /**
  * 大数据量列表渲染配置
  */
+export function getLargeListConfig(): ListRenderConfig {
+  const detector = DevicePerformanceDetector.getInstance();
+  const baseCachedCount = detector.getCachedCountForPerformance();
+  return {
+    cachedCount: Math.min(baseCachedCount + 5, 15),
+    itemSpacing: 8,
+    listPadding: 16
+  };
+}
+
 export const LARGE_LIST_CONFIG: ListRenderConfig = {
   cachedCount: 10,
   itemSpacing: 8,
@@ -354,6 +477,16 @@ export const LARGE_LIST_CONFIG: ListRenderConfig = {
 /**
  * 紧凑列表渲染配置
  */
+export function getCompactListConfig(): ListRenderConfig {
+  const detector = DevicePerformanceDetector.getInstance();
+  const baseCachedCount = detector.getCachedCountForPerformance();
+  return {
+    cachedCount: Math.max(baseCachedCount - 2, 2),
+    itemSpacing: 6,
+    listPadding: 12
+  };
+}
+
 export const COMPACT_LIST_CONFIG: ListRenderConfig = {
   cachedCount: 3,
   itemSpacing: 6,

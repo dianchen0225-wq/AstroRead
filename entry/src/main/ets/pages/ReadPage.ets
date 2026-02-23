@@ -1,22 +1,30 @@
+/**
+ * Copyright (c) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book } from '../models/Book';
-import { Chapter } from '../models/Book';
+import { Chapter, ChapterContent } from '../models/Book';
+import { BookSource } from '../models/BookSource';
+import { ReadConfig } from '../models/ReadConfig';
+import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
-import { AppLoading, AppEmpty } from '../components/index';
-import { AppButton } from '../components/AppButton';
+import { showToast } from '../utils/ToastUtils';
 import common from '@ohos.app.ability.common';
-
-interface ReadSettings {
-  fontSize: number;
-  lineHeight: number;
-  backgroundColor: string;
-  textColor: string;
-}
-
-const READ_SETTINGS_KEY = 'read_settings';
 
 @Entry
 @ComponentV2
@@ -24,536 +32,490 @@ struct ReadPage {
   @Param bookId: string = '';
   @Param initialChapterIndex: number = 0;
   @Param initialChapterUrl: string = '';
-  
+  @Local chapterIndex: number = 0;
+  @Local chapterUrl: string = '';
   @Local isLightMode: boolean = true;
   @Local book: Book | null = null;
   @Local chapters: Chapter[] = [];
   @Local currentChapterIndex: number = 0;
-  @Local currentChapterUrl: string = '';
-  @Local chapterContent: string = '';
+  @Local chapterContent: ChapterContent | null = null;
   @Local isLoading: boolean = false;
+  @Local showChapterList: boolean = false;
   @Local showMenu: boolean = false;
-  @Local showSettings: boolean = false;
-  @Local showChapterSheet: boolean = false;
-  
-  @Local readSettings: ReadSettings = {
-    fontSize: 18,
-    lineHeight: 1.8,
-    backgroundColor: '#FAF8F0',
-    textColor: '#333333'
-  };
-  
+  @Local readConfig: ReadConfig = ReadConfigViewModel.DEFAULT_READ_CONFIG;
+  @Local loadError: string = '';
+  @Local showRetryCount: number = 0;
+
+  private bookSource: BookSource | null = null;
   private isComponentActive: boolean = false;
+  private readonly MAX_RETRY_COUNT: number = 3;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
-  
-  private settingsPresets: ReadSettings[] = [
-    { fontSize: 16, lineHeight: 1.6, backgroundColor: '#FAF8F0', textColor: '#333333' },
-    { fontSize: 18, lineHeight: 1.8, backgroundColor: '#FFFFFF', textColor: '#333333' },
-    { fontSize: 20, lineHeight: 2.0, backgroundColor: '#E8E8E8', textColor: '#333333' },
-    { fontSize: 18, lineHeight: 1.8, backgroundColor: '#1A1A1A', textColor: '#CCCCCC' }
-  ];
 
   aboutToAppear(): void {
     this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-
+    
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
-
-    this.currentChapterIndex = this.initialChapterIndex;
-    this.currentChapterUrl = this.initialChapterUrl;
-
-    this.loadBookInfo();
-    this.loadSettings();
+    
+    this.chapterIndex = this.initialChapterIndex;
+    this.chapterUrl = this.initialChapterUrl;
+    
+    this.loadReadConfig();
+    this.loadBookDetail();
   }
 
   aboutToDisappear(): void {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
-    this.saveReadingProgress();
-    // 清理内存，释放大型对象
-    this.chapterContent = '';
-    this.book = null;
+    
+    this.chapterContent = null;
     this.chapters = [];
+    this.book = null;
+    this.bookSource = null;
   }
 
-  async loadBookInfo(): Promise<void> {
-    if (!this.isComponentActive || !this.bookId) return;
-
+  async loadReadConfig(): Promise<void> {
+    if (!this.isComponentActive) return;
+    
     try {
-      const bookViewModel = viewModelManager.getBookViewModel();
-      this.book = await bookViewModel.getBookById(this.bookId);
-
-      const chapterViewModel = viewModelManager.getChapterViewModel();
-      this.chapters = await chapterViewModel.getChapters(this.bookId);
-
-      if (this.currentChapterUrl) {
-        await this.loadChapterContent(this.currentChapterUrl);
-      }
+      const readConfigViewModel = viewModelManager.getReadConfigViewModel();
+      this.readConfig = await readConfigViewModel.getReadConfig();
     } catch (error) {
-      Logger.error('ReadPage', `加载书籍信息失败: ${error}`);
+      Logger.error('ReadPage', `加载阅读配置失败: ${error}`);
     }
   }
 
-  async loadChapterContent(chapterUrl: string): Promise<void> {
-    if (!this.isComponentActive || !this.book || !chapterUrl) return;
+  async loadBookDetail(): Promise<void> {
+    if (!this.isComponentActive) return;
+    
+    Logger.info('ReadPage', `bookId: ${this.bookId}, chapterIndex: ${this.chapterIndex}`);
+    
+    if (this.bookId) {
+      const bookViewModel = viewModelManager.getBookViewModel();
+      this.book = await bookViewModel.getBookById(this.bookId);
+      
+      if (this.book && this.isComponentActive) {
+        const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+        this.bookSource = await bookSourceViewModel.getBookSourceById(this.book.bookSourceId);
+      }
+    }
+    
+    await this.loadChapters();
+    await this.loadChapterContent();
+  }
 
-    this.isLoading = true;
+  async loadChapters(): Promise<void> {
+    if (!this.book || !this.isComponentActive) return;
+    
     try {
       const chapterViewModel = viewModelManager.getChapterViewModel();
-      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      this.chapters = await chapterViewModel.getChapters(this.bookId);
       
-      if (this.book.bookSourceId) {
-        const bookSource = await bookSourceViewModel.getBookSourceById(this.book.bookSourceId);
-        if (bookSource) {
-          const result = await chapterViewModel.getChapterContent(
-            this.bookId,
-            chapterUrl,
-            bookSource
-          );
-          this.chapterContent = result.content || '章节内容加载失败';
-        } else {
-          this.chapterContent = '章节内容加载失败';
-        }
-      } else {
-        this.chapterContent = '章节内容加载失败';
+      if (this.chapters.length === 0 && this.bookSource) {
+        this.chapters = await chapterViewModel.fetchAndSaveChapters(
+          this.bookId, 
+          this.bookSource, 
+          this.book.bookUrl
+        );
+      }
+    } catch (error) {
+      Logger.error('ReadPage', `加载章节失败: ${error}`);
+    }
+  }
+
+  async loadChapterContent(): Promise<void> {
+    if (!this.book || !this.bookSource || !this.isComponentActive) return;
+    
+    this.isLoading = true;
+    this.loadError = '';
+    try {
+      if (this.chapters.length > this.chapterIndex) {
+        const chapterId = this.chapters[this.chapterIndex].id;
+        const chapterViewModel = viewModelManager.getChapterViewModel();
+        this.chapterContent = await chapterViewModel.getChapterContent(
+          chapterId, 
+          this.chapterUrl, 
+          this.bookSource
+        );
+        this.showRetryCount = 0;
       }
     } catch (error) {
       Logger.error('ReadPage', `加载章节内容失败: ${error}`);
-      this.chapterContent = '章节内容加载失败';
-    } finally {
-      this.isLoading = false;
-    }
-  }
-
-  async saveReadingProgress(): Promise<void> {
-    if (!this.isComponentActive || !this.book || !this.bookId) return;
-
-    try {
-      const bookViewModel = viewModelManager.getBookViewModel();
-      await bookViewModel.updateReadProgress(
-        this.bookId,
-        this.currentChapterIndex
-      );
-    } catch (error) {
-      Logger.error('ReadPage', `保存阅读进度失败: ${error}`);
-    }
-  }
-
-  loadSettings(): void {
-    try {
-      const settingsStr = AppStorage.get<string>(READ_SETTINGS_KEY);
-      if (settingsStr) {
-        this.readSettings = JSON.parse(settingsStr) as ReadSettings;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.loadError = errorMsg;
+      this.showRetryCount++;
+      if (this.isComponentActive) {
+        showToast({
+          message: '加载失败，请点击重试'
+        });
       }
-    } catch (error) {
-      Logger.error('ReadPage', `加载阅读设置失败: ${error}`);
+    } finally {
+      if (this.isComponentActive) {
+        this.isLoading = false;
+      }
     }
   }
 
-  saveSettings(): void {
-    try {
-      AppStorage.setOrCreate<string>(READ_SETTINGS_KEY, JSON.stringify(this.readSettings));
-    } catch (error) {
-      Logger.error('ReadPage', `保存阅读设置失败: ${error}`);
+  async retryLoadChapter(): Promise<void> {
+    if (this.showRetryCount < this.MAX_RETRY_COUNT) {
+      await this.loadChapterContent();
+    } else {
+      showToast({
+        message: '重试次数过多，请检查网络后重试'
+      });
+    }
+  }
+
+  goBackToBookshelf(): void {
+    this.updateReadProgress();
+    NavigationManager.getInstance().navigateBack();
+  }
+
+  async nextChapter(): Promise<void> {
+    if (this.chapterIndex < this.chapters.length - 1) {
+      this.chapterIndex++;
+      this.chapterUrl = this.chapters[this.chapterIndex].url;
+      await this.loadChapterContent();
+    } else {
+      showToast({
+        message: '已经是最后一章了'
+      });
     }
   }
 
   async prevChapter(): Promise<void> {
-    if (this.currentChapterIndex > 0 && this.chapters.length > 0) {
-      this.currentChapterIndex--;
-      this.currentChapterUrl = this.chapters[this.currentChapterIndex].url;
-      await this.loadChapterContent(this.currentChapterUrl);
+    if (this.chapterIndex > 0) {
+      this.chapterIndex--;
+      this.chapterUrl = this.chapters[this.chapterIndex].url;
+      await this.loadChapterContent();
+    } else {
+      showToast({
+        message: '已经是第一章了'
+      });
     }
   }
 
-  async nextChapter(): Promise<void> {
-    if (this.currentChapterIndex < this.chapters.length - 1) {
-      this.currentChapterIndex++;
-      this.currentChapterUrl = this.chapters[this.currentChapterIndex].url;
-      await this.loadChapterContent(this.currentChapterUrl);
+  async updateReadProgress(): Promise<void> {
+    if (!this.book || !this.isComponentActive) return;
+    
+    try {
+      const bookViewModel = viewModelManager.getBookViewModel();
+      if (this.chapters.length > this.chapterIndex) {
+        await bookViewModel.updateReadProgress(
+          this.book.id, 
+          this.chapterIndex, 
+          this.chapters[this.chapterIndex].title
+        );
+      }
+    } catch (error) {
+      Logger.error('ReadPage', `更新阅读进度失败: ${error}`);
     }
-  }
-
-  async openChapter(index: number): Promise<void> {
-    this.showChapterSheet = false;
-    if (index >= 0 && index < this.chapters.length) {
-      this.currentChapterIndex = index;
-      this.currentChapterUrl = this.chapters[index].url;
-      await this.loadChapterContent(this.currentChapterUrl);
-    }
-  }
-
-  handleBack(): void {
-    NavigationManager.getInstance().navigateBack();
   }
 
   build() {
     Stack() {
       Column() {
-        this.buildContent()
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(this.readSettings.backgroundColor)
-
-      if (this.showMenu) {
-        this.buildMenu()
-      }
-
-      if (this.showSettings) {
-        this.buildSettingsPanel()
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .bindSheet($$this.showChapterSheet, this.buildChapterSheet(), {
-      height: '70%',
-      backgroundColor: Color.Transparent,
-      dragBar: true
-    })
-  }
-
-  @Builder
-  buildContent() {
-    Column() {
-      if (this.isLoading) {
-        AppLoading({ text: '加载中...' })
-      } else if (this.chapterContent) {
-        Scroll() {
+        if (this.isLoading) {
           Column() {
-            Text(this.chapters[this.currentChapterIndex]?.title || '')
-              .fontSize(this.readSettings.fontSize + 4)
-              .fontColor(this.readSettings.textColor)
-              .fontWeight(DesignSystem.Typography.weight.semibold)
-              .width('100%')
-              .margin({ bottom: DesignSystem.Spacing.lg })
-
-            Text(this.chapterContent)
-              .fontSize(this.readSettings.fontSize)
-              .fontColor(this.readSettings.textColor)
-              .lineHeight(this.readSettings.fontSize * this.readSettings.lineHeight)
-              .width('100%')
+            LoadingProgress()
+              .width(40)
+              .height(40)
+              .color(DesignSystem.getPrimaryColor(this.isLightMode))
+            Text('加载中...')
+              .fontSize(14)
+              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              .margin({ top: 10 })
           }
           .width('100%')
-          .padding(DesignSystem.Spacing.lg)
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .scrollBar(BarState.Auto)
-        .onClick(() => {
-          this.showMenu = !this.showMenu;
-        })
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+        } else if (this.loadError) {
+          Column() {
+            Text('章节加载失败')
+              .fontSize(20)
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .fontWeight(600)
+              .margin({ bottom: 16 })
 
-        this.buildBottomNavigation()
-      } else {
-        AppEmpty({
-          icon: '📖',
-          title: '内容加载失败',
-          description: '请检查网络连接后重试'
-        })
-      }
-    }
-    .width('100%')
-    .height('100%')
-  }
+            Text(`错误详情: ${this.loadError}`)
+              .fontSize(14)
+              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              .textAlign(TextAlign.Center)
+              .maxLines(3)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('80%')
+              .margin({ bottom: 8 })
 
-  @Builder
-  buildBottomNavigation() {
-    Row() {
-      AppButton({
-        text: '上一章',
-        variant: 'ghost',
-        buttonSize: 'sm',
-        onClicked: () => {
-          this.prevChapter();
-        }
-      })
+            Text(`重试次数: ${this.showRetryCount}/${this.MAX_RETRY_COUNT}`)
+              .fontSize(12)
+              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+              .margin({ bottom: 24 })
 
-      Text(`${this.currentChapterIndex + 1}/${this.chapters.length}`)
-        .fontSize(DesignSystem.Typography.size.sm)
-        .fontColor(this.readSettings.textColor)
-
-      AppButton({
-        text: '下一章',
-        variant: 'ghost',
-        buttonSize: 'sm',
-        onClicked: () => {
-          this.nextChapter();
-        }
-      })
-    }
-    .width('100%')
-    .justifyContent(FlexAlign.SpaceBetween)
-    .padding(DesignSystem.Spacing.md)
-    .backgroundColor(this.readSettings.backgroundColor)
-  }
-
-  @Builder
-  buildMenu() {
-    Column() {
-      Row() {
-        Text('‹')
-          .fontSize(28)
-          .fontColor(this.readSettings.textColor)
-          .onClick(() => {
-            this.handleBack();
-          })
-
-        Text(this.book?.name || '阅读')
-          .fontSize(DesignSystem.Typography.size.base)
-          .fontColor(this.readSettings.textColor)
-          .fontWeight(DesignSystem.Typography.weight.medium)
-          .layoutWeight(1)
-          .textAlign(TextAlign.Center)
-
-        Text('☰')
-          .fontSize(24)
-          .fontColor(this.readSettings.textColor)
-          .onClick(() => {
-            this.showChapterSheet = true;
-          })
-      }
-      .width('100%')
-      .height(56)
-      .padding({ left: DesignSystem.Spacing.md, right: DesignSystem.Spacing.md })
-      .backgroundColor(this.readSettings.backgroundColor)
-
-      Blank()
-
-      Row() {
-        AppButton({
-          text: '目录',
-          variant: 'ghost',
-          buttonSize: 'sm',
-          onClicked: () => {
-            this.showChapterSheet = true;
-          }
-        })
-
-        AppButton({
-          text: '设置',
-          variant: 'ghost',
-          buttonSize: 'sm',
-          onClicked: () => {
-            this.showSettings = true;
-          }
-        })
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.SpaceAround)
-      .padding(DesignSystem.Spacing.md)
-      .backgroundColor(this.readSettings.backgroundColor)
-    }
-    .width('100%')
-    .height('100%')
-    .onClick(() => {
-      this.showMenu = false;
-    })
-  }
-
-  @Builder
-  buildSettingsPanel() {
-    Column() {
-      Row() {
-        Text('阅读设置')
-          .fontSize(DesignSystem.Typography.size.lg)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.semibold)
-
-        Blank()
-
-        Text('✕')
-          .fontSize(20)
-          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          .onClick(() => {
-            this.showSettings = false;
-          })
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.lg)
-
-      Column() {
-        Text('字体大小')
-          .fontSize(DesignSystem.Typography.size.sm)
-          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          .width('100%')
-          .margin({ bottom: DesignSystem.Spacing.sm })
-
-        Row() {
-          Text('A')
-            .fontSize(14)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-
-          Slider({
-            value: this.readSettings.fontSize,
-            min: 14,
-            max: 28,
-            step: 2
-          })
-            .layoutWeight(1)
-            .onChange((value: number) => {
-              this.readSettings.fontSize = Math.round(value);
-              this.saveSettings();
-            })
-
-          Text('A')
-            .fontSize(22)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.SpaceBetween)
-
-        Text('行间距')
-          .fontSize(DesignSystem.Typography.size.sm)
-          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          .width('100%')
-          .margin({ top: DesignSystem.Spacing.lg, bottom: DesignSystem.Spacing.sm })
-
-        Row() {
-          ForEach([1.4, 1.6, 1.8, 2.0, 2.2], (value: number) => {
-            Text(`${value}`)
-              .fontSize(DesignSystem.Typography.size.sm)
-              .fontColor(this.readSettings.lineHeight === value ?
-                DesignSystem.getPrimaryColor(this.isLightMode) :
-                DesignSystem.getSecondaryTextColor(this.isLightMode))
-              .padding(DesignSystem.Spacing.sm)
-              .borderRadius(DesignSystem.BorderRadius.sm)
-              .backgroundColor(this.readSettings.lineHeight === value ?
-                DesignSystem.getHoverColor(this.isLightMode) :
-                Color.Transparent)
-              .onClick(() => {
-                this.readSettings.lineHeight = value;
-                this.saveSettings();
-              })
-          })
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.SpaceAround)
-
-        Text('主题')
-          .fontSize(DesignSystem.Typography.size.sm)
-          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          .width('100%')
-          .margin({ top: DesignSystem.Spacing.lg, bottom: DesignSystem.Spacing.sm })
-
-        Row() {
-          ForEach(this.settingsPresets, (preset: ReadSettings, index: number) => {
-            Column() {
-              Row()
-                .width(40)
+            Row() {
+              Button('重试')
+                .fontSize(16)
+                .fontColor(Color.White)
+                .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                .borderRadius(8)
+                .width(100)
                 .height(40)
-                .borderRadius(DesignSystem.BorderRadius.md)
-                .backgroundColor(preset.backgroundColor)
-                .border({
-                  width: this.readSettings.backgroundColor === preset.backgroundColor ? 2 : 1,
-                  color: this.readSettings.backgroundColor === preset.backgroundColor ?
-                    DesignSystem.getPrimaryColor(this.isLightMode) :
-                    DesignSystem.getBorderColor(this.isLightMode)
+                .margin({ right: 16 })
+                .onClick(() => {
+                  this.retryLoadChapter();
+                })
+
+              Button('返回书架')
+                .fontSize(16)
+                .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                .borderRadius(8)
+                .width(100)
+                .height(40)
+                .onClick(() => {
+                  this.goBackToBookshelf();
                 })
             }
-            .onClick(() => {
-              this.readSettings.fontSize = preset.fontSize;
-              this.readSettings.lineHeight = preset.lineHeight;
-              this.readSettings.backgroundColor = preset.backgroundColor;
-              this.readSettings.textColor = preset.textColor;
-              this.saveSettings();
-            })
-          })
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.SpaceAround)
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.lg)
-    }
-    .width('100%')
-    .borderRadius({
-      topLeft: DesignSystem.BorderRadius.xl,
-      topRight: DesignSystem.BorderRadius.xl
-    })
-    .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    .position({ x: 0, y: '30%' })
-    .shadow({
-      radius: 20,
-      color: 'rgba(0,0,0,0.15)',
-      offsetX: 0,
-      offsetY: -5
-    })
-  }
-
-  @Builder
-  buildChapterSheet() {
-    Column() {
-      Row() {
-        Text('目录')
-          .fontSize(DesignSystem.Typography.size.lg)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.semibold)
-          .layoutWeight(1)
-
-        Text(`${this.chapters.length} 章`)
-          .fontSize(DesignSystem.Typography.size.sm)
-          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.lg)
-
-      List() {
-        ForEach(this.chapters, (chapter: Chapter, index: number) => {
-          ListItem() {
-            Row() {
-              Text(chapter.title)
-                .fontSize(DesignSystem.Typography.size.sm)
+            .width('100%')
+            .justifyContent(FlexAlign.Center)
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .padding(20)
+        } else if (this.chapterContent) {
+          Column() {
+            if (this.book && this.chapters.length > 0) {
+              Text(this.chapters[this.chapterIndex].title)
+                .fontSize(18)
                 .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .layoutWeight(1)
-
-              if (chapter.isVip) {
-                Text('VIP')
-                  .fontSize(DesignSystem.Typography.size.xs)
-                  .fontColor('#FFFFFF')
-                  .padding({
-                    left: DesignSystem.Spacing.xs,
-                    right: DesignSystem.Spacing.xs,
-                    top: 2,
-                    bottom: 2
-                  })
-                  .borderRadius(DesignSystem.BorderRadius.sm)
-                  .backgroundColor(DesignSystem.getWarningColor(this.isLightMode))
-              }
+                .fontWeight(600)
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .margin({ top: 20, bottom: 20 })
+            }
+            Scroll() {
+              Text(this.chapterContent.content)
+                .fontSize(this.readConfig.fontSize)
+                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                .lineHeight(this.readConfig.lineSpacing)
+                .width('100%')
+                .padding({
+                  left: this.readConfig.margins.left,
+                  right: this.readConfig.margins.right,
+                  top: this.readConfig.margins.top,
+                  bottom: this.readConfig.margins.bottom
+                })
+                .letterSpacing(this.readConfig.letterSpacing)
             }
             .width('100%')
-            .padding(DesignSystem.Spacing.md)
-            .borderRadius(DesignSystem.BorderRadius.md)
-            .backgroundColor(this.currentChapterIndex === index ?
-              DesignSystem.getHoverColor(this.isLightMode) :
-              Color.Transparent)
+            .layoutWeight(1)
+            .scrollBar(BarState.Auto)
           }
-          .onClick(() => {
-            this.openChapter(index);
-          })
-        })
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
       }
       .width('100%')
       .height('100%')
-      .layoutWeight(1)
-      .padding({
-        left: DesignSystem.Spacing.lg,
-        right: DesignSystem.Spacing.lg
+      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+      .onClick(() => {
+        this.showMenu = !this.showMenu;
       })
-      .cachedCount(10)
+
+      if (this.showMenu) {
+        Column() {
+          Row() {
+            Button() {
+              Text('‹')
+                .fontSize(20)
+                .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
+            }
+            .width(32)
+            .height(32)
+            .borderRadius(16)
+            .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+            .margin({ right: 15 })
+            .onClick(() => {
+              this.updateReadProgress();
+              NavigationManager.getInstance().navigateBack();
+            })
+
+            if (this.book) {
+              Text(this.book.name)
+                .fontSize(18)
+                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                .fontWeight(600)
+                .layoutWeight(1)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+          }
+          .width('100%')
+          .padding({ left: 15, right: 20, top: 15, bottom: 15 })
+          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .border({
+            width: { bottom: 1 },
+            color: DesignSystem.getBorderColor(this.isLightMode)
+          })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+
+      if (this.showMenu) {
+        Column() {
+          Row() {
+            Text('A+')
+              .fontSize(14)
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(8)
+              .margin({ right: 10 })
+              .onClick(() => {
+                this.readConfig.fontSize = Math.min(this.readConfig.fontSize + 2, 32);
+                viewModelManager.getReadConfigViewModel().updateReadConfig(this.readConfig);
+              })
+
+            Text('A-')
+              .fontSize(14)
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(8)
+              .margin({ right: 10 })
+              .onClick(() => {
+                this.readConfig.fontSize = Math.max(this.readConfig.fontSize - 2, 12);
+                viewModelManager.getReadConfigViewModel().updateReadConfig(this.readConfig);
+              })
+
+            Text('目录')
+              .fontSize(14)
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(8)
+              .margin({ right: 10 })
+              .onClick(() => {
+                this.showChapterList = true;
+                this.showMenu = false;
+              })
+
+            Text('上一章')
+              .fontSize(14)
+              .fontColor(this.chapterIndex > 0 ? DesignSystem.getPrimaryTextColor(this.isLightMode) : '#999')
+              .backgroundColor(this.chapterIndex > 0 ? DesignSystem.getSecondaryBackgroundColor(this.isLightMode) : 'transparent')
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(8)
+              .margin({ right: 10 })
+              .onClick(() => {
+                if (this.chapterIndex > 0) {
+                  this.prevChapter();
+                }
+              })
+
+            Text('下一章')
+              .fontSize(14)
+              .fontColor(this.chapterIndex < this.chapters.length - 1 ? DesignSystem.getPrimaryTextColor(this.isLightMode) : '#999')
+              .backgroundColor(this.chapterIndex < this.chapters.length - 1 ? DesignSystem.getSecondaryBackgroundColor(this.isLightMode) : 'transparent')
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(8)
+              .onClick(() => {
+                if (this.chapterIndex < this.chapters.length - 1) {
+                  this.nextChapter();
+                }
+              })
+          }
+          .width('100%')
+          .padding(15)
+          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .border({
+            width: { top: 1 },
+            color: DesignSystem.getBorderColor(this.isLightMode)
+          })
+        }
+        .width('100%')
+        .position({ x: 0, y: '100%' })
+        .translate({ y: '-100%' })
+      }
+
+      if (this.showChapterList) {
+        Column() {
+          Row() {
+            Text('目录')
+              .fontSize(18)
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+              .fontWeight(600)
+              .layoutWeight(1)
+
+            Button() {
+              Text('✕')
+                .fontSize(20)
+                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+            }
+            .width(32)
+            .height(32)
+            .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+            .onClick(() => {
+              this.showChapterList = false;
+            })
+          }
+          .width('100%')
+          .padding(15)
+          .alignItems(VerticalAlign.Center)
+
+          List() {
+            ForEach(this.chapters, (chapter: Chapter, index: number) => {
+              ListItem() {
+                Row() {
+                  Text(chapter.title)
+                    .fontSize(14)
+                    .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .layoutWeight(1)
+
+                  if (chapter.isVip) {
+                    Text('VIP')
+                      .fontSize(10)
+                      .fontColor(DesignSystem.Colors.text.primary.light)
+                      .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+                      .padding({ left: 4, right: 4, top: 2, bottom: 2 })
+                      .borderRadius(4)
+                      .margin({ left: 8 })
+                  }
+                }
+                .width('100%')
+                .padding(12)
+                .borderRadius(8)
+                .backgroundColor(index === this.chapterIndex ? DesignSystem.getSecondaryBackgroundColor(this.isLightMode) : Color.Transparent)
+                .onClick(() => {
+                  this.chapterIndex = index;
+                  this.chapterUrl = chapter.url;
+                  this.showChapterList = false;
+                  this.loadChapterContent();
+                })
+              }
+            }, (chapter: Chapter) => chapter.id)
+          }
+          .width('100%')
+          .height('100%')
+          .padding({ left: 15, right: 15 })
+          .scrollBar(BarState.Auto)
+          .cachedCount(10)
+        }
+        .width(360)
+        .height('100%')
+        .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+        .alignItems(HorizontalAlign.Start)
+      }
     }
     .width('100%')
     .height('100%')
-    .borderRadius({
-      topLeft: DesignSystem.BorderRadius.xl,
-      topRight: DesignSystem.BorderRadius.xl
-    })
     .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
   }
 }

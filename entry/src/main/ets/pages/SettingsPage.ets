@@ -1,593 +1,186 @@
-import { themeManager, ThemeMode } from '../common/ThemeManager';
+/**
+ * Copyright (c) 2025 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { NavigationManager } from '../common/NavigationManager';
-import { AppNavBar, SectionHeader } from '../components/AppNavigation';
-import { viewModelManager } from '../viewmodel/ViewModelManager';
-import { ReadConfig } from '../models/ReadConfig';
-import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
-import { Logger } from '../utils/Logger';
-import { showToast } from '../utils/ToastUtils';
-import { floatingNavManager, FloatingNavConfig, FloatingNavPosition } from '../common/FloatingNavManager';
-import display from '@ohos.display';
-
-// 设置存储键
-const SETTINGS_STORAGE_KEY = 'app_settings';
-
-// 应用设置接口
-interface AppSettings {
-  autoUpdate: boolean;
-  cacheSize: string;
-  readBackground: string;
-}
 
 interface SettingItem {
-  id: string;
+  icon: string;
   title: string;
   subtitle?: string;
-  icon: string;
-  type: 'navigation' | 'toggle' | 'slider' | 'action' | 'info';
-  value?: string | number | boolean;
-  route?: string;
   action?: () => void;
-}
-
-interface SettingGroup {
-  id: string;
-  title: string;
-  items: SettingItem[];
-}
-
-interface PositionOption {
-  id: string;
-  label: string;
-  icon: string;
+  trailing?: 'arrow' | 'toggle' | 'text' | 'custom';
+  trailingValue?: string;
 }
 
 @ComponentV2
 export struct SettingsPage {
   @Local isLightMode: boolean = true;
   @Local fontSize: number = 16;
-  @Local lineSpacing: number = 1.6;
   @Local cacheSize: string = '128MB';
   @Local autoUpdate: boolean = true;
-  @Local themeModeIndex: number = 0;
-  @Local readConfig: ReadConfig = ReadConfigViewModel.DEFAULT_READ_CONFIG;
-  @Local showClearCacheConfirm: boolean = false;
-  @Local isClearingCache: boolean = false;
-  @Local showAboutSheet: boolean = false;
-  @Local searchKeyword: string = '';
-  @Local filteredGroups: SettingGroup[] = [];
-  @Local floatingNavConfig: FloatingNavConfig = floatingNavManager.getConfig();
-  @Local showFloatingNavSettings: boolean = false;
-  @Local showThemeModeSheet: boolean = false;
-  @Local showReadBackgroundSheet: boolean = false;
-  @Local showFeedbackSheet: boolean = false;
-  @Local screenWidth: number = 360;
-  @Local screenHeight: number = 780;
-  @Local isTablet: boolean = false;
+  @Local pressedItem: string = '';
   @Param safeAreaTop: number = 0;
-  @Param safeAreaBottom: number = 0;
   
-  private settingGroups: SettingGroup[] = [];
+  private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
-  private floatingNavListener: (config: FloatingNavConfig) => void = (config: FloatingNavConfig) => {
-    this.floatingNavConfig = config;
-    this.initSettingGroups();
-    this.performSearch(this.searchKeyword);
-  };
 
   aboutToAppear(): void {
-    // Component initialized
+    this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
-    this.themeModeIndex = this.getThemeModeIndex();
     themeManager.addListener(this.themeListener);
-    floatingNavManager.addConfigChangeListener(this.floatingNavListener);
-    
-    this.updateScreenSize();
-    this.loadSettings();
-    this.loadReadConfig();
-    this.initSettingGroups();
-    this.filteredGroups = this.settingGroups.slice();
-  }
-
-  // 更新屏幕尺寸和响应式状态
-  private updateScreenSize(): void {
-    try {
-      const displayInfo = display.getDefaultDisplaySync();
-      this.screenWidth = displayInfo.width;
-      this.screenHeight = displayInfo.height;
-      // 平板判断：宽度大于600vp认为是平板
-      this.isTablet = this.screenWidth > 600;
-      Logger.info('SettingsPage', `屏幕尺寸: ${this.screenWidth}x${this.screenHeight}, 是否平板: ${this.isTablet}`);
-    } catch (error) {
-      Logger.error('SettingsPage', `获取屏幕尺寸失败: ${error}`);
-    }
-  }
-
-  // 获取响应式内容宽度
-  private getContentWidth(): string {
-    if (this.isTablet) {
-      return '70%';
-    }
-    return '100%';
-  }
-
-  // 获取响应式最大内容宽度
-  private getMaxContentWidth(): number {
-    if (this.isTablet) {
-      return 600;
-    }
-    return Infinity;
   }
 
   aboutToDisappear(): void {
-    // Component destroyed
+    this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
-    floatingNavManager.removeConfigChangeListener(this.floatingNavListener);
   }
 
-  private getThemeModeIndex(): number {
-    const mode = themeManager.getThemeMode();
-    switch (mode) {
-      case ThemeMode.LIGHT:
-        return 0;
-      case ThemeMode.DARK:
-        return 1;
-      case ThemeMode.AUTO:
-        return 2;
-      default:
-        return 0;
-    }
-  }
-
-  private async loadReadConfig(): Promise<void> {
-    try {
-      const readConfigViewModel = viewModelManager.getReadConfigViewModel();
-      this.readConfig = await readConfigViewModel.getReadConfig();
-      this.fontSize = this.readConfig.fontSize;
-      this.lineSpacing = this.readConfig.lineSpacing;
-    } catch (error) {
-      Logger.error('SettingsPage', `加载阅读配置失败: ${error}`);
-    }
-  }
-
-  // 加载应用设置
-  private loadSettings(): void {
-    try {
-      const settingsStr = AppStorage.get<string>(SETTINGS_STORAGE_KEY);
-      if (settingsStr) {
-        const settings: AppSettings = JSON.parse(settingsStr);
-        this.autoUpdate = settings.autoUpdate !== undefined ? settings.autoUpdate : true;
-        this.cacheSize = settings.cacheSize || '128MB';
-        Logger.info('SettingsPage', '设置加载成功');
-      }
-    } catch (error) {
-      Logger.error('SettingsPage', `加载设置失败: ${error}`);
-    }
-  }
-
-  // 保存应用设置
-  private saveSettings(): void {
-    try {
-      const settings: AppSettings = {
-        autoUpdate: this.autoUpdate,
-        cacheSize: this.cacheSize,
-        readBackground: '默认'
-      };
-      AppStorage.set(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-      Logger.info('SettingsPage', '设置保存成功');
-    } catch (error) {
-      Logger.error('SettingsPage', `保存设置失败: ${error}`);
-    }
-  }
-
-  private initSettingGroups(): void {
-    this.settingGroups = [
+  private getReadingSettings(): SettingItem[] {
+    const items: SettingItem[] = [
       {
-        id: 'appearance',
-        title: '外观设置',
-        items: [
-          {
-            id: 'theme_mode',
-            title: '主题模式',
-            subtitle: this.getThemeModeText(),
-            icon: '🎨',
-            type: 'navigation',
-            route: 'ThemeModeSheet'
-          }
-        ]
+        icon: '🌙',
+        title: '阅读模式',
+        subtitle: this.isLightMode ? '白天模式' : '夜间模式',
+        trailing: 'text',
+        trailingValue: this.isLightMode ? '白天' : '夜间'
       },
       {
-        id: 'reading',
-        title: '阅读设置',
-        items: [
-          {
-            id: 'font_size',
-            title: '字体大小',
-            subtitle: `${this.fontSize}px`,
-            icon: '🔤',
-            type: 'slider',
-            value: this.fontSize
-          },
-          {
-            id: 'line_spacing',
-            title: '行间距',
-            subtitle: `${this.lineSpacing.toFixed(1)}`,
-            icon: '📏',
-            type: 'slider',
-            value: this.lineSpacing
-          },
-          {
-            id: 'read_background',
-            title: '阅读背景',
-            subtitle: '默认',
-            icon: '🖼️',
-            type: 'navigation',
-            route: 'ReadBackgroundSheet'
-          }
-        ]
-      },
-      {
-        id: 'app',
-        title: '应用设置',
-        items: [
-          {
-            id: 'auto_update',
-            title: '自动更新',
-            subtitle: '自动检查书源更新',
-            icon: '🔄',
-            type: 'toggle',
-            value: this.autoUpdate
-          },
-          {
-            id: 'floating_nav',
-            title: '悬浮导航栏',
-            subtitle: this.floatingNavConfig.enabled ? '已开启' : '已关闭',
-            icon: '🧭',
-            type: 'navigation',
-            route: 'FloatingNavSettings'
-          },
-          {
-            id: 'cache',
-            title: '清除缓存',
-            subtitle: this.cacheSize,
-            icon: '🗑️',
-            type: 'action',
-            action: () => {
-              this.showClearCacheConfirm = true;
-            }
-          }
-        ]
-      },
-      {
-        id: 'developer',
-        title: '开发者选项',
-        items: [
-          {
-            id: 'debug_log',
-            title: '调试日志',
-            subtitle: '查看应用运行日志',
-            icon: '📋',
-            type: 'navigation',
-            route: 'DebugLogPage'
-          },
-          {
-            id: 'performance',
-            title: '性能监控',
-            subtitle: '查看应用性能数据',
-            icon: '📊',
-            type: 'navigation',
-            route: 'PerformanceMonitorPage'
-          },
-          {
-            id: 'book_source_repair',
-            title: '书源诊断修复',
-            subtitle: '诊断并修复书源访问问题',
-            icon: '🔧',
-            type: 'navigation',
-            route: 'BookSourceRepairPage'
-          }
-        ]
-      },
-      {
-        id: 'about',
-        title: '关于',
-        items: [
-          {
-            id: 'about_app',
-            title: '关于应用',
-            subtitle: '版本 1.0.0',
-            icon: 'ℹ️',
-            type: 'navigation',
-            route: 'AboutSheet'
-          },
-          {
-            id: 'feedback',
-            title: '意见反馈',
-            subtitle: '帮助我们改进',
-            icon: '💬',
-            type: 'navigation',
-            route: 'FeedbackSheet'
-          }
-        ]
+        icon: '🔤',
+        title: '字体大小',
+        trailing: 'custom',
+        trailingValue: `${this.fontSize}px`
       }
     ];
+    return items;
   }
 
-  private getThemeModeText(): string {
-    switch (this.themeModeIndex) {
-      case 0:
-        return '浅色模式';
-      case 1:
-        return '深色模式';
-      case 2:
-        return '跟随系统';
-      default:
-        return '浅色模式';
-    }
-  }
-
-  private performSearch(keyword: string): void {
-    this.searchKeyword = keyword;
-    
-    if (!keyword || keyword.trim().length === 0) {
-      this.filteredGroups = this.settingGroups.slice();
-      return;
-    }
-    
-    const lowerKeyword = keyword.toLowerCase().trim();
-    const filtered: SettingGroup[] = [];
-    
-    for (const group of this.settingGroups) {
-      const matchedItems = group.items.filter(item => 
-        item.title.toLowerCase().includes(lowerKeyword) ||
-        (item.subtitle && item.subtitle.toLowerCase().includes(lowerKeyword))
-      );
-      
-      if (matchedItems.length > 0) {
-        filtered.push({
-          id: group.id,
-          title: group.title,
-          items: matchedItems
-        });
+  private getAppSettings(): SettingItem[] {
+    const items: SettingItem[] = [
+      {
+        icon: '🔄',
+        title: '自动更新',
+        trailing: 'toggle'
+      },
+      {
+        icon: '🗑️',
+        title: '清除缓存',
+        trailing: 'text',
+        trailingValue: this.cacheSize
+      },
+      {
+        icon: '📋',
+        title: '调试日志',
+        trailing: 'arrow'
+      },
+      {
+        icon: 'ℹ️',
+        title: '关于我们',
+        trailing: 'arrow'
       }
-    }
-    
-    this.filteredGroups = filtered;
+    ];
+    return items;
   }
-
-  private async toggleAutoUpdate(): Promise<void> {
-    this.autoUpdate = !this.autoUpdate;
-    this.saveSettings();
-    this.initSettingGroups();
-    showToast({
-      message: this.autoUpdate ? '已开启自动更新' : '已关闭自动更新'
-    });
-  }
-
-  private async clearCache(): Promise<void> {
-    this.isClearingCache = true;
-    
-    try {
-      // 模拟清除缓存操作
-      await new Promise<void>(resolve => setTimeout(resolve, 1000));
-      this.cacheSize = '0MB';
-      this.saveSettings();
-      this.initSettingGroups();
-      showToast({
-        message: '缓存已清除'
-      });
-    } catch (error) {
-      Logger.error('SettingsPage', `清除缓存失败: ${error}`);
-      showToast({
-        message: '清除失败'
-      });
-    } finally {
-      this.isClearingCache = false;
-      this.showClearCacheConfirm = false;
-    }
-  }
-
-  private async updateFontSize(size: number): Promise<void> {
-    this.fontSize = Math.round(size);
-    this.readConfig.fontSize = this.fontSize;
-    
-    try {
-      const readConfigViewModel = viewModelManager.getReadConfigViewModel();
-      await readConfigViewModel.updateReadConfig(this.readConfig);
-    } catch (error) {
-      Logger.error('SettingsPage', `保存字体大小失败: ${error}`);
-    }
-  }
-
-  private async updateLineSpacing(spacing: number): Promise<void> {
-    this.lineSpacing = Math.round(spacing * 10) / 10;
-    this.readConfig.lineSpacing = this.lineSpacing;
-    
-    try {
-      const readConfigViewModel = viewModelManager.getReadConfigViewModel();
-      await readConfigViewModel.updateReadConfig(this.readConfig);
-    } catch (error) {
-      Logger.error('SettingsPage', `保存行间距失败: ${error}`);
-    }
-  }
-
-  private async setThemeMode(index: number): Promise<void> {
-    this.themeModeIndex = index;
-    const modes: ThemeMode[] = [ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.AUTO];
-    await themeManager.setThemeMode(modes[index]);
-    
-    this.initSettingGroups();
-    this.performSearch(this.searchKeyword);
-  }
-
-  private handleItemAction(item: SettingItem): void {
-    if (item.type === 'navigation' && item.route) {
-      if (item.route === 'DebugLogPage') {
-        NavigationManager.getInstance().navigateTo('DebugLogPage');
-      } else if (item.route === 'PerformanceMonitorPage') {
-        NavigationManager.getInstance().navigateTo('PerformanceMonitorPage');
-      } else if (item.route === 'BookSourceRepairPage') {
-        NavigationManager.getInstance().navigateTo('BookSourceRepairPage');
-      } else if (item.route === 'AboutSheet') {
-        this.showAboutSheet = true;
-      } else if (item.route === 'FloatingNavSettings') {
-        this.showFloatingNavSettings = true;
-      } else if (item.route === 'ThemeModeSheet') {
-        this.showThemeModeSheet = true;
-      } else if (item.route === 'ReadBackgroundSheet') {
-        this.showReadBackgroundSheet = true;
-      } else if (item.route === 'FeedbackSheet') {
-        this.showFeedbackSheet = true;
-      }
-    } else if (item.type === 'action' && item.action) {
-      item.action();
-    } else if (item.type === 'toggle' && item.id === 'auto_update') {
-      this.toggleAutoUpdate();
-    }
-  }
-
+  
   build() {
-    Stack() {
-      Column() {
-        AppNavBar({
-          title: $r('app.string.settings'),
-          showBack: true,
-          safeAreaTop: this.safeAreaTop
-        })
+    Column() {
+      this.buildHeader()
 
-        this.buildSearchBar()
-
-        Scroll() {
-          Column() {
-            ForEach(this.filteredGroups, (group: SettingGroup) => {
-              this.buildSettingGroup(group)
-            })
-
-            if (this.filteredGroups.length === 0) {
-              this.buildEmptySearchResult()
-            }
-          }
-          .width(this.getContentWidth())
-          .padding({ bottom: DesignSystem.Spacing.xxl + this.safeAreaBottom })
+      Scroll() {
+        Column() {
+          this.buildSection('阅读设置', this.getReadingSettings())
+          
+          this.buildSection('应用设置', this.getAppSettings())
+          
+          this.buildAppInfo()
         }
         .width('100%')
-        .constraintSize({ maxWidth: this.getMaxContentWidth() })
-        .layoutWeight(1)
-        .scrollBar(BarState.Auto)
+        .padding(DesignSystem.Spacing.xl)
       }
       .width('100%')
-      .height('100%')
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-      .alignItems(this.isTablet ? HorizontalAlign.Center : HorizontalAlign.Start)
+      .layoutWeight(1)
+      .align(Alignment.Top)
+      .scrollBar(BarState.Auto)
     }
     .width('100%')
     .height('100%')
-    .onAreaChange((oldArea: Area, newArea: Area) => {
-      // 监听区域变化，更新屏幕尺寸
-      if (newArea.width !== oldArea.width || newArea.height !== oldArea.height) {
-        this.updateScreenSize();
-      }
-    })
-    .bindSheet($$this.showClearCacheConfirm, this.buildClearCacheSheet(), {
-      height: 'auto',
-      backgroundColor: Color.Transparent,
-      dragBar: false
-    })
-    .bindSheet($$this.showAboutSheet, this.buildAboutSheet(), {
-      height: 'auto',
-      backgroundColor: Color.Transparent,
-      dragBar: false
-    })
-    .bindSheet($$this.showFloatingNavSettings, this.buildFloatingNavSettingsSheet(), {
-      height: '90%',
-      backgroundColor: Color.Transparent,
-      dragBar: true
-    })
-    .bindSheet($$this.showThemeModeSheet, this.buildThemeModeSheet(), {
-      height: 'auto',
-      backgroundColor: Color.Transparent,
-      dragBar: false
-    })
-    .bindSheet($$this.showReadBackgroundSheet, this.buildReadBackgroundSheet(), {
-      height: 'auto',
-      backgroundColor: Color.Transparent,
-      dragBar: false
-    })
-    .bindSheet($$this.showFeedbackSheet, this.buildFeedbackSheet(), {
-      height: 'auto',
-      backgroundColor: Color.Transparent,
-      dragBar: false
-    })
+    .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
   }
 
   @Builder
-  buildSearchBar() {
+  buildHeader() {
     Row() {
-      Text('🔍')
-        .fontSize(DesignSystem.IconSize.sm)
-        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-        .margin({ right: DesignSystem.Spacing.sm })
-
-      TextInput({ placeholder: '搜索设置项...', text: this.searchKeyword })
-        .layoutWeight(1)
-        .backgroundColor(Color.Transparent)
-        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-        .fontSize(DesignSystem.Typography.size.sm)
-        .placeholderColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
-        .onChange((value: string) => {
-          this.performSearch(value);
-        })
-
-      if (this.searchKeyword.length > 0) {
-        Text('✕')
-          .fontSize(DesignSystem.IconSize.sm)
-          .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
-          .onClick(() => {
-            this.performSearch('');
-          })
+      Row() {
+        Text('‹')
+          .fontSize(DesignSystem.Typography.size.xl)
+          .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
       }
+      .width(40)
+      .height(40)
+      .borderRadius(DesignSystem.BorderRadius.md)
+      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+      .justifyContent(FlexAlign.Center)
+      .border({
+        width: 1,
+        color: DesignSystem.getBorderColor(this.isLightMode)
+      })
+      .onClick(() => {
+        NavigationManager.getInstance().navigateBack();
+      })
+
+      Text($r('app.string.settings'))
+        .fontSize(DesignSystem.Typography.size.xl)
+        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+        .fontWeight(DesignSystem.Typography.weight.bold)
+        .layoutWeight(1)
+        .margin({ left: DesignSystem.Spacing.md })
     }
     .width('100%')
-    .padding(DesignSystem.Spacing.md)
-    .margin({
-      left: DesignSystem.Spacing.lg,
-      right: DesignSystem.Spacing.lg,
-      top: DesignSystem.Spacing.sm,
-      bottom: DesignSystem.Spacing.md
+    .padding({
+      left: DesignSystem.Spacing.xl,
+      right: DesignSystem.Spacing.xl,
+      top: this.safeAreaTop + DesignSystem.Spacing.lg,
+      bottom: DesignSystem.Spacing.lg
     })
-    .borderRadius(DesignSystem.BorderRadius.lg)
     .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+    .border({
+      width: { bottom: 1 },
+      color: DesignSystem.getBorderColor(this.isLightMode)
+    })
   }
 
   @Builder
-  buildSettingGroup(group: SettingGroup) {
+  buildSection(title: string, items: SettingItem[]) {
     Column() {
-      SectionHeader({ title: group.title })
+      Text(title)
+        .fontSize(DesignSystem.Typography.size.sm)
+        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .fontWeight(DesignSystem.Typography.weight.semibold)
+        .margin({ bottom: DesignSystem.Spacing.md })
+        .width('100%')
+        .letterSpacing(1)
 
       Column() {
-        ForEach(group.items, (item: SettingItem, index: number) => {
-          Column() {
-            this.buildSettingItem(item)
-            
-            if (index < group.items.length - 1) {
-              Row()
-                .width('100%')
-                .height(1)
-                .backgroundColor(DesignSystem.getBorderColor(this.isLightMode))
-                .margin({ left: 48 + DesignSystem.Spacing.md })
-            }
-          }
+        ForEach(items, (item: SettingItem, index: number) => {
+          this.buildSettingItem(item, index === items.length - 1)
         })
       }
       .width('100%')
-      .margin({
-        left: DesignSystem.Spacing.lg,
-        right: DesignSystem.Spacing.lg
-      })
-      .borderRadius(DesignSystem.BorderRadius.lg)
+      .borderRadius(DesignSystem.BorderRadius.md)
       .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
       .border({
         width: 1,
@@ -595,19 +188,20 @@ export struct SettingsPage {
       })
     }
     .width('100%')
-    .margin({ bottom: DesignSystem.Spacing.md })
+    .alignItems(HorizontalAlign.Start)
+    .margin({ bottom: DesignSystem.Spacing.xl })
   }
 
   @Builder
-  buildSettingItem(item: SettingItem) {
+  buildSettingItem(item: SettingItem, isLast: boolean) {
     Row() {
       Row() {
         Text(item.icon)
-          .fontSize(DesignSystem.IconSize.md)
+          .fontSize(DesignSystem.IconSize.sm)
       }
-      .width(32)
-      .height(32)
-      .borderRadius(DesignSystem.BorderRadius.md)
+      .width(36)
+      .height(36)
+      .borderRadius(DesignSystem.BorderRadius.sm)
       .backgroundColor(DesignSystem.getHoverColor(this.isLightMode))
       .justifyContent(FlexAlign.Center)
       .margin({ right: DesignSystem.Spacing.md })
@@ -622,758 +216,149 @@ export struct SettingsPage {
           Text(item.subtitle)
             .fontSize(DesignSystem.Typography.size.xs)
             .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .margin({ top: 2 })
+            .margin({ top: DesignSystem.Spacing.xs })
         }
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      if (item.type === 'navigation') {
-        Text('›')
-          .fontSize(DesignSystem.Typography.size.xl)
-          .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
-      } else if (item.type === 'toggle') {
-        Toggle({ type: ToggleType.Switch, isOn: item.value as boolean })
-          .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .onChange((isOn: boolean) => {
-            if (item.id === 'auto_update') {
-              this.autoUpdate = isOn;
-              this.toggleAutoUpdate();
-            }
-          })
-      } else if (item.type === 'slider') {
-        Row({ space: DesignSystem.Spacing.sm }) {
-          Text(item.id === 'font_size' ? 'A-' : '紧')
-            .fontSize(DesignSystem.Typography.size.xs)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .onClick(() => {
-              if (item.id === 'font_size' && this.fontSize > 12) {
-                this.updateFontSize(this.fontSize - 1);
-              } else if (item.id === 'line_spacing' && this.lineSpacing > 1.2) {
-                this.updateLineSpacing(this.lineSpacing - 0.1);
-              }
-            })
-
-          Slider({
-            value: item.id === 'font_size' ? this.fontSize : this.lineSpacing * 10,
-            min: item.id === 'font_size' ? 12 : 12,
-            max: item.id === 'font_size' ? 32 : 24,
-            step: 1
-          })
-            .width(80)
-            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((value: number) => {
-              if (item.id === 'font_size') {
-                this.updateFontSize(value);
-              } else {
-                this.updateLineSpacing(value / 10);
-              }
-            })
-
-          Text(item.id === 'font_size' ? 'A+' : '松')
-            .fontSize(DesignSystem.Typography.size.xs)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .onClick(() => {
-              if (item.id === 'font_size' && this.fontSize < 32) {
-                this.updateFontSize(this.fontSize + 1);
-              } else if (item.id === 'line_spacing' && this.lineSpacing < 2.4) {
-                this.updateLineSpacing(this.lineSpacing + 0.1);
-              }
-            })
-        }
-      }
+      this.buildTrailing(item)
     }
     .width('100%')
-    .padding(DesignSystem.Spacing.md)
+    .padding(DesignSystem.Spacing.lg)
+    .border({
+      width: isLast ? 0 : { bottom: 1 },
+      color: DesignSystem.getBorderColor(this.isLightMode)
+    })
+    .backgroundColor(this.pressedItem === item.title ?
+      DesignSystem.getHoverColor(this.isLightMode) :
+      Color.Transparent)
+    .opacity(this.pressedItem === item.title ? 0.9 : 1)
+    .animation({
+      duration: DesignSystem.AnimationDuration.fast,
+      curve: DesignSystem.AnimationCurve.easeOut
+    })
     .onClick(() => {
-      if (item.type === 'navigation' || item.type === 'action') {
-        this.handleItemAction(item);
+      this.handleItemAction(item);
+    })
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        this.pressedItem = item.title;
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.pressedItem = '';
       }
     })
   }
 
   @Builder
-  buildEmptySearchResult() {
-    Column() {
-      Text('🔍')
-        .fontSize(48)
-        .margin({ bottom: DesignSystem.Spacing.md })
-
-      Text('未找到相关设置')
-        .fontSize(DesignSystem.Typography.size.base)
-        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-
-      Text('请尝试其他关键词')
+  buildTrailing(item: SettingItem) {
+    if (item.trailing === 'arrow') {
+      Text('›')
+        .fontSize(DesignSystem.Typography.size.xl)
+        .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+    } else if (item.trailing === 'toggle') {
+      Toggle({ type: ToggleType.Switch, isOn: this.autoUpdate })
+        .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
+        .onChange((isOn: boolean) => {
+          this.autoUpdate = isOn;
+        })
+    } else if (item.trailing === 'text' && item.trailingValue) {
+      Text(item.trailingValue)
         .fontSize(DesignSystem.Typography.size.sm)
         .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .padding({
+          left: DesignSystem.Spacing.md,
+          right: DesignSystem.Spacing.md,
+          top: DesignSystem.Spacing.xs,
+          bottom: DesignSystem.Spacing.xs
+        })
+        .borderRadius(DesignSystem.BorderRadius.sm)
+        .backgroundColor(DesignSystem.getHoverColor(this.isLightMode))
+    } else if (item.trailing === 'custom' && item.title === '字体大小') {
+      Row() {
+        Row() {
+          Text('A-')
+            .fontSize(DesignSystem.Typography.size.sm)
+            .fontColor(this.fontSize > 12 ?
+              DesignSystem.getPrimaryTextColor(this.isLightMode) :
+              DesignSystem.getTertiaryTextColor(this.isLightMode))
+        }
+        .width(32)
+        .height(32)
+        .borderRadius(DesignSystem.BorderRadius.sm)
+        .backgroundColor(DesignSystem.getHoverColor(this.isLightMode))
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          if (this.fontSize > 12) {
+            this.fontSize--;
+          }
+        })
+
+        Text(`${this.fontSize}`)
+          .fontSize(DesignSystem.Typography.size.sm)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .fontWeight(DesignSystem.Typography.weight.medium)
+          .width(40)
+          .textAlign(TextAlign.Center)
+
+        Row() {
+          Text('A+')
+            .fontSize(DesignSystem.Typography.size.sm)
+            .fontColor(this.fontSize < 24 ?
+              DesignSystem.getPrimaryTextColor(this.isLightMode) :
+              DesignSystem.getTertiaryTextColor(this.isLightMode))
+        }
+        .width(32)
+        .height(32)
+        .borderRadius(DesignSystem.BorderRadius.sm)
+        .backgroundColor(DesignSystem.getHoverColor(this.isLightMode))
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          if (this.fontSize < 24) {
+            this.fontSize++;
+          }
+        })
+      }
+    }
+  }
+
+  private handleItemAction(item: SettingItem): void {
+    switch (item.title) {
+      case '阅读模式':
+        themeManager.toggleTheme();
+        break;
+      case '清除缓存':
+        this.cacheSize = '0MB';
+        break;
+      case '调试日志':
+        NavigationManager.getInstance().navigateTo('DebugLogPage');
+        break;
+      case '关于我们':
+        break;
+    }
+  }
+
+  @Builder
+  buildAppInfo() {
+    Column() {
+      Text('AstroRead')
+        .fontSize(DesignSystem.Typography.size.lg)
+        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+        .fontWeight(DesignSystem.Typography.weight.bold)
+        .letterSpacing(2)
+
+      Text('版本 1.0.0')
+        .fontSize(DesignSystem.Typography.size.xs)
+        .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
         .margin({ top: DesignSystem.Spacing.xs })
+
+      Text('Made with ❤️ for readers')
+        .fontSize(DesignSystem.Typography.size.xs)
+        .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
+        .margin({ top: DesignSystem.Spacing.sm })
     }
     .width('100%')
     .padding(DesignSystem.Spacing.xxl)
-    .margin({ top: DesignSystem.Spacing.xxl })
-  }
-
-  @Builder
-  buildClearCacheSheet() {
-    Column() {
-      Column() {
-        Text('清除缓存')
-          .fontSize(DesignSystem.Typography.size.lg)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.semibold)
-          .margin({ bottom: DesignSystem.Spacing.md })
-
-        Text(`确定要清除所有缓存吗？当前缓存大小: ${this.cacheSize}`)
-          .fontSize(DesignSystem.Typography.size.sm)
-          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: DesignSystem.Spacing.lg })
-
-        Row({ space: DesignSystem.Spacing.md }) {
-          Row() {
-            Text('取消')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .fontWeight(DesignSystem.Typography.weight.medium)
-          }
-          .layoutWeight(1)
-          .height(44)
-          .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-          .justifyContent(FlexAlign.Center)
-          .onClick(() => {
-            this.showClearCacheConfirm = false;
-          })
-
-          Row() {
-            if (this.isClearingCache) {
-              LoadingProgress()
-                .width(20)
-                .height(20)
-                .color(('sys.color.ohos_id_color_text_primary_contrary'))
-            } else {
-              Text('确定')
-                .fontSize(DesignSystem.Typography.size.base)
-                .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
-                .fontWeight(DesignSystem.Typography.weight.medium)
-            }
-          }
-          .layoutWeight(1)
-          .height(44)
-          .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .justifyContent(FlexAlign.Center)
-          .onClick(() => {
-            if (!this.isClearingCache) {
-              this.clearCache();
-            }
-          })
-        }
-        .width('100%')
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.lg)
-      .borderRadius(DesignSystem.BorderRadius.xl)
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-    .padding(DesignSystem.Spacing.lg)
-  }
-
-  @Builder
-  buildAboutSheet() {
-    Column() {
-      Column() {
-        Column() {
-          Text('📚')
-            .fontSize(48)
-            .margin({ bottom: DesignSystem.Spacing.md })
-
-          Text('AstroRead')
-            .fontSize(DesignSystem.Typography.size.xl)
-            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-            .fontWeight(DesignSystem.Typography.weight.bold)
-
-          Text('版本 1.0.0')
-            .fontSize(DesignSystem.Typography.size.sm)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .margin({ top: DesignSystem.Spacing.xs })
-        }
-        .width('100%')
-        .padding(DesignSystem.Spacing.lg)
-
-        Column() {
-          Text('一款简洁优雅的阅读应用，支持多种书源导入，提供舒适的阅读体验。')
-            .fontSize(DesignSystem.Typography.size.sm)
-            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            .textAlign(TextAlign.Center)
-            .lineHeight(22)
-        }
-        .width('100%')
-        .padding({
-          left: DesignSystem.Spacing.lg,
-          right: DesignSystem.Spacing.lg,
-          bottom: DesignSystem.Spacing.lg
-        })
-
-        Row() {
-          Row() {
-            Text('关闭')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
-              .fontWeight(DesignSystem.Typography.weight.medium)
-          }
-          .width('100%')
-          .height(44)
-          .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .justifyContent(FlexAlign.Center)
-          .onClick(() => {
-            this.showAboutSheet = false;
-          })
-        }
-        .width('100%')
-        .padding(DesignSystem.Spacing.lg)
-      }
-      .width('100%')
-      .borderRadius(DesignSystem.BorderRadius.xl)
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-    .padding(DesignSystem.Spacing.lg)
-  }
-
-  @Builder
-  buildFloatingNavSettingsSheet() {
-    Column() {
-      Column() {
-        Text('悬浮导航栏设置')
-          .fontSize(DesignSystem.Typography.size.lg)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.semibold)
-          .margin({ bottom: DesignSystem.Spacing.lg })
-
-        Scroll() {
-          Column({ space: DesignSystem.Spacing.lg }) {
-            this.buildFloatingNavToggleSection()
-            this.buildFloatingNavPositionSection()
-            this.buildFloatingNavSizeSection()
-            this.buildFloatingNavStyleSection()
-            this.buildFloatingNavBehaviorSection()
-          }
-          .width('100%')
-          .padding({ bottom: DesignSystem.Spacing.xl })
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .scrollBar(BarState.Auto)
-
-        Row({ space: DesignSystem.Spacing.md }) {
-          Row() {
-            Text('重置')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .fontWeight(DesignSystem.Typography.weight.medium)
-          }
-          .layoutWeight(1)
-          .height(44)
-          .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-          .justifyContent(FlexAlign.Center)
-          .onClick(() => {
-            floatingNavManager.resetToDefault();
-            showToast({ message: '已恢复默认设置' });
-          })
-
-          Row() {
-            Text('完成')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor($r('sys.color.ohos_id_color_text_primary_contrary'))
-              .fontWeight(DesignSystem.Typography.weight.medium)
-          }
-          .layoutWeight(1)
-          .height(44)
-          .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .justifyContent(FlexAlign.Center)
-          .onClick(() => {
-            this.showFloatingNavSettings = false;
-          })
-        }
-        .width('100%')
-        .margin({ top: DesignSystem.Spacing.lg })
-      }
-      .width('100%')
-      .height('100%')
-      .padding(DesignSystem.Spacing.lg)
-      .borderRadius(DesignSystem.BorderRadius.xl)
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-    .height('100%')
-    .padding(DesignSystem.Spacing.lg)
-  }
-
-  @Builder
-  buildFloatingNavToggleSection() {
-    Column({ space: DesignSystem.Spacing.md }) {
-      SectionHeader({ title: '启用悬浮导航' })
-
-      Row() {
-        Text('开启悬浮导航栏')
-          .fontSize(DesignSystem.Typography.size.base)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .layoutWeight(1)
-
-        Toggle({ type: ToggleType.Switch, isOn: this.floatingNavConfig.enabled })
-          .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .onChange((isOn: boolean) => {
-            floatingNavManager.setEnabled(isOn);
-          })
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.md)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-  }
-
-  @Builder
-  buildFloatingNavPositionSection() {
-    Column({ space: DesignSystem.Spacing.md }) {
-      SectionHeader({ title: '位置设置' })
-
-      Column({ space: DesignSystem.Spacing.sm }) {
-        ForEach([
-          { id: 'bottom-left', label: '左下角', icon: '↙️' } as PositionOption,
-          { id: 'bottom-center', label: '底部居中', icon: '⬇️' } as PositionOption,
-          { id: 'bottom-right', label: '右下角', icon: '↘️' } as PositionOption,
-          { id: 'left', label: '左侧居中', icon: '⬅️' } as PositionOption,
-          { id: 'center', label: '屏幕中央', icon: '⏺️' } as PositionOption,
-          { id: 'right', label: '右侧居中', icon: '➡️' } as PositionOption
-        ], (pos: PositionOption) => {
-          Row() {
-            Text(pos.icon)
-              .fontSize(DesignSystem.IconSize.sm)
-              .margin({ right: DesignSystem.Spacing.sm })
-
-            Text(pos.label)
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .layoutWeight(1)
-
-            if (this.floatingNavConfig.position === pos.id) {
-              Text('✓')
-                .fontSize(DesignSystem.Typography.size.base)
-                .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            }
-          }
-          .width('100%')
-          .padding(DesignSystem.Spacing.md)
-          .borderRadius(DesignSystem.BorderRadius.md)
-          .backgroundColor(this.floatingNavConfig.position === pos.id ?
-            DesignSystem.getHoverColor(this.isLightMode) :
-            DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-          .onClick(() => {
-            floatingNavManager.setPosition(pos.id as FloatingNavPosition);
-          })
-        })
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.md)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-  }
-
-  @Builder
-  buildFloatingNavSizeSection() {
-    Column({ space: DesignSystem.Spacing.md }) {
-      SectionHeader({ title: '尺寸设置' })
-
-      Column({ space: DesignSystem.Spacing.md }) {
-        Column({ space: DesignSystem.Spacing.sm }) {
-          Row() {
-            Text('宽度')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .layoutWeight(1)
-
-            Text(`${this.floatingNavConfig.width}px`)
-              .fontSize(DesignSystem.Typography.size.sm)
-              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          }
-          .width('100%')
-
-          Slider({
-            value: this.floatingNavConfig.width,
-            min: 200,
-            max: 400,
-            step: 10
-          })
-            .width('100%')
-            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((value: number) => {
-              floatingNavManager.setSize(value, this.floatingNavConfig.height);
-            })
-        }
-
-        Column({ space: DesignSystem.Spacing.sm }) {
-          Row() {
-            Text('高度')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .layoutWeight(1)
-
-            Text(`${this.floatingNavConfig.height}px`)
-              .fontSize(DesignSystem.Typography.size.sm)
-              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          }
-          .width('100%')
-
-          Slider({
-            value: this.floatingNavConfig.height,
-            min: 44,
-            max: 80,
-            step: 4
-          })
-            .width('100%')
-            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((value: number) => {
-              floatingNavManager.setSize(this.floatingNavConfig.width, value);
-            })
-        }
-
-        Column({ space: DesignSystem.Spacing.sm }) {
-          Row() {
-            Text('圆角')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .layoutWeight(1)
-
-            Text(`${this.floatingNavConfig.borderRadius}px`)
-              .fontSize(DesignSystem.Typography.size.sm)
-              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          }
-          .width('100%')
-
-          Slider({
-            value: this.floatingNavConfig.borderRadius,
-            min: 0,
-            max: 40,
-            step: 2
-          })
-            .width('100%')
-            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((value: number) => {
-              floatingNavManager.setBorderRadius(value);
-            })
-        }
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.md)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-  }
-
-  @Builder
-  buildFloatingNavStyleSection() {
-    Column({ space: DesignSystem.Spacing.md }) {
-      SectionHeader({ title: '样式设置' })
-
-      Column({ space: DesignSystem.Spacing.md }) {
-        Column({ space: DesignSystem.Spacing.sm }) {
-          Row() {
-            Text('透明度')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .layoutWeight(1)
-
-            Text(`${Math.round(this.floatingNavConfig.opacity * 100)}%`)
-              .fontSize(DesignSystem.Typography.size.sm)
-              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          }
-          .width('100%')
-
-          Slider({
-            value: this.floatingNavConfig.opacity * 100,
-            min: 30,
-            max: 100,
-            step: 5
-          })
-            .width('100%')
-            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((value: number) => {
-              floatingNavManager.setOpacity(value / 100);
-            })
-        }
-
-        Column({ space: DesignSystem.Spacing.sm }) {
-          Row() {
-            Text('背景透明度')
-              .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-              .layoutWeight(1)
-
-            Text(`${Math.round(this.floatingNavConfig.backgroundOpacity * 100)}%`)
-              .fontSize(DesignSystem.Typography.size.sm)
-              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          }
-          .width('100%')
-
-          Slider({
-            value: this.floatingNavConfig.backgroundOpacity * 100,
-            min: 30,
-            max: 100,
-            step: 5
-          })
-            .width('100%')
-            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((value: number) => {
-              floatingNavManager.setBackgroundOpacity(value / 100);
-            })
-        }
-
-        Row() {
-          Text('毛玻璃效果')
-            .fontSize(DesignSystem.Typography.size.base)
-            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-            .layoutWeight(1)
-
-          Toggle({ type: ToggleType.Switch, isOn: this.floatingNavConfig.blurEnabled })
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((isOn: boolean) => {
-              floatingNavManager.setBlurEnabled(isOn);
-            })
-        }
-        .width('100%')
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.md)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-  }
-
-  @Builder
-  buildFloatingNavBehaviorSection() {
-    Column({ space: DesignSystem.Spacing.md }) {
-      SectionHeader({ title: '行为设置' })
-
-      Column({ space: DesignSystem.Spacing.md }) {
-        Row() {
-          Text('自动隐藏')
-            .fontSize(DesignSystem.Typography.size.base)
-            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-            .layoutWeight(1)
-
-          Toggle({ type: ToggleType.Switch, isOn: this.floatingNavConfig.autoHide })
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((isOn: boolean) => {
-              floatingNavManager.setAutoHide(isOn);
-            })
-        }
-        .width('100%')
-
-        if (this.floatingNavConfig.autoHide) {
-          Column({ space: DesignSystem.Spacing.sm }) {
-            Row() {
-              Text('隐藏延迟')
-                .fontSize(DesignSystem.Typography.size.base)
-                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                .layoutWeight(1)
-
-              Text(`${Math.round(this.floatingNavConfig.autoHideDelay / 1000)}秒`)
-                .fontSize(DesignSystem.Typography.size.sm)
-                .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-            }
-            .width('100%')
-
-            Slider({
-              value: this.floatingNavConfig.autoHideDelay / 1000,
-              min: 1,
-              max: 10,
-              step: 0.5
-            })
-              .width('100%')
-              .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
-              .trackColor(DesignSystem.getBorderColor(this.isLightMode))
-              .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-              .onChange((value: number) => {
-                floatingNavManager.setAutoHideDelay(value * 1000);
-              })
-          }
-        }
-
-        Row() {
-          Text('动画效果')
-            .fontSize(DesignSystem.Typography.size.base)
-            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-            .layoutWeight(1)
-
-          Toggle({ type: ToggleType.Switch, isOn: this.floatingNavConfig.animationEnabled })
-            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
-            .onChange((isOn: boolean) => {
-              floatingNavManager.setAnimationEnabled(isOn);
-            })
-        }
-        .width('100%')
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.md)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-  }
-
-  @Builder
-  buildThemeModeSheet(): void {
-    Column() {
-      Column() {
-        Text('主题模式')
-          .fontSize(DesignSystem.Typography.size.lg)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.semibold)
-          .margin({ bottom: DesignSystem.Spacing.lg })
-
-        Column({ space: DesignSystem.Spacing.sm }) {
-          ForEach(['浅色模式', '深色模式', '跟随系统'], (mode: string, index: number) => {
-            Row() {
-              Text(mode)
-                .fontSize(DesignSystem.Typography.size.base)
-                .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                .layoutWeight(1)
-
-              if (this.themeModeIndex === index) {
-                Text('✓')
-                  .fontSize(DesignSystem.Typography.size.base)
-                  .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-              }
-            }
-            .width('100%')
-            .padding(DesignSystem.Spacing.md)
-            .borderRadius(DesignSystem.BorderRadius.md)
-            .backgroundColor(this.themeModeIndex === index 
-              ? DesignSystem.getHoverColor(this.isLightMode) 
-              : Color.Transparent)
-            .onClick(() => {
-              this.setThemeMode(index);
-              this.showThemeModeSheet = false;
-            })
-          })
-        }
-        .width('100%')
-
-        Button('取消')
-          .width('100%')
-          .margin({ top: DesignSystem.Spacing.lg })
-          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .onClick(() => {
-            this.showThemeModeSheet = false;
-          })
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.lg)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-    .padding({ bottom: this.safeAreaBottom })
-  }
-
-  @Builder
-  buildReadBackgroundSheet(): void {
-    Column() {
-      Column() {
-        Text('阅读背景')
-          .fontSize(DesignSystem.Typography.size.lg)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.semibold)
-          .margin({ bottom: DesignSystem.Spacing.lg })
-
-        Text('阅读背景设置功能即将上线')
-          .fontSize(DesignSystem.Typography.size.base)
-          .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          .margin({ bottom: DesignSystem.Spacing.lg })
-
-        Button('知道了')
-          .width('100%')
-          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .fontColor(('sys.color.ohos_id_color_text_primary_contrary'))
-          .onClick(() => {
-            this.showReadBackgroundSheet = false;
-          })
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.lg)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-    .padding({ bottom: this.safeAreaBottom })
-  }
-
-  @Builder
-  buildFeedbackSheet(): void {
-    Column() {
-      Column() {
-        Text('意见反馈')
-          .fontSize(DesignSystem.Typography.size.lg)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.semibold)
-          .margin({ bottom: DesignSystem.Spacing.lg })
-
-        TextArea({ placeholder: '请输入您的意见和建议...' })
-          .width('100%')
-          .height(120)
-          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .placeholderColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
-          .margin({ bottom: DesignSystem.Spacing.md })
-
-        Button('提交反馈')
-          .width('100%')
-          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .fontColor(('sys.color.ohos_id_color_text_primary_contrary'))
-          .onClick(() => {
-            showToast({ message: '感谢您的反馈！' });
-            this.showFeedbackSheet = false;
-          })
-
-        Button('取消')
-          .width('100%')
-          .margin({ top: DesignSystem.Spacing.sm })
-          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .onClick(() => {
-            this.showFeedbackSheet = false;
-          })
-      }
-      .width('100%')
-      .padding(DesignSystem.Spacing.lg)
-      .borderRadius(DesignSystem.BorderRadius.lg)
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    }
-    .width('100%')
-    .padding({ bottom: this.safeAreaBottom })
+    .alignItems(HorizontalAlign.Center)
   }
 }

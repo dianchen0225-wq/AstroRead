@@ -182,6 +182,14 @@ export class DatabaseManager {
     return this.getBookmarkRepo().deleteBookmark(bookmarkId);
   }
 
+  async getAllBookmarks(): Promise<Bookmark[]> {
+    return this.getBookmarkRepo().getAllBookmarks();
+  }
+
+  async getBookmarkById(id: string): Promise<Bookmark | null> {
+    return this.getBookmarkRepo().getBookmarkById(id);
+  }
+
   // 书源
   async getAllEnabledBookSources(): Promise<BookSource[]> {
     return this.getBookSourceRepo().getAllEnabledBookSources();

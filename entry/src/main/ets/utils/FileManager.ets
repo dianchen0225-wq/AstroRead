@@ -24,6 +24,15 @@ export interface ImportResult {
   path?: string;
   content?: string;
   error?: string;
+  encoding?: string;
+  confidence?: number;
+}
+
+export interface EncodingDetectionResult {
+  encoding: string;
+  confidence: number;
+  hasBOM: boolean;
+  bomType?: string;
 }
 
 export class FileManager {
@@ -31,6 +40,24 @@ export class FileManager {
   private readonly TAG = 'FileManager';
   private readonly SUPPORTED_EXTENSIONS: string[] = ['.txt', '.epub', '.pdf'];
   private context: common.UIAbilityContext | null = null;
+
+  private readonly BOM_PATTERNS: Map<string, Uint8Array> = new Map([
+    ['UTF-8', new Uint8Array([0xEF, 0xBB, 0xBF])],
+    ['UTF-16LE', new Uint8Array([0xFF, 0xFE])],
+    ['UTF-16BE', new Uint8Array([0xFE, 0xFF])],
+    ['UTF-32LE', new Uint8Array([0xFF, 0xFE, 0x00, 0x00])],
+    ['UTF-32BE', new Uint8Array([0x00, 0x00, 0xFE, 0xFF])]
+  ]);
+
+  private readonly ENCODING_PRIORITY: string[] = [
+    'utf-8',
+    'gb18030',
+    'gbk',
+    'gb2312',
+    'big5',
+    'utf-16le',
+    'utf-16be'
+  ];
 
   static getInstance(): FileManager {
     if (!FileManager.instance) {
@@ -112,9 +139,6 @@ export class FileManager {
     }
   }
 
-  /**
-   * 读取文件内容
-   */
   async readFileContent(uri: string): Promise<string> {
     try {
       const file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
@@ -124,30 +148,173 @@ export class FileManager {
       fs.readSync(file.fd, buffer);
       fs.closeSync(file);
 
-      // 尝试多种编码解码
-      const encodings: string[] = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5'];
+      const uint8Array = new Uint8Array(buffer);
+      const detectionResult = this.detectEncoding(uint8Array);
+      
+      Logger.info(this.TAG, `检测到编码: ${detectionResult.encoding}, 置信度: ${detectionResult.confidence}, BOM: ${detectionResult.hasBOM}`);
 
-      for (const encoding of encodings) {
-        try {
-          const decoder = new util.TextDecoder(encoding);
-          const content = decoder.decodeToString(new Uint8Array(buffer));
-          // 检查解码是否成功（没有乱码）
-          if (this.isValidContent(content)) {
-            Logger.info(this.TAG, `使用编码: ${encoding}`);
-            return content;
-          }
-        } catch (e) {
-          continue;
+      let contentStart = 0;
+      if (detectionResult.hasBOM && detectionResult.bomType) {
+        const bomBytes = this.BOM_PATTERNS.get(detectionResult.bomType);
+        if (bomBytes) {
+          contentStart = bomBytes.length;
         }
       }
 
-      // 默认使用 utf-8
-      const defaultDecoder = new util.TextDecoder('utf-8');
-      return defaultDecoder.decodeToString(new Uint8Array(buffer));
+      const contentBuffer = uint8Array.slice(contentStart);
+      
+      const content = this.decodeContent(contentBuffer, detectionResult.encoding);
+      
+      if (this.isValidContent(content)) {
+        return content;
+      }
+
+      Logger.warn(this.TAG, '解码结果验证失败，尝试其他编码');
+      return this.tryAlternativeEncodings(contentBuffer, detectionResult.encoding);
     } catch (error) {
       Logger.error(this.TAG, `读取文件失败: ${error}`);
       throw new Error(`读取文件失败: ${error}`);
     }
+  }
+
+  detectEncoding(data: Uint8Array): EncodingDetectionResult {
+    const bomResult = this.detectBOM(data);
+    if (bomResult.hasBOM) {
+      return {
+        encoding: bomResult.encoding,
+        confidence: 1.0,
+        hasBOM: true,
+        bomType: bomResult.bomType
+      };
+    }
+
+    if (this.isValidUTF8(data)) {
+      return {
+        encoding: 'utf-8',
+        confidence: 0.9,
+        hasBOM: false
+      };
+    }
+
+    const gbResult = this.detectGBEncoding(data);
+    if (gbResult.confidence > 0.7) {
+      return gbResult;
+    }
+
+    return {
+      encoding: 'gb18030',
+      confidence: 0.5,
+      hasBOM: false
+    };
+  }
+
+  private detectBOM(data: Uint8Array): { hasBOM: boolean; encoding: string; bomType?: string } {
+    for (const [encoding, bom] of this.BOM_PATTERNS) {
+      if (data.length >= bom.length) {
+        let match = true;
+        for (let i = 0; i < bom.length; i++) {
+          if (data[i] !== bom[i]) {
+            match = false;
+            break;
+          }
+        }
+        if (match) {
+          return { hasBOM: true, encoding: encoding.toLowerCase(), bomType: encoding };
+        }
+      }
+    }
+    return { hasBOM: false, encoding: '' };
+  }
+
+  private isValidUTF8(data: Uint8Array): boolean {
+    let i = 0;
+    while (i < data.length) {
+      const byte = data[i];
+      if (byte <= 0x7F) {
+        i++;
+        continue;
+      }
+      
+      let seqLength = 0;
+      if ((byte & 0xE0) === 0xC0) {
+        seqLength = 2;
+      } else if ((byte & 0xF0) === 0xE0) {
+        seqLength = 3;
+      } else if ((byte & 0xF8) === 0xF0) {
+        seqLength = 4;
+      } else {
+        return false;
+      }
+
+      if (i + seqLength > data.length) {
+        return false;
+      }
+
+      for (let j = 1; j < seqLength; j++) {
+        if ((data[i + j] & 0xC0) !== 0x80) {
+          return false;
+        }
+      }
+      i += seqLength;
+    }
+    return true;
+  }
+
+  private detectGBEncoding(data: Uint8Array): EncodingDetectionResult {
+    let gbLikeBytes = 0;
+    let totalMultiByte = 0;
+    const sampleSize = Math.min(data.length, 4096);
+
+    for (let i = 0; i < sampleSize - 1; i++) {
+      const byte1 = data[i];
+      const byte2 = data[i + 1];
+
+      if (byte1 >= 0x81 && byte1 <= 0xFE) {
+        totalMultiByte++;
+        if (byte2 >= 0x40 && byte2 <= 0xFE && byte2 !== 0x7F) {
+          gbLikeBytes++;
+        }
+      }
+    }
+
+    const confidence = totalMultiByte > 0 ? gbLikeBytes / totalMultiByte : 0;
+
+    return {
+      encoding: 'gb18030',
+      confidence: Math.min(confidence, 0.95),
+      hasBOM: false
+    };
+  }
+
+  private decodeContent(data: Uint8Array, encoding: string): string {
+    try {
+      const decoder = new util.TextDecoder(encoding);
+      return decoder.decodeToString(data);
+    } catch (e) {
+      Logger.error(this.TAG, `解码失败 (${encoding}): ${e}`);
+      const fallbackDecoder = new util.TextDecoder('utf-8');
+      return fallbackDecoder.decodeToString(data);
+    }
+  }
+
+  private tryAlternativeEncodings(data: Uint8Array, excludeEncoding: string): string {
+    for (const encoding of this.ENCODING_PRIORITY) {
+      if (encoding === excludeEncoding) {
+        continue;
+      }
+      try {
+        const content = this.decodeContent(data, encoding);
+        if (this.isValidContent(content)) {
+          Logger.info(this.TAG, `使用备用编码成功: ${encoding}`);
+          return content;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    Logger.warn(this.TAG, '所有编码尝试失败，使用UTF-8');
+    return this.decodeContent(data, 'utf-8');
   }
 
   /**

@@ -13,6 +13,8 @@ export * from '../interfaces/IParser';
 export * from './ParserError';
 export * from './ParserAdapter';
 export * from './ParserFacade';
+export * from './Result';
+export * from '../utils/ParserCore';
 
 export { EntityDecoder } from './utils/EntityDecoder';
 export { PositionTracker } from './utils/PositionTracker';

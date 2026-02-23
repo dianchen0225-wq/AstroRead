@@ -3,7 +3,10 @@ import fs from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
 import { Logger } from './Logger';
 import { RequestThrottler } from './RequestThrottler';
+import { NetworkManager } from './NetworkManager';
 import { Book } from '../models/Book';
+import { util } from '@kit.ArkTS';
+import { networkConfigManager, ImageScraperConfig } from './NetworkConfig';
 
 export interface ImageInfo {
   url: string;
@@ -28,42 +31,9 @@ export interface ImageDownloadResult {
   retryCount?: number;
 }
 
-export interface ImageScrapeConfig {
-  maxConcurrentDownloads: number;
-  downloadTimeout: number;
-  maxRetries: number;
-  retryDelay: number;
-  minImageSize: number;
-  maxImageSize: number;
-  preferredFormats: ImageFormat[];
-  userAgent: string;
-  referer: string;
-  enableCache: boolean;
-  cacheTTL: number;
-  skipSSLVerification: boolean;
-  rateLimitPerSecond: number;
-}
-
-export interface ImageScrapeStats {
-  totalProcessed: number;
-  successful: number;
-  failed: number;
-  skipped: number;
-  totalBytes: number;
-  averageTime: number;
-  cacheHits: number;
-  cacheMisses: number;
-}
-
 export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'gif' | 'bmp' | 'svg' | 'unknown';
 
 export type ImageQuality = 'original' | 'high' | 'medium' | 'low';
-
-interface StorageUsageResult {
-  totalSize: number;
-  imageCount: number;
-  bookCount: number;
-}
 
 interface ImageCacheEntry {
   url: string;
@@ -80,52 +50,6 @@ interface AntiScrapingDetection {
   message: string;
 }
 
-interface ScrapeOptions {
-  includeCover: boolean;
-  includeInterior: boolean;
-  quality: ImageQuality;
-}
-
-interface ImageValidationResult {
-  isValid: boolean;
-  format: ImageFormat;
-  width: number;
-  height: number;
-  errorMessage?: string;
-}
-
-interface ImageDimensions {
-  width: number;
-  height: number;
-}
-
-interface ImageScore {
-  url: string;
-  score: number;
-}
-
-interface BatchDownloadItem {
-  url: string;
-  bookId: string;
-  type: 'cover' | 'interior' | 'thumbnail';
-}
-
-const DEFAULT_CONFIG: ImageScrapeConfig = {
-  maxConcurrentDownloads: 3,
-  downloadTimeout: 30000,
-  maxRetries: 3,
-  retryDelay: 1000,
-  minImageSize: 1024,
-  maxImageSize: 10 * 1024 * 1024,
-  preferredFormats: ['jpeg', 'png', 'webp'],
-  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  referer: '',
-  enableCache: true,
-  cacheTTL: 7 * 24 * 60 * 60 * 1000,
-  skipSSLVerification: true,
-  rateLimitPerSecond: 2
-};
-
 const IMAGE_SIGNATURES: Map<string, number[]> = new Map([
   ['jpeg', [0xFF, 0xD8, 0xFF]],
   ['png', [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]],
@@ -134,9 +58,20 @@ const IMAGE_SIGNATURES: Map<string, number[]> = new Map([
   ['bmp', [0x42, 0x4D]]
 ]);
 
+export interface ImageScrapeStats {
+  totalProcessed: number;
+  successful: number;
+  failed: number;
+  skipped: number;
+  totalBytes: number;
+  averageTime: number;
+  cacheHits: number;
+  cacheMisses: number;
+}
+
 export class ImageScraperService {
   private static instance: ImageScraperService | null = null;
-  private config: ImageScrapeConfig;
+  private config: ImageScraperConfig;
   private context: common.UIAbilityContext | null = null;
   private imageCache: Map<string, ImageCacheEntry> = new Map();
   private stats: ImageScrapeStats;
@@ -144,8 +79,9 @@ export class ImageScraperService {
   private downloadQueue: Map<string, Promise<ImageDownloadResult>> = new Map();
   private readonly TAG = 'ImageScraperService';
 
-  private constructor(config?: Partial<ImageScrapeConfig>) {
-    this.config = this.mergeConfig(DEFAULT_CONFIG, config);
+  private constructor(config?: Partial<ImageScraperConfig>) {
+    const baseConfig = networkConfigManager.getImageScraperConfig();
+    this.config = { ...baseConfig, ...config };
     this.throttler = RequestThrottler.getInstance({
       maxRequestsPerSecond: this.config.rateLimitPerSecond,
       maxConcurrentRequests: this.config.maxConcurrentDownloads,
@@ -159,27 +95,7 @@ export class ImageScraperService {
     this.stats = this.initStats();
   }
 
-  private mergeConfig(base: ImageScrapeConfig, update?: Partial<ImageScrapeConfig>): ImageScrapeConfig {
-    if (!update) return base;
-    const result: ImageScrapeConfig = {
-      maxConcurrentDownloads: update.maxConcurrentDownloads ?? base.maxConcurrentDownloads,
-      downloadTimeout: update.downloadTimeout ?? base.downloadTimeout,
-      maxRetries: update.maxRetries ?? base.maxRetries,
-      retryDelay: update.retryDelay ?? base.retryDelay,
-      minImageSize: update.minImageSize ?? base.minImageSize,
-      maxImageSize: update.maxImageSize ?? base.maxImageSize,
-      preferredFormats: update.preferredFormats ?? base.preferredFormats,
-      userAgent: update.userAgent ?? base.userAgent,
-      referer: update.referer ?? base.referer,
-      enableCache: update.enableCache ?? base.enableCache,
-      cacheTTL: update.cacheTTL ?? base.cacheTTL,
-      skipSSLVerification: update.skipSSLVerification ?? base.skipSSLVerification,
-      rateLimitPerSecond: update.rateLimitPerSecond ?? base.rateLimitPerSecond
-    };
-    return result;
-  }
-
-  static getInstance(config?: Partial<ImageScrapeConfig>): ImageScraperService {
+  static getInstance(config?: Partial<ImageScraperConfig>): ImageScraperService {
     if (!ImageScraperService.instance) {
       ImageScraperService.instance = new ImageScraperService(config);
     }
@@ -191,49 +107,16 @@ export class ImageScraperService {
   }
 
   updateConfig(config: Partial<ImageScrapeConfig>): void {
-    this.config = this.mergeConfig(this.config, config);
+    this.config = { ...this.config, ...config };
     Logger.info(this.TAG, 'Image scraper config updated');
   }
 
   getConfig(): ImageScrapeConfig {
-    return this.cloneConfig(this.config);
+    return { ...this.config };
   }
 
   getStats(): ImageScrapeStats {
-    return this.cloneStats(this.stats);
-  }
-
-  private cloneConfig(config: ImageScrapeConfig): ImageScrapeConfig {
-    const result: ImageScrapeConfig = {
-      maxConcurrentDownloads: config.maxConcurrentDownloads,
-      downloadTimeout: config.downloadTimeout,
-      maxRetries: config.maxRetries,
-      retryDelay: config.retryDelay,
-      minImageSize: config.minImageSize,
-      maxImageSize: config.maxImageSize,
-      preferredFormats: config.preferredFormats,
-      userAgent: config.userAgent,
-      referer: config.referer,
-      enableCache: config.enableCache,
-      cacheTTL: config.cacheTTL,
-      skipSSLVerification: config.skipSSLVerification,
-      rateLimitPerSecond: config.rateLimitPerSecond
-    };
-    return result;
-  }
-
-  private cloneStats(stats: ImageScrapeStats): ImageScrapeStats {
-    const result: ImageScrapeStats = {
-      totalProcessed: stats.totalProcessed,
-      successful: stats.successful,
-      failed: stats.failed,
-      skipped: stats.skipped,
-      totalBytes: stats.totalBytes,
-      averageTime: stats.averageTime,
-      cacheHits: stats.cacheHits,
-      cacheMisses: stats.cacheMisses
-    };
-    return result;
+    return { ...this.stats };
   }
 
   resetStats(): void {
@@ -253,12 +136,17 @@ export class ImageScraperService {
     };
   }
 
-  async scrapeBookImages(book: Book, options?: Partial<ScrapeOptions>): Promise<ImageDownloadResult[]> {
+  async scrapeBookImages(book: Book, options?: {
+    includeCover?: boolean;
+    includeInterior?: boolean;
+    quality?: ImageQuality;
+  }): Promise<ImageDownloadResult[]> {
     const results: ImageDownloadResult[] = [];
-    const opts: ScrapeOptions = {
-      includeCover: options?.includeCover ?? true,
-      includeInterior: options?.includeInterior ?? false,
-      quality: options?.quality ?? 'original'
+    const opts = {
+      includeCover: true,
+      includeInterior: false,
+      quality: 'original' as ImageQuality,
+      ...options
     };
 
     if (opts.includeCover && book.cover) {
@@ -348,7 +236,11 @@ export class ImageScraperService {
         retryCount = attempt;
       }
 
-      await this.throttler.acquire(imageUrl);
+      const throttleResult = await this.throttler.waitForSlot(this.extractDomain(imageUrl));
+      if (!throttleResult.allowed) {
+        Logger.warn(this.TAG, `Rate limited: ${throttleResult.reason}`);
+        await this.sleep(throttleResult.waitTime);
+      }
 
       try {
         const result = await this.downloadSingleImage(imageUrl, bookId, imageType);
@@ -510,58 +402,56 @@ export class ImageScraperService {
     }
   }
 
-  private validateImageData(data: Uint8Array): ImageValidationResult {
+  private validateImageData(data: Uint8Array): {
+    isValid: boolean;
+    format: ImageFormat;
+    width: number;
+    height: number;
+    errorMessage?: string;
+  } {
     if (data.length < this.config.minImageSize) {
-      const result: ImageValidationResult = {
+      return {
         isValid: false,
         format: 'unknown',
         width: 0,
         height: 0,
         errorMessage: `Image too small: ${data.length} bytes (min: ${this.config.minImageSize})`
       };
-      return result;
     }
 
     if (data.length > this.config.maxImageSize) {
-      const result: ImageValidationResult = {
+      return {
         isValid: false,
         format: 'unknown',
         width: 0,
         height: 0,
         errorMessage: `Image too large: ${data.length} bytes (max: ${this.config.maxImageSize})`
       };
-      return result;
     }
 
     const format = this.detectImageFormat(data);
     if (format === 'unknown') {
-      const result: ImageValidationResult = {
+      return {
         isValid: false,
         format: 'unknown',
         width: 0,
         height: 0,
         errorMessage: 'Unknown image format'
       };
-      return result;
     }
 
     const dimensions = this.extractImageDimensions(data, format);
 
-    const result: ImageValidationResult = {
+    return {
       isValid: true,
-      format: format,
+      format,
       width: dimensions.width,
       height: dimensions.height
     };
-    return result;
   }
 
   detectImageFormat(data: Uint8Array): ImageFormat {
-    const entries = Array.from(IMAGE_SIGNATURES.entries());
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const format = entry[0];
-      const signature = entry[1];
+    for (const [format, signature] of IMAGE_SIGNATURES) {
       if (this.matchesSignature(data, signature)) {
         if (format === 'webp') {
           if (data.length > 11 &&
@@ -596,7 +486,7 @@ export class ImageScraperService {
     return true;
   }
 
-  private extractImageDimensions(data: Uint8Array, format: ImageFormat): ImageDimensions {
+  private extractImageDimensions(data: Uint8Array, format: ImageFormat): { width: number; height: number } {
     try {
       switch (format) {
         case 'png':
@@ -610,30 +500,24 @@ export class ImageScraperService {
         case 'bmp':
           return this.extractBmpDimensions(data);
         default:
-          const defaultResult: ImageDimensions = { width: 0, height: 0 };
-          return defaultResult;
+          return { width: 0, height: 0 };
       }
     } catch (error) {
       Logger.warn(this.TAG, `Failed to extract dimensions: ${error}`);
-      const errorResult: ImageDimensions = { width: 0, height: 0 };
-      return errorResult;
+      return { width: 0, height: 0 };
     }
   }
 
-  private extractPngDimensions(data: Uint8Array): ImageDimensions {
-    if (data.length < 24) {
-      const result: ImageDimensions = { width: 0, height: 0 };
-      return result;
-    }
+  private extractPngDimensions(data: Uint8Array): { width: number; height: number } {
+    if (data.length < 24) return { width: 0, height: 0 };
     const view = new DataView(data.buffer, 16, 8);
-    const result: ImageDimensions = {
+    return {
       width: view.getUint32(0, false),
       height: view.getUint32(4, false)
     };
-    return result;
   }
 
-  private extractJpegDimensions(data: Uint8Array): ImageDimensions {
+  private extractJpegDimensions(data: Uint8Array): { width: number; height: number } {
     let offset = 2;
     while (offset < data.length - 4) {
       if (data[offset] !== 0xFF) {
@@ -650,11 +534,10 @@ export class ImageScraperService {
         marker === 0xCF) {
         if (offset + 9 > data.length) break;
         const view = new DataView(data.buffer, offset + 5, 4);
-        const result: ImageDimensions = {
+        return {
           height: view.getUint16(0, false),
           width: view.getUint16(2, false)
         };
-        return result;
       }
 
       if (marker === 0xD8 || marker === 0xD9) {
@@ -666,83 +549,57 @@ export class ImageScraperService {
       const length = (data[offset + 2] << 8) | data[offset + 3];
       offset += 2 + length;
     }
-    const result: ImageDimensions = { width: 0, height: 0 };
-    return result;
+    return { width: 0, height: 0 };
   }
 
-  private extractGifDimensions(data: Uint8Array): ImageDimensions {
-    if (data.length < 10) {
-      const result: ImageDimensions = { width: 0, height: 0 };
-      return result;
-    }
-    const result: ImageDimensions = {
+  private extractGifDimensions(data: Uint8Array): { width: number; height: number } {
+    if (data.length < 10) return { width: 0, height: 0 };
+    return {
       width: data[6] | (data[7] << 8),
       height: data[8] | (data[9] << 8)
     };
-    return result;
   }
 
-  private extractWebpDimensions(data: Uint8Array): ImageDimensions {
-    if (data.length < 30) {
-      const result: ImageDimensions = { width: 0, height: 0 };
-      return result;
-    }
+  private extractWebpDimensions(data: Uint8Array): { width: number; height: number } {
+    if (data.length < 30) return { width: 0, height: 0 };
 
     const riff = String.fromCharCode(data[0], data[1], data[2], data[3]);
     const webp = String.fromCharCode(data[8], data[9], data[10], data[11]);
 
     if (riff !== 'RIFF' || webp !== 'WEBP') {
-      const result: ImageDimensions = { width: 0, height: 0 };
-      return result;
+      return { width: 0, height: 0 };
     }
 
     const chunkType = String.fromCharCode(data[12], data[13], data[14], data[15]);
     if (chunkType === 'VP8 ') {
-      if (data.length < 30) {
-        const result: ImageDimensions = { width: 0, height: 0 };
-        return result;
-      }
+      if (data.length < 30) return { width: 0, height: 0 };
       const width = (data[26] | (data[27] << 8)) & 0x3FFF;
       const height = (data[28] | (data[29] << 8)) & 0x3FFF;
-      const result: ImageDimensions = { width: width, height: height };
-      return result;
+      return { width, height };
     } else if (chunkType === 'VP8L') {
-      if (data.length < 25) {
-        const result: ImageDimensions = { width: 0, height: 0 };
-        return result;
-      }
+      if (data.length < 25) return { width: 0, height: 0 };
       const bits = data[21] | (data[22] << 8) | (data[23] << 16) | (data[24] << 24);
-      const result: ImageDimensions = {
+      return {
         width: (bits & 0x3FFF) + 1,
         height: ((bits >> 14) & 0x3FFF) + 1
       };
-      return result;
     } else if (chunkType === 'VP8X') {
-      if (data.length < 30) {
-        const result: ImageDimensions = { width: 0, height: 0 };
-        return result;
-      }
+      if (data.length < 30) return { width: 0, height: 0 };
       const width = (data[24] | (data[25] << 8) | (data[26] << 16)) + 1;
       const height = (data[27] | (data[28] << 8) | (data[29] << 16)) + 1;
-      const result: ImageDimensions = { width: width, height: height };
-      return result;
+      return { width, height };
     }
 
-    const result: ImageDimensions = { width: 0, height: 0 };
-    return result;
+    return { width: 0, height: 0 };
   }
 
-  private extractBmpDimensions(data: Uint8Array): ImageDimensions {
-    if (data.length < 26) {
-      const result: ImageDimensions = { width: 0, height: 0 };
-      return result;
-    }
+  private extractBmpDimensions(data: Uint8Array): { width: number; height: number } {
+    if (data.length < 26) return { width: 0, height: 0 };
     const view = new DataView(data.buffer, 18, 8);
-    const result: ImageDimensions = {
+    return {
       width: view.getInt32(0, true),
       height: Math.abs(view.getInt32(4, true))
     };
-    return result;
   }
 
   private async saveImage(
@@ -768,25 +625,12 @@ export class ImageScraperService {
     const fileName = `${imageType}_${Date.now()}.${extension}`;
     const filePath = `${imageDir}/${fileName}`;
 
-    let file: fs.File | null = null;
-    try {
-      file = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
-      fs.writeSync(file.fd, data.buffer);
-      fs.closeSync(file);
-      Logger.info(this.TAG, `Image saved: ${filePath}`);
-      return filePath;
-    } catch (error) {
-      if (file) {
-        try {
-          fs.closeSync(file);
-        } catch {
-          // Ignore close error
-        }
-      }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      Logger.error(this.TAG, `Failed to save image: ${errorMessage}`);
-      throw new Error(`Failed to save image: ${errorMessage}`);
-    }
+    const file = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
+    fs.writeSync(file.fd, data.buffer);
+    fs.closeSync(file);
+
+    Logger.info(this.TAG, `Image saved: ${filePath}`);
+    return filePath;
   }
 
   private getExtension(format: ImageFormat): string {
@@ -831,7 +675,7 @@ export class ImageScraperService {
   detectImagesInHtml(html: string, baseUrl: string): string[] {
     const images: string[] = [];
     const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
-    let match: RegExpExecArray | null = null;
+    let match;
 
     while ((match = imgRegex.exec(html)) !== null) {
       const src = match[1];
@@ -863,12 +707,12 @@ export class ImageScraperService {
       }
     }
 
-    const uniqueImages = Array.from(new Set(images));
-    return this.prioritizeImages(uniqueImages);
+    const uniqueImages = [...new Set(images)];
+    return this.prioritizeImages(uniqueImages, baseUrl);
   }
 
-  private prioritizeImages(images: string[]): string[] {
-    const scored: ImageScore[] = images.map((url: string): ImageScore => {
+  private prioritizeImages(images: string[], baseUrl: string): string[] {
+    const scored = images.map(url => {
       let score = 0;
       const lowerUrl = url.toLowerCase();
 
@@ -894,12 +738,11 @@ export class ImageScraperService {
         }
       }
 
-      const result: ImageScore = { url: url, score: score };
-      return result;
+      return { url, score };
     });
 
-    scored.sort((a: ImageScore, b: ImageScore) => b.score - a.score);
-    return scored.map((item: ImageScore) => item.url);
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map(item => item.url);
   }
 
   private detectAntiScraping(errorMessage: string): AntiScrapingDetection {
@@ -981,25 +824,6 @@ export class ImageScraperService {
     Logger.info(this.TAG, 'Image cache cleared');
   }
 
-  /**
-   * 获取缓存的图片路径
-   * @param url 图片URL
-   * @returns 缓存的本地路径，如果不存在或已过期则返回 null
-   */
-  getCachedImagePath(url: string): string | null {
-    const entry = this.checkCache(url);
-    return entry ? entry.localPath : null;
-  }
-
-  /**
-   * 检查图片是否已缓存
-   * @param url 图片URL
-   * @returns 是否已缓存且未过期
-   */
-  isImageCached(url: string): boolean {
-    return this.checkCache(url) !== null;
-  }
-
   async cleanupOldImages(maxAge: number = 30 * 24 * 60 * 60 * 1000): Promise<number> {
     if (!this.context) return 0;
 
@@ -1034,37 +858,29 @@ export class ImageScraperService {
     }
 
     try {
-      const protocolIndex = baseUrl.indexOf('://');
-      if (protocolIndex === -1) return relativeUrl;
-
-      const protocol = baseUrl.substring(0, protocolIndex + 3);
-      const hostStart = protocolIndex + 3;
-      const pathIndex = baseUrl.indexOf('/', hostStart);
-
-      let origin: string;
-      let basePath: string;
-
-      if (pathIndex === -1) {
-        origin = baseUrl;
-        basePath = '/';
-      } else {
-        origin = baseUrl.substring(0, pathIndex);
-        basePath = baseUrl.substring(pathIndex);
-      }
+      const base = new URL(baseUrl);
 
       if (relativeUrl.startsWith('//')) {
-        return protocol + relativeUrl;
+        return base.protocol + relativeUrl;
       }
 
       if (relativeUrl.startsWith('/')) {
-        return origin + relativeUrl;
+        return base.origin + relativeUrl;
       }
 
-      const lastSlashIndex = basePath.lastIndexOf('/');
-      const dirPath = lastSlashIndex >= 0 ? basePath.substring(0, lastSlashIndex + 1) : '/';
-      return origin + dirPath + relativeUrl;
+      const basePath = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
+      return base.origin + basePath + relativeUrl;
     } catch {
       return relativeUrl;
+    }
+  }
+
+  private extractDomain(url: string): string {
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname;
+    } catch {
+      return 'unknown';
     }
   }
 
@@ -1093,20 +909,20 @@ export class ImageScraperService {
   }
 
   async batchDownloadImages(
-    items: BatchDownloadItem[],
+    items: Array<{ url: string; bookId: string; type: 'cover' | 'interior' | 'thumbnail' }>,
     onProgress?: (completed: number, total: number, result: ImageDownloadResult) => void
   ): Promise<ImageDownloadResult[]> {
     const results: ImageDownloadResult[] = [];
     let completed = 0;
 
-    const chunks: BatchDownloadItem[][] = [];
+    const chunks: Array<typeof items> = [];
     for (let i = 0; i < items.length; i += this.config.maxConcurrentDownloads) {
       chunks.push(items.slice(i, i + this.config.maxConcurrentDownloads));
     }
 
     for (const chunk of chunks) {
       const chunkResults = await Promise.all(
-        chunk.map(async (item: BatchDownloadItem) => {
+        chunk.map(async item => {
           const result = await this.downloadImage(item.url, item.bookId, item.type);
           completed++;
           if (onProgress) {
@@ -1161,9 +977,9 @@ export class ImageScraperService {
     }
   }
 
-  async getStorageUsage(): Promise<StorageUsageResult> {
+  async getStorageUsage(): Promise<{ totalSize: number; imageCount: number; bookCount: number }> {
     if (!this.context) {
-      return { totalSize: 0, imageCount: 0, bookCount: 0 } as StorageUsageResult;
+      return { totalSize: 0, imageCount: 0, bookCount: 0 };
     }
 
     const filesDir = this.context.filesDir;
@@ -1188,9 +1004,6 @@ export class ImageScraperService {
       Logger.error(this.TAG, `Failed to calculate storage: ${error}`);
     }
 
-    return { totalSize, imageCount, bookCount } as StorageUsageResult;
+    return { totalSize, imageCount, bookCount };
   }
 }
-
-// 导出单例实例
-export const imageScraperService = ImageScraperService.getInstance();

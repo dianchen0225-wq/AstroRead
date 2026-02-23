@@ -1,20 +1,8 @@
 import { DesignSystem, ButtonStyle } from '../common/DesignSystem';
 import { themeManager } from '../common/ThemeManager';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success';
 export type ButtonSize = 'sm' | 'md' | 'lg';
-
-interface SizeStyles {
-  height: number;
-  padding: number;
-  fontSize: number;
-}
-
-interface VariantStyles {
-  bgColor: string;
-  textColor: string;
-  borderColor: string;
-}
 
 @ComponentV2
 export struct AppButton {
@@ -24,16 +12,15 @@ export struct AppButton {
   
   @Param text: string = '';
   @Param variant: ButtonVariant = 'primary';
-  @Param buttonSize: ButtonSize = 'md';
+  @Param size: ButtonSize = 'md';
   @Param disabled: boolean = false;
   @Param loading: boolean = false;
   @Param fullWidth: boolean = false;
   @Param icon: string = '';
   @Param accessibilityLabel: string = '';
   @Param accessibilityHint: string = '';
-  @Param onClicked: () => void = () => {};
   
-  private clickHandler?: () => void;
+  private onClickHandler?: () => void;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -47,44 +34,70 @@ export struct AppButton {
     themeManager.removeListener(this.themeListener);
   }
 
-  private getSizeStyles(): SizeStyles {
-    switch (this.buttonSize) {
+  private getSizeStyles(): { height: number; padding: number; fontSize: number; iconSize: number } {
+    switch (this.size) {
       case 'sm':
-        return { height: 32, padding: DesignSystem.Spacing.sm, fontSize: DesignSystem.Typography.size.xs };
+        return { 
+          height: 32, 
+          padding: DesignSystem.Spacing.lg, 
+          fontSize: DesignSystem.Typography.size.xs,
+          iconSize: DesignSystem.IconSize.xs
+        };
       case 'lg':
-        return { height: 48, padding: DesignSystem.Spacing.lg, fontSize: DesignSystem.Typography.size.base };
+        return { 
+          height: 52, 
+          padding: DesignSystem.Spacing.xxl, 
+          fontSize: DesignSystem.Typography.size.base,
+          iconSize: DesignSystem.IconSize.md
+        };
       default:
-        return { height: 40, padding: DesignSystem.Spacing.md, fontSize: DesignSystem.Typography.size.sm };
+        return { 
+          height: 44, 
+          padding: DesignSystem.Spacing.xl, 
+          fontSize: DesignSystem.Typography.size.sm,
+          iconSize: DesignSystem.IconSize.sm
+        };
     }
   }
 
-  private getVariantStyles(): VariantStyles {
+  private getVariantStyles(): { bgColor: string; textColor: string; borderColor: string; hasGradient: boolean } {
     const pressed = this.isPressed && !this.disabled;
     
     switch (this.variant) {
       case 'primary':
         return {
-          bgColor: pressed ? this.darkenColor(DesignSystem.getPrimaryColor(this.isLightMode), 0.1) : DesignSystem.getPrimaryColor(this.isLightMode),
+          bgColor: pressed ? this.darkenColor(DesignSystem.getPrimaryColor(this.isLightMode), 0.12) : DesignSystem.getPrimaryColor(this.isLightMode),
           textColor: '#FFFFFF',
-          borderColor: 'transparent'
+          borderColor: 'transparent',
+          hasGradient: false
         };
       case 'secondary':
         return {
           bgColor: pressed ? DesignSystem.getActiveColor(this.isLightMode) : DesignSystem.getSecondaryBackgroundColor(this.isLightMode),
           textColor: DesignSystem.getPrimaryTextColor(this.isLightMode),
-          borderColor: DesignSystem.getBorderColor(this.isLightMode)
+          borderColor: DesignSystem.getBorderColor(this.isLightMode),
+          hasGradient: false
         };
       case 'ghost':
         return {
           bgColor: pressed ? DesignSystem.getHoverColor(this.isLightMode) : 'transparent',
           textColor: DesignSystem.getPrimaryColor(this.isLightMode),
-          borderColor: 'transparent'
+          borderColor: 'transparent',
+          hasGradient: false
         };
       case 'danger':
         return {
-          bgColor: pressed ? this.darkenColor(DesignSystem.getErrorColor(this.isLightMode), 0.1) : DesignSystem.getErrorColor(this.isLightMode),
+          bgColor: pressed ? this.darkenColor(DesignSystem.getErrorColor(this.isLightMode), 0.12) : DesignSystem.getErrorColor(this.isLightMode),
           textColor: '#FFFFFF',
-          borderColor: 'transparent'
+          borderColor: 'transparent',
+          hasGradient: false
+        };
+      case 'success':
+        return {
+          bgColor: pressed ? this.darkenColor(DesignSystem.getSuccessColor(this.isLightMode), 0.12) : DesignSystem.getSuccessColor(this.isLightMode),
+          textColor: '#FFFFFF',
+          borderColor: 'transparent',
+          hasGradient: false
         };
     }
   }
@@ -101,14 +114,14 @@ export struct AppButton {
     Row() {
       if (this.loading) {
         LoadingProgress()
-          .width(this.getSizeStyles().fontSize + 2)
-          .height(this.getSizeStyles().fontSize + 2)
+          .width(this.getSizeStyles().iconSize)
+          .height(this.getSizeStyles().iconSize)
           .color(this.getVariantStyles().textColor)
-          .margin({ right: this.text ? DesignSystem.Spacing.xs : 0 })
+          .margin({ right: this.text ? DesignSystem.Spacing.sm : 0 })
       } else if (this.icon) {
         Text(this.icon)
-          .fontSize(this.getSizeStyles().fontSize + 2)
-          .margin({ right: this.text ? DesignSystem.Spacing.xs : 0 })
+          .fontSize(this.getSizeStyles().iconSize)
+          .margin({ right: this.text ? DesignSystem.Spacing.sm : 0 })
       }
       
       if (this.text) {
@@ -116,6 +129,7 @@ export struct AppButton {
           .fontSize(this.getSizeStyles().fontSize)
           .fontColor(this.disabled ? DesignSystem.getTertiaryTextColor(this.isLightMode) : this.getVariantStyles().textColor)
           .fontWeight(DesignSystem.Typography.weight.medium)
+          .letterSpacing(0.5)
       }
     }
     .width(this.fullWidth ? '100%' : undefined)
@@ -127,19 +141,21 @@ export struct AppButton {
       width: this.getVariantStyles().borderColor === 'transparent' ? 0 : 1,
       color: this.getVariantStyles().borderColor
     })
-    .opacity(this.disabled ? 0.6 : 1)
+    .opacity(this.disabled ? 0.5 : (this.isPressed ? 0.92 : 1))
+    .shadow(this.variant === 'primary' && !this.disabled ? {
+      radius: 8,
+      color: this.isLightMode ? 'rgba(184, 134, 11, 0.25)' : 'rgba(232, 197, 71, 0.3)',
+      offsetX: 0,
+      offsetY: 4
+    } : undefined)
     .justifyContent(FlexAlign.Center)
     .animation({
       duration: DesignSystem.AnimationDuration.fast,
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      if (!this.disabled && !this.loading) {
-        if (this.onClicked) {
-          this.onClicked();
-        } else if (this.clickHandler) {
-          this.clickHandler();
-        }
+      if (!this.disabled && !this.loading && this.onClickHandler) {
+        this.onClickHandler();
       }
     })
     .onTouch((event: TouchEvent) => {
@@ -158,8 +174,8 @@ export struct AppButton {
     })
   }
 
-  setClickHandler(handler: () => void): AppButton {
-    this.clickHandler = handler;
+  onClick(handler: () => void): AppButton {
+    this.onClickHandler = handler;
     return this;
   }
 }

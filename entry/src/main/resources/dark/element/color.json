@@ -6,83 +6,95 @@
       },
       {
         "name": "app_background",
-        "value": "#0a0a0a"
+        "value": "#121212"
       },
       {
         "name": "page_background",
-        "value": "#0a0a0a"
+        "value": "#121212"
       },
       {
         "name": "color_primary",
-        "value": "#d4b483"
+        "value": "#E8C547"
       },
       {
         "name": "color_primary_light",
-        "value": "#e0c595"
+        "value": "#F0D060"
       },
       {
         "name": "color_primary_dark",
-        "value": "#8B6914"
+        "value": "#B8860B"
       },
       {
         "name": "color_success",
-        "value": "#4caf50"
+        "value": "#4CAF50"
       },
       {
         "name": "color_warning",
-        "value": "#FF9500"
+        "value": "#FFB74D"
       },
       {
         "name": "color_error",
-        "value": "#FF3B30"
+        "value": "#EF5350"
       },
       {
         "name": "color_info",
-        "value": "#5AC8FA"
+        "value": "#42A5F5"
       },
       {
         "name": "color_background",
-        "value": "#1a1a1a"
+        "value": "#121212"
       },
       {
         "name": "color_surface",
-        "value": "#2a2a2a"
+        "value": "#1E1E1E"
       },
       {
         "name": "color_card",
-        "value": "#1e1e1e"
+        "value": "#252525"
       },
       {
         "name": "color_text_primary",
-        "value": "#e0d8c9"
+        "value": "#FAF8F5"
       },
       {
         "name": "color_text_secondary",
-        "value": "#8a7f6e"
+        "value": "#B8B0A0"
       },
       {
         "name": "color_text_tertiary",
-        "value": "#5a5a5a"
+        "value": "#6A6A6A"
       },
       {
         "name": "color_border",
-        "value": "#2a2a2a"
+        "value": "#333333"
       },
       {
         "name": "color_button_text",
-        "value": "#e0d8c9"
+        "value": "#FAF8F5"
       },
       {
         "name": "color_hover",
-        "value": "#2f2f2f"
+        "value": "#2D2D2D"
       },
       {
         "name": "color_active",
-        "value": "#3a3a3a"
+        "value": "#3A3A3A"
       },
       {
         "name": "color_focus",
-        "value": "#444444"
+        "value": "#454545"
+      },
+      {
+        "name": "color_divider",
+        "value": "#2A2A2A"
+      },
+      {
+        "name": "color_shadow",
+        "value": "#80000000"
+      },
+      {
+        "name": "color_overlay",
+        "value": "#B3000000"
       }
     ]
   }

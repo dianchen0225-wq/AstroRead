@@ -31,17 +31,44 @@ export interface DegradationConfig {
   minHealthyScore: number;
 }
 
-export interface NetworkConfig {
+export interface ImageScraperConfig {
+  maxConcurrentDownloads: number;
+  downloadTimeout: number;
+  maxRetries: number;
+  retryDelay: number;
+  minImageSize: number;
+  maxImageSize: number;
+  preferredFormats: string[];
+  userAgent: string;
+  referer: string;
+  enableCache: boolean;
+  cacheTTL: number;
+  skipSSLVerification: boolean;
+  rateLimitPerSecond: number;
+}
+
+export interface SearchConfig {
+  maxConcurrent: number;
+  requestInterval: number;
+  timeout: number;
+  maxResultsPerSource: number;
+}
+
+export interface AppConfig {
   retry: RetryConfig;
   timeout: TimeoutConfig;
   rateLimit: RateLimitConfig;
   degradation: DegradationConfig;
+  imageScraper: ImageScraperConfig;
+  search: SearchConfig;
 }
+
+export type NetworkConfig = AppConfig;
 
 /**
  * 默认网络配置
  */
-export const DEFAULT_NETWORK_CONFIG: NetworkConfig = {
+export const DEFAULT_NETWORK_CONFIG: AppConfig = {
   retry: {
     maxRetries: 2,
     baseDelay: 500,
@@ -65,13 +92,34 @@ export const DEFAULT_NETWORK_CONFIG: NetworkConfig = {
     disableAfterConsecutiveFailures: 3,
     recoveryCheckInterval: 300000,
     minHealthyScore: 30
+  },
+  imageScraper: {
+    maxConcurrentDownloads: 3,
+    downloadTimeout: 30000,
+    maxRetries: 3,
+    retryDelay: 1000,
+    minImageSize: 1024,
+    maxImageSize: 10 * 1024 * 1024,
+    preferredFormats: ['jpeg', 'png', 'webp'],
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    referer: '',
+    enableCache: true,
+    cacheTTL: 7 * 24 * 60 * 60 * 1000,
+    skipSSLVerification: true,
+    rateLimitPerSecond: 2
+  },
+  search: {
+    maxConcurrent: 5,
+    requestInterval: 500,
+    timeout: 10000,
+    maxResultsPerSource: 20
   }
 };
 
 /**
  * 激进配置 - 用于快速搜索
  */
-export const AGGRESSIVE_NETWORK_CONFIG: NetworkConfig = {
+export const AGGRESSIVE_NETWORK_CONFIG: AppConfig = {
   retry: {
     maxRetries: 1,
     baseDelay: 300,
@@ -95,13 +143,34 @@ export const AGGRESSIVE_NETWORK_CONFIG: NetworkConfig = {
     disableAfterConsecutiveFailures: 2,
     recoveryCheckInterval: 600000,
     minHealthyScore: 40
+  },
+  imageScraper: {
+    maxConcurrentDownloads: 5,
+    downloadTimeout: 20000,
+    maxRetries: 2,
+    retryDelay: 500,
+    minImageSize: 512,
+    maxImageSize: 5 * 1024 * 1024,
+    preferredFormats: ['jpeg', 'png', 'webp'],
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    referer: '',
+    enableCache: true,
+    cacheTTL: 3 * 24 * 60 * 60 * 1000,
+    skipSSLVerification: true,
+    rateLimitPerSecond: 3
+  },
+  search: {
+    maxConcurrent: 8,
+    requestInterval: 200,
+    timeout: 8000,
+    maxResultsPerSource: 15
   }
 };
 
 /**
  * 保守配置 - 用于高质量书源
  */
-export const CONSERVATIVE_NETWORK_CONFIG: NetworkConfig = {
+export const CONSERVATIVE_NETWORK_CONFIG: AppConfig = {
   retry: {
     maxRetries: 3,
     baseDelay: 1000,
@@ -125,6 +194,27 @@ export const CONSERVATIVE_NETWORK_CONFIG: NetworkConfig = {
     disableAfterConsecutiveFailures: 5,
     recoveryCheckInterval: 180000,
     minHealthyScore: 20
+  },
+  imageScraper: {
+    maxConcurrentDownloads: 2,
+    downloadTimeout: 45000,
+    maxRetries: 5,
+    retryDelay: 2000,
+    minImageSize: 2048,
+    maxImageSize: 15 * 1024 * 1024,
+    preferredFormats: ['jpeg', 'png', 'webp'],
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    referer: '',
+    enableCache: true,
+    cacheTTL: 14 * 24 * 60 * 60 * 1000,
+    skipSSLVerification: false,
+    rateLimitPerSecond: 1
+  },
+  search: {
+    maxConcurrent: 3,
+    requestInterval: 800,
+    timeout: 15000,
+    maxResultsPerSource: 30
   }
 };
 
@@ -167,6 +257,14 @@ export class NetworkConfigManager {
     return this.currentConfig.degradation;
   }
 
+  getImageScraperConfig(): ImageScraperConfig {
+    return this.currentConfig.imageScraper;
+  }
+
+  getSearchConfig(): SearchConfig {
+    return this.currentConfig.search;
+  }
+
   isRetryableError(errorType: string, statusCode?: number): boolean {
     const retryConfig = this.currentConfig.retry;
     
@@ -175,6 +273,26 @@ export class NetworkConfigManager {
     }
     
     return retryConfig.retryableErrorTypes.includes(errorType);
+  }
+
+  updateImageScraperConfig(config: Partial<ImageScraperConfig>): void {
+    this.currentConfig = {
+      ...this.currentConfig,
+      imageScraper: {
+        ...this.currentConfig.imageScraper,
+        ...config
+      }
+    };
+  }
+
+  updateSearchConfig(config: Partial<SearchConfig>): void {
+    this.currentConfig = {
+      ...this.currentConfig,
+      search: {
+        ...this.currentConfig.search,
+        ...config
+      }
+    };
   }
 }
 

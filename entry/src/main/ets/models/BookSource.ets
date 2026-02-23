@@ -44,22 +44,33 @@ export interface ContentRule {
   replaceRule: string | undefined; // 内容替换规则（JSON格式）
 }
 
+export type BookSourceStatus = 'unknown' | 'available' | 'unavailable' | 'manual_available' | 'manual_unavailable';
+
+export interface BookSourceValidation {
+  lastValidationTime: number;
+  responseTime: number;
+  successKeyword: string;
+  failureReason: string;
+}
+
 /**
  * 书源数据模型
  */
 export interface BookSource {
-  id: string;                    // 书源ID
-  name: string;                  // 书源名称
-  url: string;                   // 书源URL
-  enabled: boolean;              // 是否启用
-  header: string | undefined;    // 请求头（JSON格式）
-  searchUrl: string;             // 搜索URL
-  searchRule: SearchRule;        // 搜索规则
-  findRule: FindRule | undefined; // 发现规则
-  chapterRule: ChapterRule;      // 章节规则
-  contentRule: ContentRule;      // 内容规则
-  ruleType: 'xpath' | 'jsonpath' | 'regex'; // 规则类型
-  sort: number;                  // 排序
-  lastUpdateTime: number;        // 最后更新时间
-  addTime: number;               // 添加时间
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  header: string | undefined;
+  searchUrl: string;
+  searchRule: SearchRule;
+  findRule: FindRule | undefined;
+  chapterRule: ChapterRule;
+  contentRule: ContentRule;
+  ruleType: 'xpath' | 'jsonpath' | 'regex';
+  sort: number;
+  lastUpdateTime: number;
+  addTime: number;
+  status?: BookSourceStatus;
+  validation?: BookSourceValidation;
 }
