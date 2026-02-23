@@ -14,11 +14,12 @@ import {
   RequestInterceptor,
   ResponseInterceptor,
   CacheStats,
-  HttpData
+  HttpData,
+  HttpError
 } from './interfaces/IHttpClient';
 import { HttpErrorImpl } from './HttpError';
 import { InterceptorManager } from './InterceptorManager';
-import RequestCache from './RequestCache';
+import { RequestCache } from './RequestCache';
 import RetryHandler from './RetryHandler';
 import { AbortManager, AbortControllerImpl } from './AbortController';
 import { ConfigManager, DEFAULTS } from './HttpClientConfig';
@@ -195,6 +196,56 @@ export class HttpClient implements IHttpClient {
   }
 
   /**
+   * 将 Map 转换为 Record
+   */
+  private mapToRecord(map: Map<string, string>): Record<string, string> {
+    const record: Record<string, string> = {};
+    map.forEach((value, key) => {
+      record[key] = value;
+    });
+    return record;
+  }
+
+  /**
+   * 生成缓存键
+   */
+  private generateCacheKey(config: HttpRequestConfig): string {
+    const paramsMap = RequestBuilder.paramsToRecord(config.params);
+    const paramsRecord = this.mapToRecord(paramsMap);
+    const body = typeof config.data === 'string' ? config.data : JSON.stringify(config.data);
+
+    const parts: string[] = [
+      (config.method ?? HttpMethod.GET).toUpperCase(),
+      config.url
+    ];
+
+    const paramKeys = Object.keys(paramsRecord).sort();
+    if (paramKeys.length > 0) {
+      const sortedParams = paramKeys.map(k => `${k}=${paramsRecord[k]}`);
+      parts.push(sortedParams.join('&'));
+    }
+
+    if (body && body !== 'undefined') {
+      parts.push(this.hashString(body));
+    }
+
+    return this.hashString(parts.join('|'));
+  }
+
+  /**
+   * 简单的字符串哈希
+   */
+  private hashString(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  /**
    * 尝试从缓存获取响应
    */
   private async tryGetCachedResponse<T>(
@@ -203,27 +254,20 @@ export class HttpClient implements IHttpClient {
     startTime: number
   ): Promise<HttpResponse<T> | null> {
     const cacheConfig = this.configManager.getConfig().cache;
-    
+
     if (!cacheConfig.enabled || config.cache?.forceRefresh) {
       return null;
     }
 
-    const cacheKey = config.cache?.key ??
-      RequestCache.generateKey(
-        config.url,
-        config.method ?? HttpMethod.GET,
-        RequestBuilder.paramsToRecord(config.params),
-        typeof config.data === 'string' ? config.data : JSON.stringify(config.data)
-      );
+    const cacheKey = config.cache?.key ?? this.generateCacheKey(config);
+    const cachedResponse = RequestCache.getInstance().get(cacheKey);
 
-    const cachedResponse = RequestCache.get(cacheKey);
-    
     if (!cachedResponse) {
       return null;
     }
 
     const response = ResponseParser.createResponse<T>(
-      cachedResponse.data as T,
+      cachedResponse.data as ESObject as T,
       cachedResponse.status,
       cachedResponse.headers,
       config,
@@ -330,20 +374,13 @@ export class HttpClient implements IHttpClient {
    */
   private cacheResponse<T>(config: HttpRequestConfig, response: HttpResponse<T>, status: number): void {
     const cacheConfig = this.configManager.getConfig().cache;
-    
-    if (!cacheConfig.enabled || !RequestCache.shouldCache(config.method ?? HttpMethod.GET, status)) {
+
+    if (!cacheConfig.enabled || !RequestCache.getInstance().shouldCache(config.method ?? HttpMethod.GET, status)) {
       return;
     }
 
-    const cacheKey = config.cache?.key ??
-      RequestCache.generateKey(
-        config.url,
-        config.method ?? HttpMethod.GET,
-        RequestBuilder.paramsToRecord(config.params),
-        typeof config.data === 'string' ? config.data : JSON.stringify(config.data)
-      );
-
-    RequestCache.set(cacheKey, response as HttpResponse, config.cache?.ttl ?? cacheConfig.ttl);
+    const cacheKey = config.cache?.key ?? this.generateCacheKey(config);
+    RequestCache.getInstance().set(cacheKey, response as HttpResponse, config.cache?.ttl ?? cacheConfig.ttl);
   }
 
   /**
@@ -494,14 +531,14 @@ export class HttpClient implements IHttpClient {
    * 清空缓存
    */
   clearCache(): void {
-    RequestCache.clear();
+    RequestCache.getInstance().clear();
   }
 
   /**
    * 获取缓存统计
    */
   getCacheStats(): CacheStats {
-    return RequestCache.getStats();
+    return RequestCache.getInstance().getHttpCacheStats();
   }
 
   // ==================== 指标管理 ====================

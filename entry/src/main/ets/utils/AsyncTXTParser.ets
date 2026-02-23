@@ -5,7 +5,6 @@
 
 import taskpool from '@ohos.taskpool';
 import { Book } from '../models/Book';
-import { Chapter } from '../models/Book';
 import { FileManager } from './FileManager';
 import { Logger } from './Logger';
 
@@ -67,24 +66,143 @@ function markTaskPoolUnavailable(): void {
 
 /**
  * 在子线程中执行的解析任务
+ * 注意：@Concurrent 函数只能使用导入的变量和局部变量
+ * 所有类型必须在函数内部定义
  */
 @Concurrent
 function parseInWorker(params: ParseTaskParams): ParseTaskResult {
+  // 在函数内部定义局部类型
+  interface WorkerChapter {
+    id: string;
+    bookId: string;
+    index: number;
+    title: string;
+    url: string;
+    content: string;
+    isVip: boolean;
+  }
+
+  interface WorkerBook {
+    id: string;
+    name: string;
+    author: string;
+    cover: string | undefined;
+    intro: string;
+    kind: string | undefined;
+    wordCount: number | undefined;
+    latestChapter: string | undefined;
+    bookUrl: string;
+    bookSourceId: string;
+    bookSourceName: string;
+    lastUpdateTime: number;
+    addTime: number;
+    readProgress: number;
+    lastReadChapter: string | undefined;
+    lastReadChapterIndex: number | undefined;
+    lastReadTime: number;
+    totalChapters: number;
+    currentChapterIndex: number;
+    currentChapterTitle: string;
+    isInShelf: boolean;
+  }
+
   try {
-    const { content, filePath, fileName } = params;
+    const content = params.content;
+    const filePath = params.filePath;
+    const fileName = params.fileName;
 
     if (!content || content.length === 0) {
       return { success: false, error: '文件内容为空' };
     }
 
+    // 默认章节标题正则（支持多种常见格式）
+    const chapterPatterns = [
+      /^\s*第[一二三四五六七八九十百千零\d]+章[\s\S]*$/i,
+      /^\s*第[一二三四五六七八九十百千零\d]+节[\s\S]*$/i,
+      /^\s*第[一二三四五六七八九十百千零\d]+回[\s\S]*$/i,
+      /^\s*第[一二三四五六七八九十百千零\d]+集[\s\S]*$/i,
+      /^\s*Chapter\s+\d+[\s\S]*$/i,
+      /^\s*\d+[\.\s]+[\s\S]+$/i,
+      /^\s*[\(（【\[]?[一二三四五六七八九十百千零\d]+[\)）】\]][\s\S]*$/i,
+      /^\s*正文[\s]*第[一二三四五六七八九十百千零\d]+章[\s\S]*$/i,
+    ];
+
     // 提取书名
-    const bookName = extractBookName(filePath, fileName);
+    let bookName: string;
+    if (fileName) {
+      bookName = fileName.replace(/\.txt$/i, '').trim();
+    } else {
+      const parts = filePath.split('/');
+      const fullName = parts[parts.length - 1];
+      bookName = fullName.replace(/\.txt$/i, '').trim();
+    }
 
     // 分析章节结构
-    const chapters = analyzeChapters(content);
+    const chapters: WorkerChapter[] = [];
+    const lines = content.split('\n');
+    let currentChapterStart = 0;
+    let currentChapterTitle = '';
+    let chapterIndex = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+
+      // 检查是否是章节标题
+      let isChapterTitle = false;
+      for (let j = 0; j < chapterPatterns.length; j++) {
+        if (chapterPatterns[j].test(line)) {
+          isChapterTitle = true;
+          break;
+        }
+      }
+
+      if (isChapterTitle) {
+        if (currentChapterTitle) {
+          const chapterContent = lines
+            .slice(currentChapterStart, i)
+            .join('\n')
+            .trim();
+
+          const chapter: WorkerChapter = {
+            id: chapterIndex.toString(),
+            bookId: '',
+            index: chapterIndex,
+            title: currentChapterTitle,
+            url: '',
+            content: chapterContent,
+            isVip: false
+          };
+          chapters.push(chapter);
+
+          chapterIndex++;
+        }
+
+        currentChapterTitle = line;
+        currentChapterStart = i + 1;
+      }
+    }
+
+    // 保存最后一章
+    if (currentChapterTitle) {
+      const chapterContent = lines
+        .slice(currentChapterStart)
+        .join('\n')
+        .trim();
+
+      const chapter: WorkerChapter = {
+        id: chapterIndex.toString(),
+        bookId: '',
+        index: chapterIndex,
+        title: currentChapterTitle,
+        url: '',
+        content: chapterContent,
+        isVip: false
+      };
+      chapters.push(chapter);
+    }
 
     if (chapters.length === 0) {
-      chapters.push({
+      const defaultChapter: WorkerChapter = {
         id: '0',
         bookId: '',
         index: 0,
@@ -92,16 +210,24 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
         url: filePath,
         content: content,
         isVip: false
-      });
+      };
+      chapters.push(defaultChapter);
+    }
+
+    // 提取简介（前200字）
+    let intro = content.substring(0, 200).replace(/\n/g, ' ').trim();
+    if (intro.length > 100) {
+      intro = intro.substring(0, 100) + '...';
     }
 
     // 创建书籍对象
-    const book: Book = {
+    const firstChapterTitle = chapters.length > 0 ? chapters[0].title : '';
+    const book: WorkerBook = {
       id: '',
       name: bookName,
       author: '未知作者',
       cover: undefined,
-      intro: extractIntro(content),
+      intro: intro,
       kind: undefined,
       wordCount: undefined,
       latestChapter: undefined,
@@ -116,19 +242,19 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
       lastReadTime: Date.now(),
       totalChapters: chapters.length,
       currentChapterIndex: 0,
-      currentChapterTitle: chapters[0]?.title || '',
+      currentChapterTitle: firstChapterTitle,
       isInShelf: false
     };
 
     // 设置章节索引
-    chapters.forEach((chapter, index) => {
-      chapter.index = index;
-    });
+    for (let i = 0; i < chapters.length; i++) {
+      chapters[i].index = i;
+    }
 
     return {
       success: true,
-      book,
-      chapters
+      book: book as Book,
+      chapters: chapters as TXTChapter[]
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);

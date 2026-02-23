@@ -4,10 +4,11 @@
  */
 import defaultHttpClient from '../HttpClient';
 import { HttpErrorImpl } from '../HttpError';
-import { HttpRequestConfig, HttpHeaders, RequestCacheConfig, HttpResponse, RequestMetrics } from '../interfaces/IHttpClient';
+import { HttpRequestConfig, HttpHeaders, RequestCacheConfig, HttpResponse, RequestMetrics, JsonObject, JsonPrimitive, JsonArray } from '../interfaces/IHttpClient';
+import { AppErrorCode } from '../../core/AppError';
 
 // 测试专用的接口定义
-interface TestData {
+interface TestData extends Record<string, JsonPrimitive | JsonArray | Record<string, JsonPrimitive>> {
   name: string;
   age: number;
 }
@@ -146,7 +147,7 @@ export class HttpClientTest {
       console.error('Timeout test failed - request should have timed out');
       return false;
     } catch (error) {
-      if (error instanceof HttpErrorImpl && error.code === 'TIMEOUT') {
+      if (error instanceof HttpErrorImpl && error.code === AppErrorCode.TIMEOUT) {
         console.log('✅ Timeout test passed');
         return true;
       }
@@ -241,8 +242,9 @@ export class HttpClientTest {
         return false;
       }
 
-      const firstMetric: RequestMetrics = metrics[0];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-function-return-type
+      // 使用类型断言确保类型安全
+      const firstMetric = metrics[0] as RequestMetrics;
+      
       if (!firstMetric.url.includes('httpbin.org')) {
         console.error('Metrics test failed - invalid URL in metrics');
         return false;

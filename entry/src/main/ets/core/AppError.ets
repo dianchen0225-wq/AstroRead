@@ -71,6 +71,16 @@ export interface AppErrorOptions {
   sourceName?: string;
 }
 
+export interface NetworkAppErrorOptions extends AppErrorOptions {
+  statusCode?: number;
+  statusText?: string;
+}
+
+export interface ParseAppErrorOptions extends AppErrorOptions {
+  line?: number;
+  column?: number;
+}
+
 export interface AppErrorJSON {
   name: string;
   code: AppErrorCode;
@@ -204,12 +214,8 @@ export abstract class AppError extends Error {
     if (error instanceof AppError) {
       return error;
     }
-    
-    return new (class extends AppError {
-      constructor() {
-        super(AppErrorCode.UNKNOWN, error.message, { cause: error });
-      }
-    })();
+
+    return new UnknownAppError(error.message, { cause: error });
   }
 }
 
@@ -220,34 +226,39 @@ export class NetworkAppError extends AppError {
   constructor(
     code: AppErrorCode,
     message: string,
-    options?: AppErrorOptions & { statusCode?: number; statusText?: string }
+    options?: NetworkAppErrorOptions
   ) {
-    super(code, message, { ...options, category: ErrorCategory.NETWORK });
+    const opts: NetworkAppErrorOptions = options ?? {};
+    opts.category = ErrorCategory.NETWORK;
+    super(code, message, opts);
     this.statusCode = options?.statusCode;
     this.statusText = options?.statusText;
   }
 
   static timeout(message: string = 'Request timeout'): NetworkAppError {
-    return new NetworkAppError(AppErrorCode.TIMEOUT, message, {
+    const opts: NetworkAppErrorOptions = {
       severity: ErrorSeverity.HIGH,
       retryable: true
-    });
+    };
+    return new NetworkAppError(AppErrorCode.TIMEOUT, message, opts);
   }
 
   static networkError(message: string = 'Network error'): NetworkAppError {
-    return new NetworkAppError(AppErrorCode.NETWORK_ERROR, message, {
+    const opts: NetworkAppErrorOptions = {
       severity: ErrorSeverity.HIGH,
       retryable: true
-    });
+    };
+    return new NetworkAppError(AppErrorCode.NETWORK_ERROR, message, opts);
   }
 
   static httpError(status: number, statusText: string): NetworkAppError {
-    return new NetworkAppError(AppErrorCode.HTTP_ERROR, `HTTP ${status}: ${statusText}`, {
+    const opts: NetworkAppErrorOptions = {
       statusCode: status,
-      statusText,
+      statusText: statusText,
       severity: status >= 500 ? ErrorSeverity.HIGH : ErrorSeverity.MEDIUM,
       retryable: status >= 500 || status === 429
-    });
+    };
+    return new NetworkAppError(AppErrorCode.HTTP_ERROR, `HTTP ${status}: ${statusText}`, opts);
   }
 }
 
@@ -258,17 +269,18 @@ export class ParseAppError extends AppError {
   constructor(
     code: AppErrorCode,
     message: string,
-    options?: AppErrorOptions & { line?: number; column?: number }
+    options?: ParseAppErrorOptions
   ) {
-    super(code, message, { ...options, category: ErrorCategory.PARSE });
+    const opts: ParseAppErrorOptions = options ?? {};
+    opts.category = ErrorCategory.PARSE;
+    super(code, message, opts);
     this.line = options?.line;
     this.column = options?.column;
   }
 
   static invalidInput(message: string = 'Invalid input'): ParseAppError {
-    return new ParseAppError(AppErrorCode.INVALID_INPUT, message, {
-      recoverable: false
-    });
+    const opts: ParseAppErrorOptions = { recoverable: false };
+    return new ParseAppError(AppErrorCode.INVALID_INPUT, message, opts);
   }
 
   static emptyInput(): ParseAppError {
@@ -276,11 +288,12 @@ export class ParseAppError extends AppError {
   }
 
   static syntaxError(message: string, line?: number, column?: number): ParseAppError {
-    return new ParseAppError(AppErrorCode.SYNTAX_ERROR, message, {
-      line,
-      column,
+    const opts: ParseAppErrorOptions = {
+      line: line,
+      column: column,
       recoverable: false
-    });
+    };
+    return new ParseAppError(AppErrorCode.SYNTAX_ERROR, message, opts);
   }
 }
 
@@ -290,33 +303,38 @@ export class SourceAppError extends AppError {
     message: string,
     options?: AppErrorOptions
   ) {
-    super(code, message, { ...options, category: ErrorCategory.SOURCE });
+    const opts: AppErrorOptions = options ?? {};
+    opts.category = ErrorCategory.SOURCE;
+    super(code, message, opts);
   }
 
   static notFound(sourceId: string, sourceName?: string): SourceAppError {
-    return new SourceAppError(AppErrorCode.SOURCE_NOT_FOUND, `Source not found: ${sourceName ?? sourceId}`, {
-      sourceId,
-      sourceName,
+    const opts: AppErrorOptions = {
+      sourceId: sourceId,
+      sourceName: sourceName,
       recoverable: false
-    });
+    };
+    return new SourceAppError(AppErrorCode.SOURCE_NOT_FOUND, `Source not found: ${sourceName ?? sourceId}`, opts);
   }
 
   static disabled(sourceId: string, sourceName?: string): SourceAppError {
-    return new SourceAppError(AppErrorCode.SOURCE_DISABLED, `Source disabled: ${sourceName ?? sourceId}`, {
-      sourceId,
-      sourceName,
+    const opts: AppErrorOptions = {
+      sourceId: sourceId,
+      sourceName: sourceName,
       recoverable: false,
       severity: ErrorSeverity.CRITICAL
-    });
+    };
+    return new SourceAppError(AppErrorCode.SOURCE_DISABLED, `Source disabled: ${sourceName ?? sourceId}`, opts);
   }
 
   static unhealthy(sourceId: string, sourceName?: string): SourceAppError {
-    return new SourceAppError(AppErrorCode.SOURCE_UNHEALTHY, `Source unhealthy: ${sourceName ?? sourceId}`, {
-      sourceId,
-      sourceName,
+    const opts: AppErrorOptions = {
+      sourceId: sourceId,
+      sourceName: sourceName,
       severity: ErrorSeverity.HIGH,
       retryable: true
-    });
+    };
+    return new SourceAppError(AppErrorCode.SOURCE_UNHEALTHY, `Source unhealthy: ${sourceName ?? sourceId}`, opts);
   }
 }
 
@@ -326,23 +344,34 @@ export class BusinessAppError extends AppError {
     message: string,
     options?: AppErrorOptions
   ) {
-    super(code, message, { ...options, category: ErrorCategory.BUSINESS });
+    const opts: AppErrorOptions = options ?? {};
+    opts.category = ErrorCategory.BUSINESS;
+    super(code, message, opts);
   }
 
   static bookNotFound(bookId: string): BusinessAppError {
-    return new BusinessAppError(AppErrorCode.BOOK_NOT_FOUND, `Book not found: ${bookId}`, {
-      recoverable: false
-    });
+    const opts: AppErrorOptions = { recoverable: false };
+    return new BusinessAppError(AppErrorCode.BOOK_NOT_FOUND, `Book not found: ${bookId}`, opts);
   }
 
   static chapterNotFound(chapterId: string): BusinessAppError {
-    return new BusinessAppError(AppErrorCode.CHAPTER_NOT_FOUND, `Chapter not found: ${chapterId}`, {
-      recoverable: false
-    });
+    const opts: AppErrorOptions = { recoverable: false };
+    return new BusinessAppError(AppErrorCode.CHAPTER_NOT_FOUND, `Chapter not found: ${chapterId}`, opts);
   }
 
   static contentEmpty(): BusinessAppError {
     return new BusinessAppError(AppErrorCode.CONTENT_EMPTY, 'Chapter content is empty');
+  }
+}
+
+export class UnknownAppError extends AppError {
+  constructor(
+    message: string,
+    options?: AppErrorOptions
+  ) {
+    const opts: AppErrorOptions = options ?? {};
+    opts.category = ErrorCategory.UNKNOWN;
+    super(AppErrorCode.UNKNOWN, message, opts);
   }
 }
 

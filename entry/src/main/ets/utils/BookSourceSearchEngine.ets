@@ -795,7 +795,7 @@ export class BookSourceSearchEngine {
     }
 
     // 先检查缓存
-    const cached = parseCache.get(html, rule);
+    const cached = parseCache.getBySelector(html, rule);
     if (cached && cached.length > 0) {
       // 从缓存的元素中提取文本
       return this.extractTextFromElement(cached[0]);
@@ -808,7 +808,7 @@ export class BookSourceSearchEngine {
     if (text) {
       const elements = await this.asyncCssSelectorParser.selectElements(html, rule);
       if (elements.length > 0) {
-        parseCache.set(html, rule, elements);
+        parseCache.setBySelector(html, rule, elements);
       }
     }
 

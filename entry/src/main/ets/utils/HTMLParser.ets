@@ -437,7 +437,7 @@ export class HTMLParser {
 
     try {
       // 先检查缓存
-      const cached = parseCache.get(html, rule);
+      const cached = parseCache.getBySelector(html, rule);
       if (cached) {
         Logger.debug(this.TAG, `异步解析缓存命中: ${rule}`);
         return cached;
@@ -447,12 +447,12 @@ export class HTMLParser {
       if (rule.includes('||')) {
         const orRules = rule.split('||').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
         Logger.debug(this.TAG, `异步检测到||或运算符，共${orRules.length}个规则`);
-        
+
         for (const orRule of orRules) {
           const result = await this.parseAsync(html, orRule);
           if (result.length > 0) {
             Logger.info(this.TAG, `异步||或运算符匹配成功: ${orRule}, 找到${result.length}个元素`);
-            parseCache.set(html, rule, result);
+            parseCache.setBySelector(html, rule, result);
             return result;
           }
         }
@@ -478,7 +478,7 @@ export class HTMLParser {
         Logger.debug(this.TAG, `异步使用XPath解析: ${rule}`);
         // XPath 使用异步 CSS 选择器
         const elements = await this.asyncCssSelectorParser.selectElements(html, rule);
-        parseCache.set(html, rule, elements);
+        parseCache.setBySelector(html, rule, elements);
         return elements;
       }
 
@@ -487,7 +487,7 @@ export class HTMLParser {
           rule.startsWith('.') || rule.startsWith('#') || /^[a-zA-Z]/.test(rule)) {
         Logger.debug(this.TAG, `异步使用CSS选择器解析: ${rule}`);
         const elements = await this.asyncCssSelectorParser.selectElements(html, rule);
-        parseCache.set(html, rule, elements);
+        parseCache.setBySelector(html, rule, elements);
         return elements;
       }
 
@@ -519,7 +519,7 @@ export class HTMLParser {
     // 缓存结果
     for (let i = 0; i < items.length; i++) {
       if (results[i] && results[i].length > 0) {
-        parseCache.set(items[i], rule, results[i]);
+        parseCache.setBySelector(items[i], rule, results[i]);
       }
     }
 

@@ -4,6 +4,8 @@
  * 统一网络请求接口规范
  */
 
+import { AppErrorCode } from '../../core/AppError';
+
 type URLSearchParams = HttpUrlSearchParams;
 
 export enum HttpMethod {
@@ -102,7 +104,7 @@ export type HttpParams = Map<string, HttpParamEntry>;
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonArray = JsonPrimitive[];
-export type JsonObject = object;
+export type JsonObject = Record<string, JsonPrimitive | JsonArray | Record<string, JsonPrimitive>>;
 
 export type HttpData = string | JsonObject | ArrayBuffer;
 export type HttpBody = string | JsonObject | ArrayBuffer;

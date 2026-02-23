@@ -3,9 +3,7 @@ import fs from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
 import { Logger } from './Logger';
 import { RequestThrottler } from './RequestThrottler';
-import { NetworkManager } from './NetworkManager';
 import { Book } from '../models/Book';
-import { util } from '@kit.ArkTS';
 
 export interface ImageInfo {
   url: string;
@@ -99,6 +97,17 @@ interface ImageValidationResult {
 interface ImageDimensions {
   width: number;
   height: number;
+}
+
+interface ImageScore {
+  url: string;
+  score: number;
+}
+
+interface BatchDownloadItem {
+  url: string;
+  bookId: string;
+  type: 'cover' | 'interior' | 'thumbnail';
 }
 
 const DEFAULT_CONFIG: ImageScrapeConfig = {
@@ -759,12 +768,25 @@ export class ImageScraperService {
     const fileName = `${imageType}_${Date.now()}.${extension}`;
     const filePath = `${imageDir}/${fileName}`;
 
-    const file = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
-    fs.writeSync(file.fd, data.buffer);
-    fs.closeSync(file);
-
-    Logger.info(this.TAG, `Image saved: ${filePath}`);
-    return filePath;
+    let file: fs.File | null = null;
+    try {
+      file = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
+      fs.writeSync(file.fd, data.buffer);
+      fs.closeSync(file);
+      Logger.info(this.TAG, `Image saved: ${filePath}`);
+      return filePath;
+    } catch (error) {
+      if (file) {
+        try {
+          fs.closeSync(file);
+        } catch {
+          // Ignore close error
+        }
+      }
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      Logger.error(this.TAG, `Failed to save image: ${errorMessage}`);
+      throw new Error(`Failed to save image: ${errorMessage}`);
+    }
   }
 
   private getExtension(format: ImageFormat): string {
@@ -809,7 +831,7 @@ export class ImageScraperService {
   detectImagesInHtml(html: string, baseUrl: string): string[] {
     const images: string[] = [];
     const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
-    let match;
+    let match: RegExpExecArray | null = null;
 
     while ((match = imgRegex.exec(html)) !== null) {
       const src = match[1];
@@ -841,12 +863,12 @@ export class ImageScraperService {
       }
     }
 
-    const uniqueImages = [...new Set(images)];
-    return this.prioritizeImages(uniqueImages, baseUrl);
+    const uniqueImages = Array.from(new Set(images));
+    return this.prioritizeImages(uniqueImages);
   }
 
-  private prioritizeImages(images: string[], baseUrl: string): string[] {
-    const scored = images.map(url => {
+  private prioritizeImages(images: string[]): string[] {
+    const scored: ImageScore[] = images.map((url: string): ImageScore => {
       let score = 0;
       const lowerUrl = url.toLowerCase();
 
@@ -872,11 +894,12 @@ export class ImageScraperService {
         }
       }
 
-      return { url, score };
+      const result: ImageScore = { url: url, score: score };
+      return result;
     });
 
-    scored.sort((a, b) => b.score - a.score);
-    return scored.map(item => item.url);
+    scored.sort((a: ImageScore, b: ImageScore) => b.score - a.score);
+    return scored.map((item: ImageScore) => item.url);
   }
 
   private detectAntiScraping(errorMessage: string): AntiScrapingDetection {
@@ -1045,24 +1068,6 @@ export class ImageScraperService {
     }
   }
 
-  private extractDomain(url: string): string {
-    try {
-      const protocolIndex = url.indexOf('://');
-      if (protocolIndex === -1) return 'unknown';
-
-      const hostStart = protocolIndex + 3;
-      const pathIndex = url.indexOf('/', hostStart);
-
-      if (pathIndex === -1) {
-        return url.substring(hostStart);
-      }
-
-      return url.substring(hostStart, pathIndex);
-    } catch {
-      return 'unknown';
-    }
-  }
-
   private getHeaderValue(headers: object, key: string): string | undefined {
     if (!headers) return undefined;
 
@@ -1088,20 +1093,20 @@ export class ImageScraperService {
   }
 
   async batchDownloadImages(
-    items: Array<{ url: string; bookId: string; type: 'cover' | 'interior' | 'thumbnail' }>,
+    items: BatchDownloadItem[],
     onProgress?: (completed: number, total: number, result: ImageDownloadResult) => void
   ): Promise<ImageDownloadResult[]> {
     const results: ImageDownloadResult[] = [];
     let completed = 0;
 
-    const chunks: Array<typeof items> = [];
+    const chunks: BatchDownloadItem[][] = [];
     for (let i = 0; i < items.length; i += this.config.maxConcurrentDownloads) {
       chunks.push(items.slice(i, i + this.config.maxConcurrentDownloads));
     }
 
     for (const chunk of chunks) {
       const chunkResults = await Promise.all(
-        chunk.map(async item => {
+        chunk.map(async (item: BatchDownloadItem) => {
           const result = await this.downloadImage(item.url, item.bookId, item.type);
           completed++;
           if (onProgress) {

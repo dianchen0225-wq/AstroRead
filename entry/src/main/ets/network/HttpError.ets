@@ -3,13 +3,14 @@
  * 继承自 AppError，提供 HTTP 特有的错误信息
  */
 
-import { HttpErrorCode, HttpHeaders, HttpRequestConfig, HttpResponse } from './interfaces/IHttpClient';
+import { HttpErrorCode, HttpHeaders, HttpRequestConfig, HttpResponse, HttpError } from './interfaces/IHttpClient';
 import {
   AppError,
   AppErrorCode,
   ErrorCategory,
   ErrorSeverity,
-  AppErrorOptions
+  AppErrorOptions,
+  AppErrorJSON
 } from '../core/AppError';
 
 interface HttpErrorOptions {
@@ -39,7 +40,7 @@ class HttpErrorOptionsImpl implements HttpErrorOptions {
 
 interface HttpErrorJSON {
   name: string;
-  code: HttpErrorCode;
+  code: AppErrorCode;
   message: string;
   status?: number;
   statusText?: string;
@@ -63,7 +64,7 @@ function mapHttpErrorCode(code: HttpErrorCode): AppErrorCode {
   return mapping[code] ?? AppErrorCode.UNKNOWN;
 }
 
-export class HttpErrorImpl extends AppError {
+export class HttpErrorImpl extends AppError implements HttpError {
   readonly httpCode: HttpErrorCode;
   readonly status?: number;
   readonly statusText?: string;
@@ -88,7 +89,7 @@ export class HttpErrorImpl extends AppError {
     };
 
     super(appCode, message, appOptions);
-    
+
     this.httpCode = code;
     this.name = 'HttpError';
     this.status = options?.status;
@@ -138,9 +139,7 @@ export class HttpErrorImpl extends AppError {
     return false;
   }
 
-  get code(): AppErrorCode {
-    return super.code;
-  }
+
 
   static timeout(message: string = 'Request timeout', config?: HttpRequestConfig): HttpErrorImpl {
     const options: HttpErrorOptions = { config: config };
@@ -245,10 +244,15 @@ export class HttpErrorImpl extends AppError {
     return new HttpErrorImpl(HttpErrorCode.UNKNOWN, error.message, new HttpErrorOptionsImpl(config, error));
   }
 
-  toJSON(): HttpErrorJSON {
-    const jsonObj: HttpErrorJSON = {
+  toJSON(): AppErrorJSON {
+    const baseJson = super.toJSON();
+    return baseJson;
+  }
+
+  toHttpErrorJSON(): HttpErrorJSON {
+    return {
       name: this.name,
-      code: this.httpCode,
+      code: super.code,
       message: this.message,
       status: this.status,
       statusText: this.statusText,
@@ -256,7 +260,6 @@ export class HttpErrorImpl extends AppError {
       timestamp: this.timestamp,
       url: this.config?.url
     };
-    return jsonObj;
   }
 
   toString(): string {

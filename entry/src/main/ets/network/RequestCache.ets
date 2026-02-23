@@ -3,16 +3,9 @@
  * 继承自 BaseCache，缓存 HTTP 响应
  */
 
-import { CacheStats, HttpResponse } from './interfaces/IHttpClient';
-import { BaseCache, CacheConfig } from '../core/BaseCache';
+import { CacheStats as HttpCacheStats, CacheEntryInfo, HttpResponse } from './interfaces/IHttpClient';
+import { BaseCache, CacheConfig, CacheStats } from '../core/BaseCache';
 import { Logger } from '../utils/Logger';
-
-interface CacheEntryInfo {
-  key: string;
-  size: number;
-  age: number;
-  hits: number;
-}
 
 export class RequestCache extends BaseCache<HttpResponse> {
   private static instance: RequestCache | null = null;
@@ -21,7 +14,7 @@ export class RequestCache extends BaseCache<HttpResponse> {
   private defaultTTL: number = 5 * 60 * 1000;
 
   private constructor(config?: Partial<CacheConfig>) {
-    super({ maxSize: 100, ttl: 5 * 60 * 1000, ...config });
+    super({ maxSize: 100, ttl: 5 * 60 * 1000, enableStats: config?.enableStats ?? true });
   }
 
   static getInstance(): RequestCache {
@@ -100,25 +93,37 @@ export class RequestCache extends BaseCache<HttpResponse> {
   }
 
   /**
-   * 获取缓存统计（扩展版）
+   * 获取缓存统计（继承自基类）
    */
   getStats(): CacheStats {
+    return super.getStats();
+  }
+
+  /**
+   * 获取缓存统计（扩展版）
+   */
+  getHttpCacheStats(): HttpCacheStats {
     const baseStats = super.getStats();
 
     const entries: CacheEntryInfo[] = this.keys().map(key => {
       const entry = this.cache.get(key);
-      return {
-        key,
+      const entryInfo: CacheEntryInfo = {
+        key: key,
         size: entry?.size ?? 0,
         age: Date.now() - (entry?.timestamp ?? 0),
         hits: entry?.accessCount ?? 0
       };
+      return entryInfo;
     });
 
-    return {
-      ...baseStats,
-      entries
+    const stats: HttpCacheStats = {
+      size: baseStats.size,
+      maxSize: baseStats.maxSize,
+      hitRate: baseStats.hitRate,
+      missRate: baseStats.missRate,
+      entries: entries
     };
+    return stats;
   }
 
   /**
@@ -154,4 +159,5 @@ export class RequestCache extends BaseCache<HttpResponse> {
   }
 }
 
-export default RequestCache.getInstance();
+const requestCache = RequestCache.getInstance();
+export default requestCache;

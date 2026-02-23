@@ -57,12 +57,12 @@ export class ResponseParser {
   static decodeArrayBuffer(arrayBuffer: ArrayBuffer, headers: Record<string, string>): string {
     const uint8Data = new Uint8Array(arrayBuffer);
 
-    const charsetFromHeader = this.detectCharsetFromHeader(headers);
+    const charsetFromHeader = ResponseParser.detectCharsetFromHeader(headers);
     if (charsetFromHeader) {
       try {
         const decoder = util.TextDecoder.create(charsetFromHeader, { ignoreBOM: true });
         const text = decoder.decodeToString(uint8Data);
-        if (this.isValidDecodedContent(text)) {
+        if (ResponseParser.isValidDecodedContent(text)) {
           return text;
         }
       } catch {
@@ -70,12 +70,12 @@ export class ResponseParser {
       }
     }
 
-    const charsetFromContent = this.detectCharsetFromContent(uint8Data);
+    const charsetFromContent = ResponseParser.detectCharsetFromContent(uint8Data);
     if (charsetFromContent && charsetFromContent !== charsetFromHeader) {
       try {
         const decoder = util.TextDecoder.create(charsetFromContent, { ignoreBOM: true });
         const text = decoder.decodeToString(uint8Data);
-        if (this.isValidDecodedContent(text)) {
+        if (ResponseParser.isValidDecodedContent(text)) {
           return text;
         }
       } catch {
@@ -83,14 +83,14 @@ export class ResponseParser {
       }
     }
 
-    for (const encoding of this.FALLBACK_ENCODINGS) {
+    for (const encoding of ResponseParser.FALLBACK_ENCODINGS) {
       if (encoding === charsetFromHeader || encoding === charsetFromContent) {
         continue;
       }
       try {
         const decoder = util.TextDecoder.create(encoding, { ignoreBOM: true });
         const text = decoder.decodeToString(uint8Data);
-        if (this.isValidDecodedContent(text)) {
+        if (ResponseParser.isValidDecodedContent(text)) {
           return text;
         }
       } catch {
@@ -110,14 +110,14 @@ export class ResponseParser {
    * 从响应头检测编码
    */
   private static detectCharsetFromHeader(headers: Record<string, string>): string | null {
-    const contentType = this.getHeaderValue(headers, 'Content-Type');
+    const contentType = ResponseParser.getHeaderValue(headers, 'Content-Type');
     if (!contentType) {
       return null;
     }
 
     const charsetMatch = contentType.match(/charset=["']?([^;"'\s]+)["']?/i);
     if (charsetMatch) {
-      return this.normalizeCharset(charsetMatch[1].toLowerCase());
+      return ResponseParser.normalizeCharset(charsetMatch[1].toLowerCase());
     }
     return null;
   }
@@ -132,12 +132,12 @@ export class ResponseParser {
 
       const metaCharsetMatch = preview.match(/<meta[^>]+charset=["']?([^"'\s>]+)["']?/i);
       if (metaCharsetMatch) {
-        return this.normalizeCharset(metaCharsetMatch[1].toLowerCase());
+        return ResponseParser.normalizeCharset(metaCharsetMatch[1].toLowerCase());
       }
 
       const contentTypeMatch = preview.match(/<meta[^>]+content=["'][^"']*charset=([^"'\s;]+)/i);
       if (contentTypeMatch) {
-        return this.normalizeCharset(contentTypeMatch[1].toLowerCase());
+        return ResponseParser.normalizeCharset(contentTypeMatch[1].toLowerCase());
       }
     } catch {
       // 忽略错误
@@ -150,7 +150,7 @@ export class ResponseParser {
    */
   private static normalizeCharset(charset: string): string {
     const normalized = charset.toLowerCase().trim();
-    return this.CHARSET_MAP[normalized] || normalized;
+    return ResponseParser.CHARSET_MAP[normalized] || normalized;
   }
 
   /**

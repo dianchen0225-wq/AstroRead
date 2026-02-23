@@ -49,7 +49,30 @@ export abstract class BaseCache<T> {
   protected readonly abstract TAG: string;
 
   constructor(config?: Partial<CacheConfig>) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = this.mergeConfig(DEFAULT_CONFIG, config);
+  }
+
+  /**
+   * 合并配置对象
+   */
+  private mergeConfig(defaultConfig: CacheConfig, userConfig?: Partial<CacheConfig>): CacheConfig {
+    const result: CacheConfig = {
+      maxSize: defaultConfig.maxSize,
+      ttl: defaultConfig.ttl,
+      enableStats: defaultConfig.enableStats
+    };
+    if (userConfig) {
+      if (userConfig.maxSize !== undefined) {
+        result.maxSize = userConfig.maxSize;
+      }
+      if (userConfig.ttl !== undefined) {
+        result.ttl = userConfig.ttl;
+      }
+      if (userConfig.enableStats !== undefined) {
+        result.enableStats = userConfig.enableStats;
+      }
+    }
+    return result;
   }
 
   /**
@@ -301,7 +324,11 @@ export abstract class BaseCache<T> {
    * 获取缓存配置
    */
   getConfig(): CacheConfig {
-    return { ...this.config };
+    return {
+      maxSize: this.config.maxSize,
+      ttl: this.config.ttl,
+      enableStats: this.config.enableStats
+    };
   }
 
   /**

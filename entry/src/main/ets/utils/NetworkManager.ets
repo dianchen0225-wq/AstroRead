@@ -39,12 +39,20 @@ const DEFAULT_SECURITY_OPTIONS: NetworkSecurityOptions = {
   maxResponseSize: 10 * 1024 * 1024
 };
 
+function createDefaultSecurityOptions(): NetworkSecurityOptions {
+  return {
+    skipSSLVerification: DEFAULT_SECURITY_OPTIONS.skipSSLVerification,
+    ignoreAntiCrawling: DEFAULT_SECURITY_OPTIONS.ignoreAntiCrawling,
+    maxResponseSize: DEFAULT_SECURITY_OPTIONS.maxResponseSize
+  };
+}
+
 /**
  * @deprecated 使用 BookSourceNetworkService 替代
  */
 export class NetworkManager {
   private static instance: NetworkManager | null = null;
-  private securityOptions: NetworkSecurityOptions = { ...DEFAULT_SECURITY_OPTIONS };
+  private securityOptions: NetworkSecurityOptions = createDefaultSecurityOptions();
   private bookSourceService: BookSourceNetworkService;
   private httpClient: HttpClient;
   private context: common.UIAbilityContext | null = null;
@@ -92,7 +100,11 @@ export class NetworkManager {
    * @deprecated 安全选项现在由 HttpClient 配置管理
    */
   getSecurityOptions(): NetworkSecurityOptions {
-    return { ...this.securityOptions };
+    return {
+      skipSSLVerification: this.securityOptions.skipSSLVerification,
+      ignoreAntiCrawling: this.securityOptions.ignoreAntiCrawling,
+      maxResponseSize: this.securityOptions.maxResponseSize
+    };
   }
 
   /**
@@ -158,7 +170,7 @@ export class NetworkManager {
    */
   getRecentRequestLogs(count: number = 20): RequestLog[] {
     const metrics = this.httpClient.getMetrics().slice(-count);
-    return metrics.map(m => ({
+    return metrics.map((m): RequestLog => ({
       timestamp: m.startTime,
       url: m.url,
       method: m.method,

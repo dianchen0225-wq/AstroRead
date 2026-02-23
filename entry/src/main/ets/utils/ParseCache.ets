@@ -14,7 +14,7 @@ export class ParseCache extends BaseCache<string[]> {
   protected readonly TAG = 'ParseCache';
 
   private constructor(config?: Partial<CacheConfig>) {
-    super({ maxSize: 200, ttl: 5 * 60 * 1000, ...config });
+    super({ maxSize: 200, ttl: 5 * 60 * 1000, enableStats: config?.enableStats ?? true });
   }
 
   static getInstance(): ParseCache {
