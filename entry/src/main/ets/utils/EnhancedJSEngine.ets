@@ -37,6 +37,11 @@ export class EnhancedJSEngine {
   private cache: Map<string, CacheValue> = new Map();
   private readonly TAG = 'EnhancedJSEngine';
 
+  private readonly MAX_CACHE_SIZE = 100;
+  private readonly CACHE_TTL = 30 * 60 * 1000;
+  private cacheTimestamps: Map<string, number> = new Map();
+  private accessOrder: string[] = [];
+
   private constructor() {
     this.htmlParser = HTMLParser.getInstance();
     this.networkAdapter = NetworkAdapter.getInstance();
@@ -82,7 +87,7 @@ export class EnhancedJSEngine {
 
   private isSimpleUrlTemplate(code: string): boolean {
     return code.includes('{{key}}') || code.includes('{{page}}') ||
-           code.includes('searchKey') || code.includes('searchPage');
+    code.includes('searchKey') || code.includes('searchPage');
   }
 
   private isTemplateString(code: string): boolean {
@@ -193,15 +198,77 @@ export class EnhancedJSEngine {
 
   private setCacheValue(name: string, value: string | number | boolean | object | null): void {
     const cacheKey = `var_${name}`;
+
+    this.cleanupExpiredCache();
+
+    if (this.cache.size >= this.MAX_CACHE_SIZE && !this.cache.has(cacheKey)) {
+      this.evictLRU();
+    }
+
     const cacheData: CacheValue = {};
     cacheData['value'] = value;
     this.cache.set(cacheKey, cacheData);
+    this.cacheTimestamps.set(cacheKey, Date.now());
+
+    const existingIndex = this.accessOrder.indexOf(cacheKey);
+    if (existingIndex !== -1) {
+      this.accessOrder.splice(existingIndex, 1);
+    }
+    this.accessOrder.push(cacheKey);
   }
 
   private getCacheValue(name: string): string | number | boolean | object | null {
     const cacheKey = `var_${name}`;
+
+    const timestamp = this.cacheTimestamps.get(cacheKey);
+    if (timestamp && Date.now() - timestamp > this.CACHE_TTL) {
+      this.removeCacheEntry(cacheKey);
+      return null;
+    }
+
     const cached = this.cache.get(cacheKey);
+    if (cached) {
+      const existingIndex = this.accessOrder.indexOf(cacheKey);
+      if (existingIndex !== -1) {
+        this.accessOrder.splice(existingIndex, 1);
+        this.accessOrder.push(cacheKey);
+      }
+    }
     return cached?.value ?? null;
+  }
+
+  private cleanupExpiredCache(): void {
+    const now = Date.now();
+    const keysToDelete: string[] = [];
+
+    this.cacheTimestamps.forEach((timestamp: number, key: string) => {
+      if (now - timestamp > this.CACHE_TTL) {
+        keysToDelete.push(key);
+      }
+    });
+
+    for (const key of keysToDelete) {
+      this.removeCacheEntry(key);
+    }
+  }
+
+  private evictLRU(): void {
+    if (this.accessOrder.length === 0) return;
+
+    const lruKey = this.accessOrder.shift();
+    if (lruKey) {
+      this.removeCacheEntry(lruKey);
+      Logger.debug(this.TAG, `LRU淘汰缓存: ${lruKey}`);
+    }
+  }
+
+  private removeCacheEntry(key: string): void {
+    this.cache.delete(key);
+    this.cacheTimestamps.delete(key);
+    const index = this.accessOrder.indexOf(key);
+    if (index !== -1) {
+      this.accessOrder.splice(index, 1);
+    }
   }
 
   async executeRule(html: string, rule: string, baseUrl: string = ''): Promise<string> {
@@ -271,15 +338,50 @@ export class EnhancedJSEngine {
   }
 
   getCache(key: string): CacheValue | undefined {
+    const timestamp = this.cacheTimestamps.get(key);
+    if (timestamp && Date.now() - timestamp > this.CACHE_TTL) {
+      this.removeCacheEntry(key);
+      return undefined;
+    }
     return this.cache.get(key);
   }
 
   setCache(key: string, value: CacheValue): void {
+    this.cleanupExpiredCache();
+
+    if (this.cache.size >= this.MAX_CACHE_SIZE && !this.cache.has(key)) {
+      this.evictLRU();
+    }
+
     this.cache.set(key, value);
+    this.cacheTimestamps.set(key, Date.now());
+
+    const existingIndex = this.accessOrder.indexOf(key);
+    if (existingIndex !== -1) {
+      this.accessOrder.splice(existingIndex, 1);
+    }
+    this.accessOrder.push(key);
   }
 
   clearCache(): void {
     this.cache.clear();
+    this.cacheTimestamps.clear();
+    this.accessOrder = [];
+  }
+
+  getCacheStats(): { size: number; maxSize: number; oldestEntry: number } {
+    let oldestTimestamp = Date.now();
+    this.cacheTimestamps.forEach((timestamp: number) => {
+      if (timestamp < oldestTimestamp) {
+        oldestTimestamp = timestamp;
+      }
+    });
+
+    return {
+      size: this.cache.size,
+      maxSize: this.MAX_CACHE_SIZE,
+      oldestEntry: this.cache.size > 0 ? Date.now() - oldestTimestamp : 0
+    };
   }
 
   destroy(): void {
