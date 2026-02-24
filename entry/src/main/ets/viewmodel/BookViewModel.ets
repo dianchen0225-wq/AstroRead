@@ -8,14 +8,14 @@ import {
   SearchStopCondition,
   DEFAULT_STOP_CONDITION
 } from '../models/SearchResult';
-import { BookFoundCallback } from '../utils/BookSourceSearchEngine';
+import { BookFoundCallback, SearchOptions } from '../utils/BookSourceSearchEngine';
 import { databaseManager } from '../utils/DatabaseManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import SearchEnhancer from '../utils/SearchEnhancer';
 import { BookSourceSearchEngine } from '../utils/BookSourceSearchEngine';
 import { Logger } from '../utils/Logger';
 import { IdGenerator } from '../utils/IdGenerator';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 
 const SEARCH_HISTORY_KEY = 'search_history';
@@ -274,15 +274,16 @@ export class BookViewModel {
       
       await this.addToSearchHistory(keyword);
       
+      const searchOptions: SearchOptions = {
+        key: keyword,
+        page: page,
+        pageSize: this.paginationConfig.pageSize,
+        maxResultsPerSource: this.paginationConfig.maxResultsPerSource,
+        stopCondition: stopCondition || DEFAULT_STOP_CONDITION
+      };
       const result = await this.searchEngine.searchWithPaging(
         bookSources,
-        {
-          key: keyword,
-          page: page,
-          pageSize: this.paginationConfig.pageSize,
-          maxResultsPerSource: this.paginationConfig.maxResultsPerSource,
-          stopCondition: stopCondition || DEFAULT_STOP_CONDITION
-        },
+        searchOptions,
         progressCallback,
         bookFoundCallback
       );
@@ -434,5 +435,26 @@ export class BookViewModel {
   async isBookAdded(bookId: string): Promise<boolean> {
     const books = await this.loadAllBooks();
     return books.some((book: Book) => book.id === bookId);
+  }
+
+  /**
+   * 清理资源，防止内存泄漏
+   * 在页面销毁时调用
+   */
+  destroy(): void {
+    Logger.info('BookViewModel', '销毁 BookViewModel，清理资源');
+    
+    // 清理 context 引用
+    this.context = null;
+    
+    // 清理 preferences 引用
+    this.preferences = null;
+    
+    // 重置加载状态
+    this.isLoading = false;
+    this.loadingLockResolver = null;
+    
+    // 清理网络管理器的 context 引用
+    this.networkManager.setContext(null);
   }
 }

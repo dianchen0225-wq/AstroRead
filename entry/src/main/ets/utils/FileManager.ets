@@ -4,11 +4,12 @@
  * 替代 Android SAF/FileProvider
  */
 
-import fs from '@ohos.file.fs';
-import picker from '@ohos.file.picker';
-import util from '@ohos.util';
-import common from '@ohos.app.ability.common';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { picker } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
+import { common } from '@kit.AbilityKit';
 import { Logger } from './Logger';
+import { SecurityUtils } from './SecurityUtils';
 
 export interface FileInfo {
   name: string;
@@ -349,20 +350,25 @@ export class FileManager {
 
   /**
    * 复制文件到应用沙盒
+   * 使用SecurityUtils进行安全验证，修复路径遍历漏洞
    */
   private async copyToSandbox(sourceUri: string, fileName: string): Promise<string> {
     if (!this.context) {
       throw new Error('上下文未设置，请先调用 setContext() 方法');
     }
 
-    const safeFileName = this.sanitizeFileName(fileName);
+    // 使用SecurityUtils清理文件名
+    const safeFileName = SecurityUtils.sanitizeFileName(fileName);
     if (!safeFileName) {
       throw new Error('文件名无效或包含不安全字符');
     }
 
-    const sandboxPath = `${this.context.filesDir}/books/${safeFileName}`;
+    // 使用SecurityUtils构建安全路径
+    const booksDir = `${this.context.filesDir}/books`;
+    const sandboxPath = SecurityUtils.buildSafePath(booksDir, safeFileName);
 
-    if (!this.isPathWithinSandbox(sandboxPath)) {
+    // 使用SecurityUtils验证路径安全
+    if (!SecurityUtils.isSafePath(sandboxPath, this.context.filesDir)) {
       throw new Error('文件路径不在安全沙盒范围内');
     }
 

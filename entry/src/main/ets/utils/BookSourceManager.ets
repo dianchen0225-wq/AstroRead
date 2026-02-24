@@ -7,10 +7,16 @@
 import { BookSource } from '../models/BookSource';
 import { Book } from '../models/Book';
 import BookSourceParser, { BookSourceParser as BookSourceParserClass } from './BookSourceParser';
-import { BookSourceSearchEngine, SearchOptions, SearchResult } from './BookSourceSearchEngine';
+import { BookSourceSearchEngine } from './BookSourceSearchEngine';
+import { 
+  ISearchEngine, 
+  SearchOptions, 
+  SearchResult,
+  SearchEngineConfig 
+} from '../core/interfaces/ISearchEngine';
 import { BookSourceDebugger } from './BookSourceDebugger';
 import { Logger } from './Logger';
-import http from '@ohos.net.http';
+import { http } from '@kit.NetworkKit';
 
 type JsonObject = Record<string, string | number | boolean | object | null | undefined>;
 
@@ -67,14 +73,31 @@ interface SourceValidationResult {
 export class BookSourceManager {
   private static instance: BookSourceManager | null = null;
   private parser: BookSourceParserClass;
-  private searchEngine: BookSourceSearchEngine;
+  private searchEngine: ISearchEngine;
   private debuggerInstance: BookSourceDebugger;
   private sources: BookSource[] = [];
   private readonly TAG = 'BookSourceManager';
-  private constructor() {
+
+  private constructor(searchEngine?: ISearchEngine) {
     this.parser = BookSourceParser;
-    this.searchEngine = BookSourceSearchEngine.getInstance();
+    // 通过依赖注入传入搜索引擎，或默认使用 BookSourceSearchEngine
+    this.searchEngine = searchEngine || BookSourceSearchEngine.getInstance();
     this.debuggerInstance = BookSourceDebugger.getInstance();
+  }
+
+  /**
+   * 设置搜索引擎（用于依赖注入）
+   * @param searchEngine 搜索引擎实例
+   */
+  setSearchEngine(searchEngine: ISearchEngine): void {
+    this.searchEngine = searchEngine;
+  }
+
+  /**
+   * 获取当前搜索引擎
+   */
+  getSearchEngine(): ISearchEngine {
+    return this.searchEngine;
   }
 
   static getInstance(): BookSourceManager {
@@ -82,6 +105,26 @@ export class BookSourceManager {
       BookSourceManager.instance = new BookSourceManager();
     }
     return BookSourceManager.instance;
+  }
+
+  /**
+   * 使用指定的搜索引擎获取实例（用于依赖注入）
+   * @param searchEngine 搜索引擎实例
+   */
+  static getInstanceWithEngine(searchEngine: ISearchEngine): BookSourceManager {
+    if (!BookSourceManager.instance) {
+      BookSourceManager.instance = new BookSourceManager(searchEngine);
+    } else {
+      BookSourceManager.instance.setSearchEngine(searchEngine);
+    }
+    return BookSourceManager.instance;
+  }
+
+  /**
+   * 重置实例（主要用于测试）
+   */
+  static resetInstance(): void {
+    BookSourceManager.instance = null;
   }
 
   /**
@@ -390,8 +433,8 @@ export class BookSourceManager {
       timeout: options.timeout ?? 30000
     };
 
-    const results = await this.searchEngine.search(enabledSources, searchOptions);
-    const books = this.searchEngine.aggregateResults(results);
+    const results: SearchResult[] = await this.searchEngine.search(enabledSources, searchOptions);
+    const books: Book[] = this.searchEngine.aggregateResults(results);
 
     return { results, books };
   }

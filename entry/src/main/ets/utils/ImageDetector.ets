@@ -255,7 +255,7 @@ export class ImageDetector {
   private extractImagesFromJsonLd(json: object): string[] {
     const images: string[] = [];
 
-    const traverse = (obj: unknown) => {
+    const traverse = (obj: Object | null) => {
       if (!obj || typeof obj !== 'object') return;
 
       if (Array.isArray(obj)) {
@@ -263,18 +263,18 @@ export class ImageDetector {
         return;
       }
 
-      const record = obj as Record<string, unknown>;
+      const record = obj as Record<string, Object | null>;
 
       if (record['@type'] === 'Book' || record['@type'] === 'Product') {
         if (record.image) {
           if (typeof record.image === 'string') {
             images.push(record.image);
           } else if (Array.isArray(record.image)) {
-            record.image.forEach((img: unknown) => {
+            record.image.forEach((img: Object | null) => {
               if (typeof img === 'string') images.push(img);
             });
           } else if (typeof record.image === 'object' && record.image !== null) {
-            const imgObj = record.image as Record<string, unknown>;
+            const imgObj = record.image as Record<string, Object | null>;
             if (imgObj.url) images.push(imgObj.url as string);
           }
         }
@@ -283,7 +283,7 @@ export class ImageDetector {
           if (typeof record.thumbnailUrl === 'string') {
             images.push(record.thumbnailUrl);
           } else if (Array.isArray(record.thumbnailUrl)) {
-            record.thumbnailUrl.forEach((url: unknown) => {
+            record.thumbnailUrl.forEach((url: Object | null) => {
               if (typeof url === 'string') images.push(url);
             });
           }

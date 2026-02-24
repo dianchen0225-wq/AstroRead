@@ -8,12 +8,11 @@ import { DesignSystem } from '../common/DesignSystem';
 import { FileManager, FileInfo } from '../utils/FileManager';
 import { TXTParser } from '../utils/TXTParser';
 import { EPUBParser } from '../utils/EPUBParser';
-import { AsyncTXTParser, asyncTXTParser } from '../utils/AsyncTXTParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book, Chapter } from '../models/Book';
 import { Logger } from '../utils/Logger';
-import { NavigationManager } from '../common/NavigationManager';
-import common from '@ohos.app.ability.common';
+import NavigationManager, { NavParams } from '../common/NavigationManager';
+import { common } from '@kit.AbilityKit';
 
 @Entry
 @ComponentV2
@@ -28,7 +27,6 @@ struct ImportPage {
 
   private fileManager = FileManager.getInstance();
   private txtParser = TXTParser.getInstance();
-  private asyncTXTParser = asyncTXTParser;
   private epubParser = EPUBParser.getInstance();
 
   aboutToAppear() {
@@ -85,16 +83,9 @@ struct ImportPage {
     }
   }
 
-  // 解析并保存TXT（使用异步解析器）
+  // 解析并保存TXT
   async parseAndSaveTXT(filePath: string) {
-    // 使用异步解析器，避免主线程阻塞
-    const parseResult = await this.asyncTXTParser.parse(
-      filePath,
-      undefined,
-      (progress: number) => {
-        this.importProgress = `解析进度: ${progress}%`;
-      }
-    );
+    const parseResult = await this.txtParser.parse(filePath);
 
     if (parseResult.success && parseResult.book && parseResult.chapters) {
       // 保存到数据库
@@ -215,7 +206,8 @@ struct ImportPage {
 
     if (book) {
       try {
-        NavigationManager.getInstance().navigateToBookDetail({ bookId: book.id });
+        const navParams: NavParams = { bookId: book.id };
+        NavigationManager.navigateTo('ReadPage', navParams);
       } catch (error) {
         Logger.error('ImportPage', `打开书籍失败: ${error}`);
       }
@@ -288,11 +280,13 @@ struct ImportPage {
           ForEach(this.importedFiles, (file: FileInfo) => {
             ListItem() {
               Row() {
+                // 文件图标
                 Image(this.getFileIcon(file.extension))
                   .width(48)
                   .height(48)
                   .margin({ right: 12 })
 
+                // 文件信息
                 Column() {
                   Text(file.name)
                     .fontSize(16)
@@ -310,6 +304,7 @@ struct ImportPage {
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
 
+                // 操作按钮
                 Row() {
                   Button('打开')
                     .fontSize(12)
@@ -331,7 +326,6 @@ struct ImportPage {
           }, (file: FileInfo) => file.path)
         }
         .width('100%')
-        .height('100%')
         .padding(16)
         .layoutWeight(1)
         .divider({ strokeWidth: 8, color: 'transparent' })

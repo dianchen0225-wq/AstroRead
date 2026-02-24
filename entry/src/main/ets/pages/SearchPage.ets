@@ -5,7 +5,7 @@ import { BookSource } from '../models/BookSource';
 import { Book, SourceStatus } from '../models/Book';
 import { PagedSearchResult, SearchProgress } from '../models/SearchResult';
 import { Logger } from '../utils/Logger';
-import { NavigationManager } from '../common/NavigationManager';
+import { NavigationManager, NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/NetworkManager';
 import { purifyIntro } from '../utils/ContentPurifier';
@@ -148,7 +148,10 @@ export struct SearchPage {
   }
 
   private async performSearch(page: number = 1): Promise<void> {
-    if (!this.searchText.trim()) return;
+    if (!this.searchText?.trim()) {
+      this.errorMessage = '请输入搜索关键词';
+      return;
+    }
 
     this.isSearching = true;
     this.hasSearched = true;
@@ -163,11 +166,11 @@ export struct SearchPage {
     }
 
     try {
-      if (this.bookSources.length === 0) {
+      if (!this.bookSources || this.bookSources.length === 0) {
         await this.loadBookSources();
       }
 
-      if (this.bookSources.length === 0) {
+      if (!this.bookSources || this.bookSources.length === 0) {
         this.errorMessage = '没有可用的书源';
         this.hasEnabledSources = false;
         this.isSearching = false;
@@ -178,28 +181,31 @@ export struct SearchPage {
       this.totalSources = sourcesToUse.length;
 
       const bookViewModel = viewModelManager.getBookViewModel();
-      
+
       const progressCallback = (progress: SearchProgress): void => {
-        if (this.isComponentActive) {
-          this.completedSources = progress.completedSources;
-          this.foundBooksCount = progress.foundBooks;
-          this.searchProgress = `正在搜索 ${progress.currentSource}...`;
+        if (this.isComponentActive && progress) {
+          this.completedSources = progress.completedSources ?? 0;
+          this.foundBooksCount = progress.foundBooks ?? 0;
+          this.searchProgress = `正在搜索 ${progress.currentSource ?? '未知书源'}...`;
         }
       };
 
       const bookFoundCallback = (newBooks: Book[], _progress: SearchProgress): void => {
-        if (this.isComponentActive && page === 1) {
+        if (this.isComponentActive && page === 1 && newBooks && newBooks.length > 0) {
           for (const book of newBooks) {
+            if (!book) continue;
+
             const exists = this.searchResults.some(b => {
+              if (!b || !book) return false;
               if (b.bookSourceId && book.bookSourceId) {
-                return b.name === book.name && 
-                       (b.author || '') === (book.author || '') && 
+                return b.name === book.name &&
+                       (b.author ?? '') === (book.author ?? '') &&
                        b.bookSourceId === book.bookSourceId;
               }
               if (b.bookUrl && book.bookUrl) {
                 return b.bookUrl === book.bookUrl;
               }
-              return b.name === book.name && (b.author || '') === (book.author || '');
+              return b.name === book.name && (b.author ?? '') === (book.author ?? '');
             });
             if (!exists) {
               this.searchResults = this.addBookToArray(this.searchResults, book);
@@ -217,18 +223,18 @@ export struct SearchPage {
         bookFoundCallback
       );
 
-      if (this.isComponentActive) {
+      if (this.isComponentActive && result) {
         if (page === 1) {
-          this.searchResults = result.books;
+          this.searchResults = result.books ?? [];
         } else {
-          this.searchResults = this.mergeBookArrays(this.searchResults, result.books);
+          this.searchResults = this.mergeBookArrays(this.searchResults, result.books ?? []);
         }
-        this.currentPage = result.currentPage;
-        this.totalPages = result.totalPages;
-        this.totalCount = result.totalCount;
-        this.hasMore = result.hasMore;
+        this.currentPage = result.currentPage ?? 1;
+        this.totalPages = result.totalPages ?? 1;
+        this.totalCount = result.totalCount ?? 0;
+        this.hasMore = result.hasMore ?? false;
 
-        if (result.totalCount === 0) {
+        if (this.totalCount === 0) {
           this.errorMessage = '当前启用的书源无匹配结果';
         }
       }
@@ -237,7 +243,7 @@ export struct SearchPage {
       Logger.error('SearchPage', `搜索失败: ${error}`);
       if (this.isComponentActive) {
         const errorMsg = error instanceof Error ? error.message : '未知错误';
-        
+
         if (errorMsg.includes('network') || errorMsg.includes('网络')) {
           this.errorMessage = '网络连接失败，请检查网络设置';
         } else if (errorMsg.includes('timeout') || errorMsg.includes('超时')) {
@@ -250,8 +256,8 @@ export struct SearchPage {
       if (this.isComponentActive) {
         this.isSearching = false;
         this.searchProgress = '';
-        
-        if (this.searchResults.length >= 50) {
+
+        if (this.searchResults && this.searchResults.length >= 50) {
           this.validateBooksSources();
         }
       }
@@ -350,14 +356,16 @@ export struct SearchPage {
   private async openBook(book: Book): Promise<void> {
     try {
       await this.addToBookshelf(book);
-      NavigationManager.getInstance().navigateTo('BookDetailPage', { bookId: book.id });
+      const params: NavParams = { bookId: book.id };
+      NavigationManager.getInstance().navigateTo('BookDetailPage', params);
     } catch (error) {
       Logger.error('SearchPage', `打开书籍失败: ${error}`);
     }
   }
 
   private navigateToSourcePage(): void {
-    NavigationManager.getInstance().navigateTo('MainPage', { tabIndex: 3 });
+    const params: NavParams = { tabIndex: 3 };
+    NavigationManager.getInstance().navigateTo('MainPage', params);
   }
 
   private async clearSearchHistory(): Promise<void> {
@@ -675,9 +683,9 @@ export struct SearchPage {
         Text(`共 ${this.totalCount} 本书籍`)
           .fontSize(DesignSystem.Typography.size.sm)
           .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-        
+
         Blank()
-        
+
         Text(`第 ${this.currentPage}/${this.totalPages} 页`)
           .fontSize(DesignSystem.Typography.size.xs)
           .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
@@ -689,13 +697,65 @@ export struct SearchPage {
         this.buildFilterBar()
       }
 
-      this.buildResultsList()
+      // 空列表处理
+      if (this.searchResults.length === 0) {
+        this.buildEmptyResultsState()
+      } else {
+        this.buildResultsList()
+      }
 
       if (this.totalPages > 1) {
         this.buildPagination()
       }
     }
     .width('100%')
+  }
+
+  @Builder
+  buildEmptyResultsState() {
+    Column() {
+      Text('📚')
+        .fontSize(48)
+        .margin({ bottom: DesignSystem.Spacing.md })
+
+      Text('暂无搜索结果')
+        .fontSize(DesignSystem.Typography.size.base)
+        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+        .fontWeight(DesignSystem.Typography.weight.medium)
+        .margin({ bottom: DesignSystem.Spacing.xs })
+
+      Text('请尝试其他关键词或检查书源配置')
+        .fontSize(DesignSystem.Typography.size.sm)
+        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: DesignSystem.Spacing.md })
+
+      Row() {
+        Text('更换关键词')
+          .fontSize(DesignSystem.Typography.size.sm)
+          .fontColor('#FFFFFF')
+      }
+      .padding({
+        left: DesignSystem.Spacing.lg,
+        right: DesignSystem.Spacing.lg,
+        top: DesignSystem.Spacing.sm,
+        bottom: DesignSystem.Spacing.sm
+      })
+      .borderRadius(DesignSystem.BorderRadius.md)
+      .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
+      .onClick(() => {
+        // 聚焦搜索框
+      })
+    }
+    .width('100%')
+    .padding(DesignSystem.Spacing.xxl)
+    .margin({ top: DesignSystem.Spacing.lg })
+    .borderRadius(DesignSystem.BorderRadius.xl)
+    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+    .border({
+      width: 1,
+      color: DesignSystem.getBorderColor(this.isLightMode)
+    })
   }
 
   @Builder

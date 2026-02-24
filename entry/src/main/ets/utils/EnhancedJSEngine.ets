@@ -1,13 +1,14 @@
 /**
  * EnhancedJSEngine - 增强版 JavaScript 引擎
- * 使用安全表达式解析器，不依赖 eval 或 new Function()
+ * 使用 ScriptEngine 解释器，支持完整脚本语法
  * 支持 HarmonyOS 安全沙箱环境
  */
 
 import { Logger } from './Logger';
 import { HTMLParser } from './HTMLParser';
 import { NetworkAdapter } from './NetworkAdapter';
-import { SafeExpressionEngine, ExpressionContext } from './SafeExpressionEngine';
+import { ScriptEngine, ScriptContext } from './ScriptEngine';
+import { JSSecurityConfig, SecurityValidationResult } from './JSSecurityConfig';
 
 export interface JSExecutionResult {
   success: boolean;
@@ -22,18 +23,20 @@ export interface JSContext {
   baseUrl?: string;
 }
 
-type CacheValue = Record<string, string | number | boolean | object | null | undefined>;
-
-interface AssignmentResult {
-  name: string;
-  value: string;
+export interface CacheStats {
+  size: number;
+  maxSize: number;
+  oldestEntry: number;
 }
+
+type CacheValue = Record<string, string | number | boolean | object | null | undefined>;
 
 export class EnhancedJSEngine {
   private static instance: EnhancedJSEngine | null = null;
   private htmlParser: HTMLParser;
   private networkAdapter: NetworkAdapter;
-  private expressionEngine: SafeExpressionEngine;
+  private scriptEngine: ScriptEngine;
+  private securityConfig: JSSecurityConfig;
   private cache: Map<string, CacheValue> = new Map();
   private readonly TAG = 'EnhancedJSEngine';
 
@@ -45,7 +48,8 @@ export class EnhancedJSEngine {
   private constructor() {
     this.htmlParser = HTMLParser.getInstance();
     this.networkAdapter = NetworkAdapter.getInstance();
-    this.expressionEngine = SafeExpressionEngine.getInstance();
+    this.scriptEngine = ScriptEngine.getInstance();
+    this.securityConfig = JSSecurityConfig.getInstance();
   }
 
   static getInstance(): EnhancedJSEngine {
@@ -59,26 +63,33 @@ export class EnhancedJSEngine {
     try {
       const jsCode = script.replace(/^@js:\s*/i, '').trim();
 
-      const contextData: ExpressionContext = {
-        key: context.key,
+      // 安全验证脚本
+      const validation = this.securityConfig.validateScript(jsCode);
+      if (!validation.valid) {
+        Logger.error(this.TAG, `搜索URL脚本安全验证失败: ${validation.error}`);
+        return '';
+      }
+
+      // 净化上下文输入
+      const sanitizedContext: JSContext = {
+        key: context.key ? this.securityConfig.sanitizeInput(context.key) : undefined,
         page: context.page,
-        baseUrl: context.baseUrl,
-        result: context.result
+        baseUrl: context.baseUrl ? this.securityConfig.sanitizeInput(context.baseUrl) : undefined,
+        result: context.result ? this.securityConfig.sanitizeInput(context.result) : undefined
+      };
+
+      const contextData: ScriptContext = {
+        key: sanitizedContext.key,
+        page: sanitizedContext.page,
+        baseUrl: sanitizedContext.baseUrl,
+        result: sanitizedContext.result
       };
 
       if (this.isSimpleUrlTemplate(jsCode)) {
-        return this.processUrlTemplate(jsCode, context);
+        return this.processUrlTemplate(jsCode, sanitizedContext);
       }
 
-      if (this.isTemplateString(jsCode)) {
-        return this.expressionEngine.evaluateAsString(jsCode, contextData);
-      }
-
-      if (this.isSimpleExpression(jsCode)) {
-        return this.expressionEngine.evaluateAsString(jsCode, contextData);
-      }
-
-      return this.evaluateComplexScript(jsCode, context);
+      return this.scriptEngine.executeAsString(jsCode, contextData);
     } catch (error) {
       Logger.error(this.TAG, `执行搜索 URL 脚本失败: ${error}`);
       return '';
@@ -88,31 +99,6 @@ export class EnhancedJSEngine {
   private isSimpleUrlTemplate(code: string): boolean {
     return code.includes('{{key}}') || code.includes('{{page}}') ||
     code.includes('searchKey') || code.includes('searchPage');
-  }
-
-  private isTemplateString(code: string): boolean {
-    return code.includes('{{') && code.includes('}}');
-  }
-
-  private isSimpleExpression(code: string): boolean {
-    const simplePatterns = [
-      /^[a-zA-Z_$][a-zA-Z0-9_$]*$/,
-      /^[a-zA-Z_$][a-zA-Z0-9_$]*\s*[+\-*/]\s*('[^']*'|"[^"]*"|\d+|[a-zA-Z_$][a-zA-Z0-9_$]*)$/,
-      /^[a-zA-Z_$][a-zA-Z0-9_$]*\([^)]*\)$/,
-      /^encodeURI(Component)?\([^)]*\)$/,
-      /^decodeURI(Component)?\([^)]*\)$/,
-      /^String2?\([^)]*\)$/,
-      /^base64(Encode|Decode)\([^)]*\)$/,
-      /^replace\([^)]+\)$/,
-      /^match\([^)]+\)$/
-    ];
-
-    for (const pattern of simplePatterns) {
-      if (pattern.test(code.trim())) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private processUrlTemplate(template: string, context: JSContext): string {
@@ -137,153 +123,40 @@ export class EnhancedJSEngine {
     return result;
   }
 
-  private evaluateComplexScript(code: string, context: JSContext): string {
-    const contextData: ExpressionContext = {
-      key: context.key,
-      page: context.page,
-      baseUrl: context.baseUrl,
-      result: context.result
-    };
-
-    const lines = code.split(/[;\n]/);
-    let lastResult = '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      if (trimmed.startsWith('//')) continue;
-
-      if (trimmed.startsWith('let ') || trimmed.startsWith('const ') || trimmed.startsWith('var ')) {
-        const assignment = this.parseAssignment(trimmed);
-        if (assignment) {
-          const value = this.expressionEngine.evaluate(assignment.value, contextData);
-          this.setCacheValue(assignment.name, value);
-        }
-        continue;
-      }
-
-      if (trimmed.includes('=') && !trimmed.includes('==') && !trimmed.includes('===')) {
-        const assignment = this.parseAssignment(trimmed);
-        if (assignment) {
-          const value = this.expressionEngine.evaluate(assignment.value, contextData);
-          this.setCacheValue(assignment.name, value);
-          lastResult = String(value ?? '');
-        }
-        continue;
-      }
-
-      if (trimmed.startsWith('return ')) {
-        const returnExpr = trimmed.substring(7).trim();
-        return this.expressionEngine.evaluateAsString(returnExpr, contextData);
-      }
-
-      lastResult = this.expressionEngine.evaluateAsString(trimmed, contextData);
-    }
-
-    return lastResult;
-  }
-
-  private parseAssignment(line: string): AssignmentResult | null {
-    const match = line.match(/^(?:let|const|var)?\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(.+)$/);
-    if (match) {
-      const result: AssignmentResult = {
-        name: match[1],
-        value: match[2].trim()
-      };
-      return result;
-    }
-    return null;
-  }
-
-  private setCacheValue(name: string, value: string | number | boolean | object | null): void {
-    const cacheKey = `var_${name}`;
-
-    this.cleanupExpiredCache();
-
-    if (this.cache.size >= this.MAX_CACHE_SIZE && !this.cache.has(cacheKey)) {
-      this.evictLRU();
-    }
-
-    const cacheData: CacheValue = {};
-    cacheData['value'] = value;
-    this.cache.set(cacheKey, cacheData);
-    this.cacheTimestamps.set(cacheKey, Date.now());
-
-    const existingIndex = this.accessOrder.indexOf(cacheKey);
-    if (existingIndex !== -1) {
-      this.accessOrder.splice(existingIndex, 1);
-    }
-    this.accessOrder.push(cacheKey);
-  }
-
-  private getCacheValue(name: string): string | number | boolean | object | null {
-    const cacheKey = `var_${name}`;
-
-    const timestamp = this.cacheTimestamps.get(cacheKey);
-    if (timestamp && Date.now() - timestamp > this.CACHE_TTL) {
-      this.removeCacheEntry(cacheKey);
-      return null;
-    }
-
-    const cached = this.cache.get(cacheKey);
-    if (cached) {
-      const existingIndex = this.accessOrder.indexOf(cacheKey);
-      if (existingIndex !== -1) {
-        this.accessOrder.splice(existingIndex, 1);
-        this.accessOrder.push(cacheKey);
-      }
-    }
-    return cached?.value ?? null;
-  }
-
-  private cleanupExpiredCache(): void {
-    const now = Date.now();
-    const keysToDelete: string[] = [];
-
-    this.cacheTimestamps.forEach((timestamp: number, key: string) => {
-      if (now - timestamp > this.CACHE_TTL) {
-        keysToDelete.push(key);
-      }
-    });
-
-    for (const key of keysToDelete) {
-      this.removeCacheEntry(key);
-    }
-  }
-
-  private evictLRU(): void {
-    if (this.accessOrder.length === 0) return;
-
-    const lruKey = this.accessOrder.shift();
-    if (lruKey) {
-      this.removeCacheEntry(lruKey);
-      Logger.debug(this.TAG, `LRU淘汰缓存: ${lruKey}`);
-    }
-  }
-
-  private removeCacheEntry(key: string): void {
-    this.cache.delete(key);
-    this.cacheTimestamps.delete(key);
-    const index = this.accessOrder.indexOf(key);
-    if (index !== -1) {
-      this.accessOrder.splice(index, 1);
-    }
-  }
-
   async executeRule(html: string, rule: string, baseUrl: string = ''): Promise<string> {
     try {
       if (!rule) return html;
 
+      // 净化输入
+      const sanitizedHtml = this.securityConfig.sanitizeInput(html);
+      const sanitizedBaseUrl = this.securityConfig.sanitizeInput(baseUrl);
+
       if (rule.startsWith('@js:')) {
         const jsCode = rule.substring(4).trim();
-        return this.evaluateRuleScript(jsCode, html, baseUrl);
+        
+        // 安全验证
+        const validation = this.securityConfig.validateScript(jsCode);
+        if (!validation.valid) {
+          Logger.error(this.TAG, `规则脚本安全验证失败: ${validation.error}`);
+          return '';
+        }
+        
+        return this.evaluateRuleScript(jsCode, sanitizedHtml, sanitizedBaseUrl);
       }
 
       if (rule.includes('<js>')) {
         const jsMatch = rule.match(/<js>([\s\S]*?)<\/js>/);
         if (jsMatch) {
-          return this.evaluateRuleScript(jsMatch[1], html, baseUrl);
+          const jsCode = jsMatch[1];
+          
+          // 安全验证
+          const validation = this.securityConfig.validateScript(jsCode);
+          if (!validation.valid) {
+            Logger.error(this.TAG, `规则脚本安全验证失败: ${validation.error}`);
+            return '';
+          }
+          
+          return this.evaluateRuleScript(jsCode, sanitizedHtml, sanitizedBaseUrl);
         }
       }
 
@@ -308,16 +181,12 @@ export class EnhancedJSEngine {
   }
 
   private evaluateRuleScript(jsCode: string, html: string, baseUrl: string): string {
-    const contextData: ExpressionContext = {
+    const contextData: ScriptContext = {
       result: html,
       baseUrl: baseUrl
     };
 
-    if (this.isSimpleExpression(jsCode)) {
-      return this.expressionEngine.evaluateAsString(jsCode, contextData);
-    }
-
-    return this.evaluateComplexScript(jsCode, { result: html, baseUrl });
+    return this.scriptEngine.executeAsString(jsCode, contextData);
   }
 
   async executeRuleList(html: string, rule: string, baseUrl: string = ''): Promise<string[]> {
@@ -363,13 +232,47 @@ export class EnhancedJSEngine {
     this.accessOrder.push(key);
   }
 
+  private cleanupExpiredCache(): void {
+    const now = Date.now();
+    const keysToDelete: string[] = [];
+
+    this.cacheTimestamps.forEach((timestamp: number, key: string) => {
+      if (now - timestamp > this.CACHE_TTL) {
+        keysToDelete.push(key);
+      }
+    });
+
+    for (const key of keysToDelete) {
+      this.removeCacheEntry(key);
+    }
+  }
+
+  private evictLRU(): void {
+    if (this.accessOrder.length === 0) return;
+
+    const lruKey = this.accessOrder.shift();
+    if (lruKey) {
+      this.removeCacheEntry(lruKey);
+      Logger.debug(this.TAG, `LRU淘汰缓存: ${lruKey}`);
+    }
+  }
+
+  private removeCacheEntry(key: string): void {
+    this.cache.delete(key);
+    this.cacheTimestamps.delete(key);
+    const index = this.accessOrder.indexOf(key);
+    if (index !== -1) {
+      this.accessOrder.splice(index, 1);
+    }
+  }
+
   clearCache(): void {
     this.cache.clear();
     this.cacheTimestamps.clear();
     this.accessOrder = [];
   }
 
-  getCacheStats(): { size: number; maxSize: number; oldestEntry: number } {
+  getCacheStats(): CacheStats {
     let oldestTimestamp = Date.now();
     this.cacheTimestamps.forEach((timestamp: number) => {
       if (timestamp < oldestTimestamp) {
@@ -377,11 +280,12 @@ export class EnhancedJSEngine {
       }
     });
 
-    return {
+    const stats: CacheStats = {
       size: this.cache.size,
       maxSize: this.MAX_CACHE_SIZE,
       oldestEntry: this.cache.size > 0 ? Date.now() - oldestTimestamp : 0
     };
+    return stats;
   }
 
   destroy(): void {

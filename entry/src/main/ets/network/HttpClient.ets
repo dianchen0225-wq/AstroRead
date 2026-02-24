@@ -1,9 +1,10 @@
 /**
  * HttpClient - 统一网络请求客户端
  * 提供统一的 HTTP 请求服务
+ * 增强版：添加请求体脱敏和日志级别控制
  */
 
-import http from '@ohos.net.http';
+import { http } from '@kit.NetworkKit';
 import {
   IHttpClient,
   HttpClientConfig,
@@ -27,6 +28,19 @@ import { CookieManager } from './CookieManager';
 import { RequestBuilder } from './RequestBuilder';
 import { ResponseParser } from './ResponseParser';
 import { MetricsCollector } from './MetricsCollector';
+import { Logger, LogLevel } from '../utils/Logger';
+
+/**
+ * 敏感字段列表（用于请求体脱敏）
+ */
+const SENSITIVE_BODY_FIELDS: string[] = [
+  'password', 'passwd', 'pwd', 'token', 'access_token', 'refresh_token',
+  'secret', 'api_key', 'apikey', 'private_key', 'authorization',
+  'credential', 'auth', 'session', 'cookie', 'csrf_token',
+  'card_number', 'cvv', 'cvc', 'ssn', 'pin'
+];
+
+const MASK = '******';
 
 /**
  * HTTP客户端
@@ -44,7 +58,7 @@ export class HttpClient implements IHttpClient {
 
   private constructor(config?: HttpClientConfig) {
     this.configManager = new ConfigManager(config);
-    this.cookieManager = new CookieManager();
+    this.cookieManager = CookieManager.getInstance();
     this.interceptors = new InterceptorManager();
     this.metricsCollector = new MetricsCollector(
       this.TAG,
@@ -78,7 +92,7 @@ export class HttpClient implements IHttpClient {
 
     // 响应拦截器：处理Set-Cookie
     this.interceptors.useResponseInterceptor(
-      (response: HttpResponse<void>) => this.handleResponseCookie(response),
+      (response: HttpResponse<ESObject>) => this.handleResponseCookie(response as HttpResponse<void>) as HttpResponse<ESObject>,
       undefined,
       { priority: 100, id: 'cookie-handler' }
     );
@@ -477,8 +491,17 @@ export class HttpClient implements IHttpClient {
    * 添加响应拦截器
    */
   addResponseInterceptor(interceptor: ResponseInterceptor): string {
+    const handler = interceptor.onResponse
+      ? (r: HttpResponse<ESObject>) => {
+          const result = interceptor.onResponse!(r as HttpResponse<void>);
+          if (result instanceof Promise) {
+            return result.then(res => res as HttpResponse<ESObject>);
+          }
+          return result as HttpResponse<ESObject>;
+        }
+      : (r: HttpResponse<ESObject>) => r;
     return this.interceptors.useResponseInterceptor(
-      interceptor.onResponse ?? ((r: HttpResponse<ESObject>) => r),
+      handler,
       interceptor.onResponseError,
       { priority: interceptor.priority, id: interceptor.id }
     );
@@ -597,6 +620,127 @@ export class HttpClient implements IHttpClient {
   private generateRequestId(): string {
     this.requestIdCounter++;
     return `req_${Date.now()}_${this.requestIdCounter}`;
+  }
+  
+  /**
+   * 脱敏处理请求体
+   * 用于日志输出时保护敏感信息
+   */
+  private sanitizeRequestBody(data: HttpData | undefined): string {
+    if (!data) return '';
+    
+    try {
+      // 如果是字符串，尝试解析为JSON
+      if (typeof data === 'string') {
+        // 检查是否是JSON
+        if (data.startsWith('{') || data.startsWith('[')) {
+          try {
+            const parsed: object = JSON.parse(data) as object;
+            const sanitized = this.sanitizeObject(parsed as Record<string, Object>);
+            return JSON.stringify(sanitized);
+          } catch {
+            // 不是有效JSON，检查是否包含敏感字段
+            return this.sanitizeString(data);
+          }
+        }
+        return this.sanitizeString(data);
+      }
+      
+      // 如果是对象
+      if (typeof data === 'object') {
+        const sanitized = this.sanitizeObject(data as Record<string, Object>);
+        return JSON.stringify(sanitized);
+      }
+      
+      return String(data);
+    } catch {
+      return '[DATA_SANITIZATION_ERROR]';
+    }
+  }
+  
+  /**
+   * 脱敏处理对象
+   */
+  private sanitizeObject(obj: Record<string, Object> | Object[]): Record<string, Object> | Object[] {
+    if (Array.isArray(obj)) {
+      return obj.map(item => {
+        if (typeof item === 'object' && item !== null) {
+          return this.sanitizeObject(item as Record<string, Object>);
+        }
+        return item;
+      });
+    }
+    
+    const result: Record<string, Object> = {};
+    const entries = Object.entries(obj);
+    for (let i = 0; i < entries.length; i++) {
+      const key = entries[i][0];
+      const value = entries[i][1];
+      const lowerKey = key.toLowerCase();
+      
+      // 检查是否是敏感字段
+      let isSensitive = false;
+      for (const sensitiveField of SENSITIVE_BODY_FIELDS) {
+        if (lowerKey.includes(sensitiveField)) {
+          isSensitive = true;
+          break;
+        }
+      }
+      
+      if (isSensitive) {
+        result[key] = MASK;
+      } else if (typeof value === 'object' && value !== null) {
+        result[key] = this.sanitizeObject(value as Record<string, Object>);
+      } else if (typeof value === 'string') {
+        result[key] = this.sanitizeString(value);
+      } else {
+        result[key] = value;
+      }
+    }
+    
+    return result;
+  }
+  
+  /**
+   * 脱敏处理字符串
+   */
+  private sanitizeString(str: string): string {
+    let sanitized = str;
+    
+    // 检查并替换敏感字段模式
+    for (const field of SENSITIVE_BODY_FIELDS) {
+      const patterns = [
+        new RegExp(`(${field}[=:]\\s*)[^&\\s,;]+`, 'gi'),
+        new RegExp(`"${field}"\\s*:\\s*"[^"]*"`, 'gi'),
+        new RegExp(`'${field}'\\s*:\\s*'[^']*'`, 'gi'),
+      ];
+      
+      for (const pattern of patterns) {
+        sanitized = sanitized.replace(pattern, `$1${MASK}`);
+      }
+    }
+    
+    // 替换JWT token
+    sanitized = sanitized.replace(/\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*/g, '[JWT_TOKEN]');
+    
+    // 替换长Base64字符串
+    sanitized = sanitized.replace(/\b[A-Za-z0-9+/]{40,}={0,2}\b/g, '[BASE64_DATA]');
+    
+    return sanitized;
+  }
+  
+  /**
+   * 设置日志级别
+   */
+  setLogLevel(level: LogLevel): void {
+    Logger.setLogLevel(level);
+  }
+  
+  /**
+   * 启用/禁用生产模式
+   */
+  setProductionMode(enabled: boolean): void {
+    Logger.setProductionMode(enabled);
   }
 }
 

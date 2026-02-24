@@ -1,4 +1,4 @@
-import relationalStore from '@ohos.data.relationalStore';
+import { relationalStore } from '@kit.ArkData';
 import { ReadConfig, MarginsConfig, DEFAULT_READ_CONFIG } from '../../models/ReadConfig';
 import { Logger } from '../Logger';
 

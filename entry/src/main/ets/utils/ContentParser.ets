@@ -4,6 +4,7 @@ import { CssSelectorParser } from './CssSelectorParser';
 import { AsyncCssSelectorParser } from './AsyncCssSelectorParser';
 import { Logger } from './Logger';
 import { EntityDecoder } from '../core/utils/EntityDecoder';
+import { SafeRegex } from './SafeRegex';
 
 export interface ParsedBookItem {
   name?: string;
@@ -356,50 +357,70 @@ export class ContentParser {
 
   private static parseByRegex(html: string, listRule: string, rule: SearchRule): ParsedBookItem[] {
     try {
+      // 验证输入安全性
+      if (!SafeRegex.isInputSafe(html)) {
+        Logger.warn(ContentParser.TAG, '输入内容未通过安全检查');
+        return [];
+      }
+
+      // 净化正则表达式模式
+      const sanitizedListRule = SafeRegex.sanitizePattern(listRule);
+      if (!sanitizedListRule) {
+        Logger.warn(ContentParser.TAG, '列表规则为空或无效');
+        return [];
+      }
+
       const books: ParsedBookItem[] = [];
 
-      const listRegex = new RegExp(listRule.replace(/^\(\?s\)/, ''), listRule.startsWith('(?s)') ? 'gs' : 'g');
-      const listMatches = html.matchAll(listRegex);
+      // 使用安全的全局匹配
+      const listPattern = sanitizedListRule.replace(/^\(\?s\)/, '');
+      const listFlags = sanitizedListRule.startsWith('(?s)') ? 'gs' : 'g';
+      const listMatches = SafeRegex.safeMatchAll(listPattern, html, listFlags);
 
       for (const match of listMatches) {
         const bookItem: ParsedBookItem = {};
-        const matchStr = match[0] || match[1] || '';
+        const matchStr = match.getGroup(0) || match.getGroup(1) || '';
 
         if (rule.name) {
-          const nameRegex = new RegExp(rule.name.replace(/^\(\?s\)/, ''), rule.name.startsWith('(?s)') ? 's' : '');
-          const nameMatch = matchStr.match(nameRegex);
+          const namePattern = SafeRegex.sanitizePattern(rule.name).replace(/^\(\?s\)/, '');
+          const nameFlags = rule.name.startsWith('(?s)') ? 's' : '';
+          const nameMatch = SafeRegex.safeMatch(namePattern, matchStr, nameFlags);
           if (nameMatch) {
             bookItem.name = ContentParser.cleanText(nameMatch[1] || nameMatch[0]);
           }
         }
 
         if (rule.author) {
-          const authorRegex = new RegExp(rule.author.replace(/^\(\?s\)/, ''), rule.author.startsWith('(?s)') ? 's' : '');
-          const authorMatch = matchStr.match(authorRegex);
+          const authorPattern = SafeRegex.sanitizePattern(rule.author).replace(/^\(\?s\)/, '');
+          const authorFlags = rule.author.startsWith('(?s)') ? 's' : '';
+          const authorMatch = SafeRegex.safeMatch(authorPattern, matchStr, authorFlags);
           if (authorMatch) {
             bookItem.author = ContentParser.cleanText(authorMatch[1] || authorMatch[0]);
           }
         }
 
         if (rule.cover) {
-          const coverRegex = new RegExp(rule.cover.replace(/^\(\?s\)/, ''), rule.cover.startsWith('(?s)') ? 's' : '');
-          const coverMatch = matchStr.match(coverRegex);
+          const coverPattern = SafeRegex.sanitizePattern(rule.cover).replace(/^\(\?s\)/, '');
+          const coverFlags = rule.cover.startsWith('(?s)') ? 's' : '';
+          const coverMatch = SafeRegex.safeMatch(coverPattern, matchStr, coverFlags);
           if (coverMatch) {
             bookItem.cover = ContentParser.cleanUrl(coverMatch[1] || coverMatch[0]);
           }
         }
 
         if (rule.intro) {
-          const introRegex = new RegExp(rule.intro.replace(/^\(\?s\)/, ''), rule.intro.startsWith('(?s)') ? 's' : '');
-          const introMatch = matchStr.match(introRegex);
+          const introPattern = SafeRegex.sanitizePattern(rule.intro).replace(/^\(\?s\)/, '');
+          const introFlags = rule.intro.startsWith('(?s)') ? 's' : '';
+          const introMatch = SafeRegex.safeMatch(introPattern, matchStr, introFlags);
           if (introMatch) {
             bookItem.intro = ContentParser.cleanText(introMatch[1] || introMatch[0]);
           }
         }
 
         if (rule.bookUrl) {
-          const urlRegex = new RegExp(rule.bookUrl.replace(/^\(\?s\)/, ''), rule.bookUrl.startsWith('(?s)') ? 's' : '');
-          const urlMatch = matchStr.match(urlRegex);
+          const urlPattern = SafeRegex.sanitizePattern(rule.bookUrl).replace(/^\(\?s\)/, '');
+          const urlFlags = rule.bookUrl.startsWith('(?s)') ? 's' : '';
+          const urlMatch = SafeRegex.safeMatch(urlPattern, matchStr, urlFlags);
           if (urlMatch) {
             bookItem.bookUrl = ContentParser.cleanUrl(urlMatch[1] || urlMatch[0]);
           }
@@ -419,10 +440,25 @@ export class ContentParser {
 
   private static parseChaptersByRegex(html: string, listRule: string, rule: ChapterRule): ParsedChapterItem[] {
     try {
+      // 验证输入安全性
+      if (!SafeRegex.isInputSafe(html)) {
+        Logger.warn(ContentParser.TAG, '输入内容未通过安全检查');
+        return [];
+      }
+
+      // 净化正则表达式模式
+      const sanitizedListRule = SafeRegex.sanitizePattern(listRule);
+      if (!sanitizedListRule) {
+        Logger.warn(ContentParser.TAG, '列表规则为空或无效');
+        return [];
+      }
+
       const chapters: ParsedChapterItem[] = [];
 
-      const listRegex = new RegExp(listRule.replace(/^\(\?s\)/, ''), listRule.startsWith('(?s)') ? 'gs' : 'g');
-      const listMatches = html.matchAll(listRegex);
+      // 使用安全的全局匹配
+      const listPattern = sanitizedListRule.replace(/^\(\?s\)/, '');
+      const listFlags = sanitizedListRule.startsWith('(?s)') ? 'gs' : 'g';
+      const listMatches = SafeRegex.safeMatchAll(listPattern, html, listFlags);
 
       let order = 0;
       for (const match of listMatches) {
@@ -432,19 +468,21 @@ export class ContentParser {
           isVip: false,
           order: 0
         };
-        const matchStr = match[0] || match[1] || '';
+        const matchStr = match.getGroup(0) || match.getGroup(1) || '';
 
         if (rule.chapterName) {
-          const nameRegex = new RegExp(rule.chapterName.replace(/^\(\?s\)/, ''), rule.chapterName.startsWith('(?s)') ? 's' : '');
-          const nameMatch = matchStr.match(nameRegex);
+          const namePattern = SafeRegex.sanitizePattern(rule.chapterName).replace(/^\(\?s\)/, '');
+          const nameFlags = rule.chapterName.startsWith('(?s)') ? 's' : '';
+          const nameMatch = SafeRegex.safeMatch(namePattern, matchStr, nameFlags);
           if (nameMatch) {
             chapterItem.title = ContentParser.cleanText(nameMatch[1] || nameMatch[0]);
           }
         }
 
         if (rule.chapterUrl) {
-          const urlRegex = new RegExp(rule.chapterUrl.replace(/^\(\?s\)/, ''), rule.chapterUrl.startsWith('(?s)') ? 's' : '');
-          const urlMatch = matchStr.match(urlRegex);
+          const urlPattern = SafeRegex.sanitizePattern(rule.chapterUrl).replace(/^\(\?s\)/, '');
+          const urlFlags = rule.chapterUrl.startsWith('(?s)') ? 's' : '';
+          const urlMatch = SafeRegex.safeMatch(urlPattern, matchStr, urlFlags);
           if (urlMatch) {
             chapterItem.url = ContentParser.cleanUrl(urlMatch[1] || urlMatch[0]);
           }
@@ -568,35 +606,45 @@ export class ContentParser {
 
   static purifyContent(content: string, replaceRule?: ReplaceRuleConfig): string {
     try {
+      // 验证输入安全性
+      if (!SafeRegex.isInputSafe(content)) {
+        Logger.warn(ContentParser.TAG, '输入内容未通过安全检查');
+        return content;
+      }
+
       let purified = content;
 
       if (replaceRule?.removeHtmlTags) {
-        purified = purified.replace(/<[^>]+>/g, '');
+        purified = SafeRegex.safeReplace(purified, '<[^>]+>', '');
       }
 
       if (replaceRule?.removeTags) {
         replaceRule.removeTags.forEach((tag: string) => {
-          const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'gi');
-          purified = purified.replace(regex, '');
+          // 净化标签名，防止注入
+          const sanitizedTag = tag.replace(/[^a-zA-Z0-9]/g, '');
+          if (sanitizedTag) {
+            const pattern = `<${sanitizedTag}[^>]*>([\\s\\S]*?)</${sanitizedTag}>`;
+            purified = SafeRegex.safeReplace(purified, pattern, '');
+          }
         });
       }
 
       if (replaceRule?.replace) {
         replaceRule.replace.forEach((rule: ReplaceRuleItem) => {
-          const regex = new RegExp(rule.from, 'g');
-          purified = purified.replace(regex, rule.to);
+          // 使用安全的替换方法
+          purified = SafeRegex.safeReplace(purified, rule.from, rule.to);
         });
       }
 
       purified = EntityDecoder.decode(purified);
 
-      purified = purified.replace(/\s+/g, ' ');
-      purified = purified.replace(/[\n\r]+/g, '\n');
-
-      purified = purified.replace(/[！!]+/g, '！');
-      purified = purified.replace(/[。.]+/g, '。');
-      purified = purified.replace(/[,，]+/g, '，');
-      purified = purified.replace(/[;；]+/g, '；');
+      // 使用安全的替换方法处理格式化
+      purified = SafeRegex.safeReplace(purified, '\\s+', ' ');
+      purified = SafeRegex.safeReplace(purified, '[\\n\\r]+', '\n');
+      purified = SafeRegex.safeReplace(purified, '[！!]+', '！');
+      purified = SafeRegex.safeReplace(purified, '[。.]+', '。');
+      purified = SafeRegex.safeReplace(purified, '[,，]+', '，');
+      purified = SafeRegex.safeReplace(purified, '[;；]+', '；');
 
       purified = purified.trim();
 

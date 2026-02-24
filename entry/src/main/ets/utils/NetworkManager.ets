@@ -1,9 +1,9 @@
-import http from '@ohos.net.http';
+import { http } from '@kit.NetworkKit';
 import { BookSource } from '../models/BookSource';
 import { ContentParser, ParsedBookItem, ParsedChapterItem } from './ContentParser';
 import { Book } from '../models/Book';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 import astroReadJSRuntime, { SearchContext } from './AstroReadJSRuntime';
 import { Logger } from './Logger';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -68,7 +68,7 @@ export class NetworkManager {
     };
   }
 
-  setContext(context: common.UIAbilityContext): void {
+  setContext(context: common.UIAbilityContext | null): void {
     this.context = context;
   }
 

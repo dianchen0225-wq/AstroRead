@@ -235,9 +235,9 @@ export class ResponseParser {
   /**
    * 估算数据大小
    */
-  static estimateSize(data: ESObject): number {
+  static estimateSize<T>(data: T): number {
     if (typeof data === 'string') {
-      return data.length;
+      return (data as string).length;
     }
     if (data instanceof ArrayBuffer) {
       return data.byteLength;

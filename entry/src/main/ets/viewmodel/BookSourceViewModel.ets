@@ -9,9 +9,8 @@ import BookSourceParser from '../utils/BookSourceParser';
 import BookSourceManager, { SearchBooksResult, YCKSourceData } from '../utils/BookSourceManager';
 import { Logger } from '../utils/Logger';
 import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from '../utils/SourceSandbox';
-import fileio from '@ohos.fileio';
-import fs from '@ohos.file.fs';
-import common from '@ohos.app.ability.common';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 
 /**
@@ -892,10 +891,10 @@ export class BookSourceViewModel {
         throw new Error('无效的文件路径');
       }
       
-      // 使用fileio模块写入文件 - 修复：使用正确的API
-      const fd = await fileio.open(filePath, 0o2 | 0o100); // READ_WRITE | CREATE
-      await fileio.write(fd, content);
-      await fileio.close(fd);
+      // 使用fs模块写入文件
+      const file = await fs.open(filePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
+      await fs.write(file.fd, content);
+      await fs.close(file.fd);
     } catch (error) {
       throw new Error('写入文件失败');
     }

@@ -1,4 +1,4 @@
-import relationalStore from '@ohos.data.relationalStore';
+import { relationalStore } from '@kit.ArkData';
 import { BookCategory } from '../../models/BookCategory';
 import { Logger } from '../Logger';
 

@@ -3,7 +3,7 @@ import { DesignSystem } from '../common/DesignSystem';
 import { ContentFilterConfig, ReplaceRule, FilterRule, DEFAULT_FILTER_CONFIG } from '../models/ContentFilter';
 import { ContentFilter } from '../utils/ContentFilter';
 import { Logger } from '../utils/Logger';
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 
 interface RouterParams {
   config?: ContentFilterConfig;

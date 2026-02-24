@@ -1,6 +1,7 @@
 /**
  * BookSourceSearchEngine - 书源搜索引擎
  * 支持多书源并发搜索、请求频率控制、结果聚合、分页控制
+ * 实现 ISearchEngine 接口
  */
 
 import { BookSource } from '../models/BookSource';
@@ -15,6 +16,15 @@ import {
   SearchStopCondition,
   DEFAULT_STOP_CONDITION
 } from '../models/SearchResult';
+import { 
+  ISearchEngine, 
+  SearchResult as ISearchResult, 
+  SearchOptions as ISearchOptions,
+  SearchEngineConfig,
+  DEFAULT_SEARCH_ENGINE_CONFIG,
+  SearchProgressCallback,
+  BookFoundCallback
+} from '../core/interfaces/ISearchEngine';
 import NetworkAdapter, { NetworkError } from './NetworkAdapter';
 import { HTMLParser } from './HTMLParser';
 import { CssSelectorParser } from './CssSelectorParser';
@@ -22,30 +32,13 @@ import { AsyncCssSelectorParser } from './AsyncCssSelectorParser';
 import { parseCache } from './ParseCache';
 import { EnhancedJSEngine } from './EnhancedJSEngine';
 import { Logger } from './Logger';
-import { enhancedSourceHealthManager as sourceHealthManager } from './EnhancedSourceHealthManager';
+import { sourceHealthManager } from './SourceHealthManager';
+import { searchCache } from './SearchCache';
+import { searchResultValidator } from './SearchResultValidator';
+import { searchQueryParser } from './SearchQueryParser';
 
-export interface SearchResult {
-  books: Book[];
-  sourceName: string;
-  sourceUrl: string;
-  success: boolean;
-  error?: string;
-  responseTime: number;
-}
-
-export interface SearchOptions {
-  key: string;
-  page?: number;
-  timeout?: number;
-  concurrent?: number;
-  interval?: number;
-  pageSize?: number;
-  maxResultsPerSource?: number;
-  stopCondition?: SearchStopCondition;
-}
-
-export type SearchProgressCallback = (progress: SearchProgress) => void;
-export type BookFoundCallback = (books: Book[], progress: SearchProgress) => void;
+// 为了保持向后兼容，重新导出接口
+export { ISearchResult as SearchResult, ISearchOptions as SearchOptions, SearchProgressCallback, BookFoundCallback };
 
 interface UrlConfig {
   method: 'GET' | 'POST';
@@ -63,12 +56,7 @@ interface MutexInterface {
   unlock: () => void;
 }
 
-interface ContainerPattern {
-  name: string;
-  regex: RegExp;
-}
-
-export class BookSourceSearchEngine {
+export class BookSourceSearchEngine implements ISearchEngine {
   private static instance: BookSourceSearchEngine | null = null;
   private htmlParser: HTMLParser;
   private jsEngine: EnhancedJSEngine;
@@ -76,14 +64,10 @@ export class BookSourceSearchEngine {
   private requestTimestamps: Map<string, number[]> = new Map();
   private pendingTimers: Set<number> = new Set();
   private isCancelled: boolean = false;
+  private isSearchingFlag: boolean = false;
   private readonly TAG = 'BookSourceSearchEngine';
 
-  private config: SearchConfig = {
-    maxConcurrent: 5,
-    requestInterval: 500,
-    timeout: 10000,
-    maxResultsPerSource: 15
-  };
+  private config: SearchEngineConfig = DEFAULT_SEARCH_ENGINE_CONFIG;
 
   private paginationConfig: SearchPaginationConfig = DEFAULT_PAGINATION_CONFIG;
 
@@ -98,6 +82,53 @@ export class BookSourceSearchEngine {
       BookSourceSearchEngine.instance = new BookSourceSearchEngine();
     }
     return BookSourceSearchEngine.instance;
+  }
+
+  /**
+   * 设置配置
+   */
+  setConfig(config: Partial<SearchEngineConfig>): void {
+    // ArkTS 不支持对象展开运算符，手动合并配置
+    if (config.maxConcurrent !== undefined) {
+      this.config.maxConcurrent = config.maxConcurrent;
+    }
+    if (config.requestInterval !== undefined) {
+      this.config.requestInterval = config.requestInterval;
+    }
+    if (config.timeout !== undefined) {
+      this.config.timeout = config.timeout;
+    }
+    if (config.maxResultsPerSource !== undefined) {
+      this.config.maxResultsPerSource = config.maxResultsPerSource;
+    }
+    if (config.enableCache !== undefined) {
+      this.config.enableCache = config.enableCache;
+    }
+    if (config.cacheExpiry !== undefined) {
+      this.config.cacheExpiry = config.cacheExpiry;
+    }
+  }
+
+  /**
+   * 获取配置
+   */
+  getConfig(): SearchEngineConfig {
+    // ArkTS 不支持对象展开运算符，手动复制配置
+    return {
+      maxConcurrent: this.config.maxConcurrent,
+      requestInterval: this.config.requestInterval,
+      timeout: this.config.timeout,
+      maxResultsPerSource: this.config.maxResultsPerSource,
+      enableCache: this.config.enableCache,
+      cacheExpiry: this.config.cacheExpiry
+    };
+  }
+
+  /**
+   * 是否正在搜索
+   */
+  isSearching(): boolean {
+    return this.isSearchingFlag;
   }
 
   /**
@@ -122,6 +153,37 @@ export class BookSourceSearchEngine {
     this.clearAllTimers();
   }
 
+  /**
+   * 在单个书源中搜索（实现 ISearchEngine 接口）
+   */
+  async searchInSource(
+    source: BookSource,
+    keyword: string,
+    options?: ISearchOptions
+  ): Promise<ISearchResult> {
+    const page = options?.page || 1;
+    return this.searchSingleSource(source, keyword, page);
+  }
+
+  /**
+   * 在多个书源中并发搜索（实现 ISearchEngine 接口）
+   */
+  async searchInMultipleSources(
+    sources: BookSource[],
+    keyword: string,
+    options?: ISearchOptions,
+    onProgress?: SearchProgressCallback,
+    onBookFound?: BookFoundCallback
+  ): Promise<ISearchResult[]> {
+    const searchOptions: ISearchOptions = {
+      key: keyword,
+      page: options?.page || 1,
+      concurrent: options?.concurrent || this.config.maxConcurrent,
+      timeout: options?.timeout || this.config.timeout
+    };
+    return this.search(sources, searchOptions);
+  }
+
   private clearAllTimers(): void {
     this.pendingTimers.forEach((timerId: number) => {
       clearTimeout(timerId);
@@ -135,7 +197,7 @@ export class BookSourceSearchEngine {
    */
   async searchWithPaging(
     sources: BookSource[],
-    options: SearchOptions,
+    options: ISearchOptions,
     progressCallback?: SearchProgressCallback,
     bookFoundCallback?: BookFoundCallback
   ): Promise<PagedSearchResult> {
@@ -144,7 +206,7 @@ export class BookSourceSearchEngine {
     const concurrent = options.concurrent || this.config.maxConcurrent;
     const pageSize = options.pageSize || this.paginationConfig.pageSize;
     const maxPerSource = options.maxResultsPerSource || this.paginationConfig.maxResultsPerSource;
-    const stopCondition = options.stopCondition || DEFAULT_STOP_CONDITION;
+    const stopCondition = DEFAULT_STOP_CONDITION;
 
     const config: SearchPaginationConfig = {
       pageSize: pageSize,
@@ -196,14 +258,12 @@ export class BookSourceSearchEngine {
       }
     } : undefined;
 
-    // 记录连续失败次数
-    let consecutiveFailures = 0;
-    const MAX_CONSECUTIVE_FAILURES = 5;
-
     const checkStopCondition = (): boolean => {
       const elapsed = Date.now() - startTime;
       const totalBooks = resultBuilder.getTotalCount();
-      const successSources = progress.completedSources;
+      const completedSources = progress.completedSources;
+      const sourceStats = resultBuilder.getSourceStats();
+      const successSources = sourceStats.filter((s: SourceSearchStats) => s.success).length;
 
       if (totalBooks >= stopCondition.maxBooks) {
         Logger.info(this.TAG, `智能停止: 已找到${totalBooks}本书，达到最大数量${stopCondition.maxBooks}`);
@@ -216,13 +276,7 @@ export class BookSourceSearchEngine {
       }
 
       if (successSources >= stopCondition.minSources && totalBooks > 0) {
-        Logger.info(this.TAG, `智能停止: 已搜索${successSources}个书源，找到${totalBooks}本书`);
-        return true;
-      }
-
-      // 连续失败过多，提前停止
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        Logger.warn(this.TAG, `智能停止: 连续${consecutiveFailures}个书源失败，可能网络或书源有问题`);
+        Logger.info(this.TAG, `智能停止: 已成功搜索${successSources}个书源，找到${totalBooks}本书`);
         return true;
       }
 
@@ -239,7 +293,7 @@ export class BookSourceSearchEngine {
         await this.checkRateLimit(source.url);
 
         const promise = this.searchSingleSource(source, searchKey, 1)
-          .then((result: SearchResult) => {
+          .then((result: ISearchResult) => {
             if (shouldStop) return;
 
             const newBooks = resultBuilder.addSourceResult(
@@ -250,18 +304,10 @@ export class BookSourceSearchEngine {
               result.error,
               result.responseTime
             );
-
-            if (result.success && result.books.length > 0) {
-              // 成功且找到书，重置连续失败计数
-              consecutiveFailures = 0;
+            
+            if (result.success) {
               sourceHealthManager.recordSuccess(source.id, source.name, source.url, result.responseTime);
-            } else if (result.success && result.books.length === 0) {
-              // 成功但找不到书（解析问题），不算失败也不算成功
-              consecutiveFailures++;
-              Logger.warn(this.TAG, `书源 ${source.name} 返回成功但无结果，可能是解析规则失效`);
             } else {
-              // 请求失败
-              consecutiveFailures++;
               const networkError = this.parseNetworkError(result.error || '');
               sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
             }
@@ -289,15 +335,12 @@ export class BookSourceSearchEngine {
           })
           .catch((error: Error) => {
             if (shouldStop) return;
-
+            
             Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
-
-            // 增加连续失败计数
-            consecutiveFailures++;
-
+            
             const networkError = this.parseNetworkError(error.message);
             sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
-
+            
             resultBuilder.addSourceResult(
               source.id,
               source.name,
@@ -313,16 +356,6 @@ export class BookSourceSearchEngine {
 
             if (throttledProgressCallback) {
               throttledProgressCallback(this.cloneSearchProgress(progress));
-            }
-
-            // 检查是否需要提前停止
-            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-              shouldStop = true;
-              progress.isComplete = true;
-              Logger.warn(this.TAG, `连续${consecutiveFailures}个书源失败，提前停止搜索`);
-              if (throttledProgressCallback) {
-                throttledProgressCallback(this.cloneSearchProgress(progress));
-              }
             }
           })
           .finally(() => {
@@ -386,8 +419,8 @@ export class BookSourceSearchEngine {
    */
   async search(
     sources: BookSource[],
-    options: SearchOptions
-  ): Promise<SearchResult[]> {
+    options: ISearchOptions
+  ): Promise<ISearchResult[]> {
     const searchKey = options.key;
     const page = options.page || 1;
     const concurrent = options.concurrent || this.config.maxConcurrent;
@@ -396,7 +429,7 @@ export class BookSourceSearchEngine {
 
     const enabledSources = sources.filter((s: BookSource) => s.enabled);
 
-    const results: SearchResult[] = [];
+    const results: ISearchResult[] = [];
     const executing: Promise<void>[] = [];
 
     for (let i = 0; i < enabledSources.length; i++) {
@@ -409,19 +442,20 @@ export class BookSourceSearchEngine {
       await this.checkRateLimit(source.url);
 
       const promise = this.searchSingleSource(source, searchKey, page)
-        .then((result: SearchResult) => {
+        .then((result: ISearchResult) => {
           results.push(result);
         })
         .catch((error: Error) => {
           Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
-          results.push({
+          const failedResult: ISearchResult = {
             books: [],
             sourceName: source.name,
             sourceUrl: source.url,
             success: false,
             error: String(error),
             responseTime: 0
-          });
+          };
+          results.push(failedResult);
         })
         .finally(() => {
           const index = executing.indexOf(promise);
@@ -435,7 +469,7 @@ export class BookSourceSearchEngine {
 
     await Promise.all(executing);
 
-    Logger.info(this.TAG, `搜索完成: ${results.filter((r: SearchResult) => r.success).length}/${sources.length} 成功`);
+    Logger.info(this.TAG, `搜索完成: ${results.filter((r: ISearchResult) => r.success).length}/${sources.length} 成功`);
     return results;
   }
 
@@ -446,7 +480,7 @@ export class BookSourceSearchEngine {
     source: BookSource,
     key: string,
     page: number = 1
-  ): Promise<SearchResult> {
+  ): Promise<ISearchResult> {
     const startTime = Date.now();
 
     try {
@@ -669,19 +703,13 @@ export class BookSourceSearchEngine {
     }
 
     Logger.debug(this.TAG, `开始解析: ${source.name}, 列表规则: ${searchRule.bookList}`);
-    Logger.debug(this.TAG, `书名规则: ${searchRule.name}, 作者规则: ${searchRule.author}, URL规则: ${searchRule.bookUrl}`);
 
     // 1. 获取书籍列表（使用异步解析避免主线程阻塞）
     const bookListHtml = await this.htmlParser.parseAsync(html, searchRule.bookList);
 
     if (!bookListHtml || bookListHtml.length === 0) {
       Logger.warn(this.TAG, `解析结果为空: ${source.name}, 列表规则: ${searchRule.bookList}`);
-      // 增强调试：保存 HTML 内容用于分析
-      const htmlPreview = html.substring(0, 800).replace(/\s+/g, ' ');
-      Logger.debug(this.TAG, `HTML前800字符: ${htmlPreview}`);
-      // 尝试用简单选择器诊断问题
-      const diagnostic = await this.diagnoseHtmlStructure(html);
-      Logger.debug(this.TAG, `HTML结构诊断: ${diagnostic}`);
+      Logger.debug(this.TAG, `HTML前500字符: ${html.substring(0, 500)}`);
       return books;
     }
 
@@ -795,7 +823,7 @@ export class BookSourceSearchEngine {
     }
 
     // 先检查缓存
-    const cached = parseCache.getBySelector(html, rule);
+    const cached = parseCache.get(html, rule);
     if (cached && cached.length > 0) {
       // 从缓存的元素中提取文本
       return this.extractTextFromElement(cached[0]);
@@ -808,7 +836,7 @@ export class BookSourceSearchEngine {
     if (text) {
       const elements = await this.asyncCssSelectorParser.selectElements(html, rule);
       if (elements.length > 0) {
-        parseCache.setBySelector(html, rule, elements);
+        parseCache.set(html, rule, elements);
       }
     }
 
@@ -816,115 +844,52 @@ export class BookSourceSearchEngine {
   }
 
   /**
-   * 从元素中提取文本 - 增强版，递归提取所有文本
+   * 从元素中提取文本
    */
   private extractTextFromElement(element: string): string {
     if (!element) return '';
 
-    // 使用改进的文本提取：移除所有标签，保留内容
-    let text = element;
+    // 提取文本内容
+    const textMatch = element.match(/>([^<]*)</);
+    if (textMatch) {
+      return this.decodeHtmlEntities(textMatch[1].trim());
+    }
 
-    // 移除 script/style
-    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-
-    // 替换 br 为换行
-    text = text.replace(/<br\s*\/?>/gi, '\n');
-
-    // 移除所有 HTML 标签
-    text = text.replace(/<[^>]+>/g, '');
-
-    // 解码 HTML 实体
-    text = this.decodeHtmlEntities(text);
-
-    // 清理空白
-    text = text.replace(/\s+/g, ' ').trim();
-
-    return text;
+    return '';
   }
 
   /**
-   * 解码 HTML 实体 - 增强版，支持更多实体
+   * 解码 HTML 实体
    */
   private decodeHtmlEntities(text: string): string {
-    const entities: Record<string, string> = {
-      // 基础实体
-      '&amp;': '&',
-      '&lt;': '<',
-      '&gt;': '>',
-      '&quot;': '"',
-      '&#39;': "'",
-      '&#x27;': "'",
-      '&nbsp;': ' ',
-      '&#160;': ' ',
-      // 中文标点
-      '&hellip;': '…',
-      '&#8230;': '…',
-      // 破折号和连字符
-      '&mdash;': '—',
-      '&#8212;': '—',
-      '&ndash;': '–',
-      '&#8211;': '–',
-      // 引号
-      '&ldquo;': '"',
-      '&#8220;': '"',
-      '&rdquo;': '"',
-      '&#8221;': '"',
-      '&lsquo;': "'",
-      '&#8216;': "'",
-      '&rsquo;': "'",
-      '&#8217;': "'",
-      // 其他常用实体
-      '&copy;': '©',
-      '&#169;': '©',
-      '&reg;': '®',
-      '&#174;': '®',
-      '&trade;': '™',
-      '&#8482;': '™',
-      '&yen;': '¥',
-      '&#165;': '¥',
-      '&euro;': '€',
-      '&#8364;': '€',
-      // 数学符号
-      '&times;': '×',
-      '&#215;': '×',
-      '&divide;': '÷',
-      '&#247;': '÷',
-      '&plusmn;': '±',
-      '&#177;': '±',
-      // 箭头
-      '&larr;': '←',
-      '&#8592;': '←',
-      '&uarr;': '↑',
-      '&#8593;': '↑',
-      '&rarr;': '→',
-      '&#8594;': '→',
-      '&darr;': '↓',
-      '&#8595;': '↓',
-    };
+    const entities: Map<string, string> = new Map([
+      ['&amp;', '&'],
+      ['&lt;', '<'],
+      ['&gt;', '>'],
+      ['&quot;', '"'],
+      ['&#39;', "'"],
+      ['&nbsp;', ' '],
+      ['&hellip;', '…'],
+      ['&mdash;', '—'],
+      ['&ndash;', '–'],
+      ['&ldquo;', '"'],
+      ['&rdquo;', '"'],
+      ['&lsquo;', '\u2018'],
+      ['&rsquo;', '\u2019'],
+    ]);
 
     let result = text;
-    const entityKeys = Object.keys(entities);
-    for (const entity of entityKeys) {
-      result = result.split(entity).join(entities[entity]);
-    }
-
-    // 处理十进制数字实体 &#123;
-    result = result.replace(/&#(\d+);/g, (match: string, dec: string) => {
-      const code = parseInt(dec, 10);
-      if (!isNaN(code) && code > 0 && code < 0x10FFFF) {
-        return String.fromCharCode(code);
-      }
-      return match;
+    entities.forEach((value: string, key: string) => {
+      result = result.split(key).join(value);
     });
 
-    // 处理十六进制数字实体 &#x7B;
+    // 处理数字实体
+    result = result.replace(/&#(\d+);/g, (match: string, dec: string) => {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+
     result = result.replace(/&#x([0-9a-fA-F]+);/g, (match: string, hex: string) => {
-      const code = parseInt(hex, 16);
-      if (!isNaN(code) && code > 0 && code < 0x10FFFF) {
-        return String.fromCharCode(code);
-      }
-      return match;
+      return String.fromCharCode(parseInt(hex, 16));
     });
 
     return result;
@@ -1055,60 +1020,19 @@ export class BookSourceSearchEngine {
   }
 
   /**
-   * HTML 结构诊断 - 帮助理解页面结构
-   */
-  private async diagnoseHtmlStructure(html: string): Promise<string> {
-    const checks: string[] = [];
-
-    const containerPatterns: ContainerPattern[] = [
-      { name: 'div.book', regex: /<div[^>]*class=["'][^"']*book[^"']*["'][^>]*>/i },
-      { name: 'div.item', regex: /<div[^>]*class=["'][^"']*item[^"']*["'][^>]*>/i },
-      { name: 'div.list', regex: /<div[^>]*class=["'][^"']*list[^"']*["'][^>]*>/i },
-      { name: 'li.item', regex: /<li[^>]*class=["'][^"']*item[^"']*["'][^>]*>/i },
-      { name: 'tr', regex: /<tr[\s>]/i },
-      { name: 'article', regex: /<article[\s>]/i },
-      { name: 'section', regex: /<section[\s>]/i }
-    ];
-
-    for (const pattern of containerPatterns) {
-      const matches = html.match(pattern.regex);
-      if (matches) {
-        checks.push(`${pattern.name}: ${matches.length}个`);
-      }
-    }
-
-    // 检查是否有 script 动态渲染
-    if (html.includes('<script') && html.includes('document.write')) {
-      checks.push('警告: 页面使用JS动态渲染');
-    }
-
-    // 检查是否是 JSON 数据
-    if (html.trim().startsWith('{') || html.trim().startsWith('[')) {
-      checks.push('内容类型: JSON数据');
-    }
-
-    // 检查状态码错误页面
-    if (html.includes('403') || html.includes('Forbidden')) {
-      checks.push('警告: 可能是403错误页面');
-    }
-    if (html.includes('404') || html.includes('Not Found')) {
-      checks.push('警告: 可能是404错误页面');
-    }
-
-    return checks.length > 0 ? checks.join(', ') : '未识别到常见模式';
-  }
-
-  /**
    * 聚合搜索结果（去重）
    */
-  aggregateResults(results: SearchResult[]): Book[] {
+  aggregateResults(results: ISearchResult[]): Book[] {
     const allBooks: Book[] = [];
     const seen = new Set<string>();
 
-    for (const result of results) {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
       if (!result.success) continue;
 
-      for (const book of result.books) {
+      const books = result.books;
+      for (let j = 0; j < books.length; j++) {
+        const book = books[j];
         // 使用书名+作者作为唯一标识
         const key = `${book.name}_${book.author}`;
 
@@ -1120,16 +1044,6 @@ export class BookSourceSearchEngine {
     }
 
     return allBooks;
-  }
-
-  /**
-   * 设置配置
-   */
-  setConfig(config: Partial<SearchConfig>): void {
-    this.config.maxConcurrent = config.maxConcurrent ?? this.config.maxConcurrent;
-    this.config.requestInterval = config.requestInterval ?? this.config.requestInterval;
-    this.config.timeout = config.timeout ?? this.config.timeout;
-    this.config.maxResultsPerSource = config.maxResultsPerSource ?? this.config.maxResultsPerSource;
   }
 
   /**
@@ -1174,13 +1088,6 @@ export class BookSourceSearchEngine {
   clearCache(): void {
     this.requestTimestamps.clear();
   }
-}
-
-export interface SearchConfig {
-  maxConcurrent: number;
-  requestInterval: number;
-  timeout: number;
-  maxResultsPerSource: number;
 }
 
 export default BookSourceSearchEngine.getInstance();

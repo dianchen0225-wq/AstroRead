@@ -4,7 +4,7 @@ import { ImageDetector, ImageCandidate, ImageDetectionConfig } from './ImageDete
 import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { NetworkManager } from './NetworkManager';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 
 export interface BookImageResult {
   bookId: string;

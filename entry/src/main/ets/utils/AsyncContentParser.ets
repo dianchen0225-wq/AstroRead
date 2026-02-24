@@ -3,7 +3,7 @@
   * 使用 TaskPool 将内容解析任务移至子线程
   */
 
-import taskpool from '@ohos.taskpool';
+import { taskpool } from '@kit.ArkTS';
 import { Logger } from './Logger';
 import { ParserCore } from './ParserCore';
 import { purifyContent } from './ContentPurifier';

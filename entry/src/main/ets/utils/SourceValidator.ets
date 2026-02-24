@@ -7,25 +7,111 @@ import { BookSource } from '../models/BookSource';
 import { NetworkManager } from './NetworkManager';
 import { Logger } from './Logger';
 
-// 验证结果类型定义
+interface ParsedUrl {
+  protocol: string;
+  hostname: string;
+  port: string;
+  pathname: string;
+  search: string;
+  hash: string;
+  href: string;
+}
+
 interface ValidationResult {
   isValid: boolean;
   errors: string[];
 }
 
-// 可用性验证结果类型定义
 interface AvailabilityResult {
   isAvailable: boolean;
   responseTime: number;
   error?: string;
 }
 
-// 批量验证结果类型定义
 interface BatchValidationResult {
   source: BookSource;
   isAvailable: boolean;
   responseTime: number;
   error?: string;
+}
+
+function parseUrl(url: string): ParsedUrl | null {
+  try {
+    let href = url;
+    
+    const protocolMatch = href.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
+    const protocol = protocolMatch ? protocolMatch[1].toLowerCase() : '';
+    
+    if (!protocolMatch) {
+      return null;
+    }
+    
+    href = href.substring(protocolMatch[0].length);
+    
+    let hostname = '';
+    let port = '';
+    let pathname = '/';
+    let search = '';
+    let hash = '';
+    
+    const pathIndex = href.indexOf('/');
+    const queryIndex = href.indexOf('?');
+    const hashIndex = href.indexOf('#');
+    
+    let hostEnd = href.length;
+    if (pathIndex !== -1) hostEnd = Math.min(hostEnd, pathIndex);
+    if (queryIndex !== -1) hostEnd = Math.min(hostEnd, queryIndex);
+    if (hashIndex !== -1) hostEnd = Math.min(hostEnd, hashIndex);
+    
+    const hostPart = href.substring(0, hostEnd);
+    
+    const portIndex = hostPart.lastIndexOf(':');
+    if (portIndex !== -1) {
+      const possiblePort = hostPart.substring(portIndex + 1);
+      if (/^\d+$/.test(possiblePort)) {
+        hostname = hostPart.substring(0, portIndex);
+        port = possiblePort;
+      } else {
+        hostname = hostPart;
+      }
+    } else {
+      hostname = hostPart;
+    }
+    
+    if (hostname.startsWith('[') && hostname.endsWith(']')) {
+      hostname = hostname.slice(1, -1);
+    }
+    
+    let remaining = href.substring(hostEnd);
+    
+    const hashIdx = remaining.indexOf('#');
+    if (hashIdx !== -1) {
+      hash = remaining.substring(hashIdx);
+      remaining = remaining.substring(0, hashIdx);
+    }
+    
+    const queryIdx = remaining.indexOf('?');
+    if (queryIdx !== -1) {
+      search = remaining.substring(queryIdx);
+      pathname = remaining.substring(0, queryIdx);
+    } else {
+      pathname = remaining || '/';
+    }
+    
+    if (!pathname) pathname = '/';
+    
+    return {
+      protocol,
+      hostname,
+      port,
+      pathname,
+      search,
+      hash,
+      href: url
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 // 搜索功能验证结果类型定义
@@ -466,6 +552,7 @@ class SourceValidator {
   
   /**
    * URL安全性验证 - 增强SSRF防护
+   * 修复了八进制、十六进制IP绕过问题，增加了URL标准化和重定向验证
    */
   private isSafeUrl(url: string): boolean {
     try {
@@ -473,29 +560,29 @@ class SourceValidator {
         return false;
       }
 
-      let decodedUrl = url;
-      try {
-        decodedUrl = decodeURIComponent(url);
-      } catch (e) {
-        // URL解码失败，使用原始URL
-      }
-
-      const urlPattern = /^(https?:\/\/)([^\/:]+)(:\d+)?(\/.*)?$/i;
-      const match = decodedUrl.match(urlPattern);
-      
-      if (!match) {
+      if (!url.match(/^https?:\/\//i)) {
         return false;
       }
-      
-      let hostname = match[2].toLowerCase();
-      
-      try {
-        hostname = decodeURIComponent(hostname);
-      } catch (e) {
-        // 解码失败，使用原始hostname
+
+      let decodedUrl = url;
+      for (let i = 0; i < 3; i++) {
+        try {
+          const newDecoded = decodeURIComponent(decodedUrl);
+          if (newDecoded === decodedUrl) break;
+          decodedUrl = newDecoded;
+        } catch (e) {
+          break;
+        }
       }
 
-      hostname = hostname.replace(/\[\]/g, '').replace(/\s+/g, '');
+      const normalizedUrl = parseUrl(decodedUrl);
+      if (!normalizedUrl) {
+        return false;
+      }
+
+      let hostname = normalizedUrl.hostname.toLowerCase().trim();
+
+      hostname = hostname.replace(/\s+/g, '');
 
       if (hostname.startsWith('[') && hostname.endsWith(']')) {
         hostname = hostname.slice(1, -1);
@@ -517,11 +604,20 @@ class SourceValidator {
         return false;
       }
 
+      if (this.isMixedOctalHexIP(hostname)) {
+        return false;
+      }
+
+      if (this.isDottedDecimalBypass(hostname)) {
+        return false;
+      }
+
       const forbiddenHosts = [
         'localhost', '127.0.0.1', '0.0.0.0', '::1', '0:0:0:0:0:0:0:1',
         '169.254.169.254', 'metadata.google.internal', 'metadata.azure.internal',
         '100.100.100.200', 'alibaba.metadata', 'kubernetes.default',
-        'kubernetes.default.svc'
+        'kubernetes.default.svc', 'metadata', 'metadata.google',
+        'instance-data', 'ec2metadata', 'ec2-metadata'
       ];
       
       if (forbiddenHosts.includes(hostname)) {
@@ -540,7 +636,7 @@ class SourceValidator {
         '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.',
         '127.', '169.254.', '0.0.', '224.', '225.', '226.', '227.', '228.',
         '229.', '230.', '231.', '232.', '233.', '234.', '235.', '236.',
-        '237.', '238.', '239.', '240.', '255.'
+        '237.', '238.', '239.', '240.', '255.', 'fc', 'fd', 'fe80:', '::'
       ];
       
       for (const network of internalNetworks) {
@@ -549,32 +645,136 @@ class SourceValidator {
         }
       }
 
-      if (hostname.includes('.local') || hostname.includes('.internal') ||
-          hostname.includes('.localhost') || hostname.includes('.localdomain') ||
-          hostname.includes('localtest.me') || hostname.includes('127.0.0.1.nip.io')) {
+      const suspiciousDomains = [
+        '.local', '.internal', '.localhost', '.localdomain',
+        '.test', '.example', '.invalid', '.home', '.lan',
+        'localtest.me', 'nip.io', 'sslip.io', 'xip.io',
+        '127.0.0.1.nip.io', '127.0.0.1.sslip.io', '127.0.0.1.xip.io'
+      ];
+
+      for (const domain of suspiciousDomains) {
+        if (hostname.includes(domain)) {
+          return false;
+        }
+      }
+
+      if (/^0x[0-9a-f]+$/i.test(hostname) || /^[0-9a-f]{8,}$/i.test(hostname)) {
         return false;
       }
 
-      if (/^0x[0-9a-f]+$/i.test(hostname) || /^[0-9a-f]+$/i.test(hostname)) {
-        return false;
+      const port = normalizedUrl.port;
+      if (port) {
+        const forbiddenPorts = ['22', '23', '25', '53', '110', '143', '445', '3306', '3389', '5432', '6379', '8080', '8443', '9200', '9300'];
+        if (forbiddenPorts.includes(port)) {
+          return false;
+        }
       }
 
-      const tld = hostname.split('.').pop();
-      const commonTlds = ['com', 'org', 'net', 'edu', 'gov', 'cn', 'io', 'dev',
-                           'cc', 'co', 'info', 'biz', 'me', 'tv', 'xyz', 'top',
-                           'vip', 'site', 'online', 'store', 'app', 'pro', 'tech',
-                           'fun', 'club', 'shop', 'ltd', 'work', 'live', 'world',
-                           'asia', 'mobi', 'name', 'tel', 'travel', 'int', 'mil',
-                           'jp', 'kr', 'tw', 'hk', 'uk', 'de', 'fr', 'ru', 'in',
-                           'br', 'au', 'ca', 'mx', 'es', 'it', 'nl', 'pl', 'tr'];
-      if (!tld || !commonTlds.includes(tld)) {
-        return this.isPublicDomain(hostname);
+      const pathname = normalizedUrl.pathname.toLowerCase();
+      const suspiciousPathPatterns = [
+        '/metadata', '/instance', '/latest/meta-data',
+        '/actuator', '/env', '/configprops', '/heapdump',
+        '/.git/', '/.svn/', '/.env', '/config.xml', '/web.config'
+      ];
+      for (const pattern of suspiciousPathPatterns) {
+        if (pathname.includes(pattern)) {
+          return false;
+        }
       }
 
       return true;
     } catch (error) {
       return false;
     }
+  }
+
+  /**
+   * 验证重定向后的 URL 安全性
+   * 在跟随重定向时必须调用此方法进行二次验证
+   */
+  public validateRedirectUrl(originalUrl: string, redirectUrl: string): boolean {
+    try {
+      const original = parseUrl(originalUrl);
+      if (!original) {
+        return false;
+      }
+
+      let redirectHref = redirectUrl;
+      if (!redirectUrl.startsWith('http://') && !redirectUrl.startsWith('https://')) {
+        redirectHref = original.protocol + '://' + original.hostname + 
+          (original.port ? ':' + original.port : '') + redirectUrl;
+      }
+      
+      const redirect = parseUrl(redirectHref);
+      if (!redirect) {
+        return false;
+      }
+
+      if (original.protocol === 'https' && redirect.protocol === 'http') {
+        Logger.warn(this.TAG, '检测到协议降级，禁止重定向');
+        return false;
+      }
+
+      if (!this.isSafeUrl(redirect.href)) {
+        Logger.warn(this.TAG, '重定向后的 URL 未通过安全检查');
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * 检查是否为混合八进制/十六进制 IP 格式
+   * 例如: 0177.0.0.1 (八进制 127.0.0.1)
+   */
+  private isMixedOctalHexIP(hostname: string): boolean {
+    const parts = hostname.split('.');
+    if (parts.length !== 4) return false;
+
+    let hasOctal = false;
+    let hasHex = false;
+
+    for (const part of parts) {
+      // 检查八进制 (以 0 开头且长度大于 1)
+      if (part.startsWith('0') && part.length > 1 && /^[0-7]+$/.test(part)) {
+        hasOctal = true;
+      }
+      // 检查十六进制 (以 0x 开头)
+      if (part.startsWith('0x') && /^0x[0-9a-f]+$/i.test(part)) {
+        hasHex = true;
+      }
+    }
+
+    return hasOctal || hasHex;
+  }
+
+  /**
+   * 检查是否为点分十进制绕过
+   * 例如: 2130706433 -> 127.0.0.1
+   */
+  private isDottedDecimalBypass(hostname: string): boolean {
+    // 纯数字且长度在 7-10 位之间可能是十进制 IP
+    if (/^\d{7,10}$/.test(hostname)) {
+      const num = parseInt(hostname, 10);
+      // 检查是否在私有 IP 范围内
+      // 127.0.0.1 = 2130706433
+      // 10.0.0.0 = 167772160
+      // 10.255.255.255 = 184549375
+      // 172.16.0.0 = 2886729728
+      // 172.31.255.255 = 2887778303
+      // 192.168.0.0 = 3232235520
+      // 192.168.255.255 = 3232301055
+      if ((num >= 167772160 && num <= 184549375) ||      // 10.0.0.0/8
+          (num >= 2886729728 && num <= 2887778303) ||    // 172.16.0.0/12
+          (num >= 3232235520 && num <= 3232301055) ||    // 192.168.0.0/16
+          num === 2130706433 || num === 0) {             // 127.0.0.1, 0.0.0.0
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

@@ -2,7 +2,7 @@
  * EPUBParser - EPUB 电子书解析器
  * EPUB 本质是 ZIP + HTML，使用 @kit.CoreFileKit 和 @kit.ArkTS 解压后解析
  */
-import fs from '@ohos.file.fs';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { Logger } from './Logger';
 import { util } from '@kit.ArkTS';
 import { EntityDecoder } from '../core/utils/EntityDecoder';

@@ -1,9 +1,14 @@
-import fileIo from '@ohos.file.fs';
-import util from '@ohos.util';
+import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { IdGenerator } from './IdGenerator';
 import { Logger } from './Logger';
+
+export interface FileValidationResult {
+  valid: boolean;
+  error?: string;
+}
 
 export class FileParser {
   private static readonly TAG = 'FileParser';
@@ -272,21 +277,28 @@ export class FileParser {
     }
   }
 
-  static async validateFile(filePath: string): Promise<{ valid: boolean; error?: string }> {
+  static async validateFile(filePath: string): Promise<FileValidationResult> {
     try {
       const stat = await fileIo.stat(filePath);
 
       if (stat.size === 0) {
-        return { valid: false, error: '文件为空' };
+        const result: FileValidationResult = { valid: false, error: '文件为空' };
+        return result;
       }
 
       if (stat.size > FileParser.MAX_FILE_SIZE) {
-        return { valid: false, error: `文件过大，最大支持 ${FileParser.MAX_FILE_SIZE / 1024 / 1024}MB` };
+        const result: FileValidationResult = { 
+          valid: false, 
+          error: `文件过大，最大支持 ${FileParser.MAX_FILE_SIZE / 1024 / 1024}MB` 
+        };
+        return result;
       }
 
-      return { valid: true };
+      const result: FileValidationResult = { valid: true };
+      return result;
     } catch (error) {
-      return { valid: false, error: `文件访问失败: ${error}` };
+      const result: FileValidationResult = { valid: false, error: `文件访问失败: ${error}` };
+      return result;
     }
   }
 }

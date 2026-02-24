@@ -1,6 +1,7 @@
 import { Logger } from './Logger';
 import { CssSelectorParser } from './CssSelectorParser';
 import { EntityDecoder } from '../core/utils/EntityDecoder';
+import { SafeRegex } from './SafeRegex';
 
 export interface RuleContext {
   variables: Map<string, string>;
@@ -160,6 +161,12 @@ export class RuleEngine {
 
     let value = CssSelectorParser.extractValue(html, extractRule);
 
+    // 验证输入安全性
+    if (!SafeRegex.isInputSafe(value)) {
+      Logger.warn(RuleEngine.TAG, '输入内容未通过安全检查');
+      return value.trim();
+    }
+
     for (const pattern of replacePatterns) {
       const trimmedPattern = pattern.trim();
 
@@ -167,19 +174,11 @@ export class RuleEngine {
         const patternParts = trimmedPattern.split('##');
         const searchPattern = patternParts[0];
         const replacement = patternParts[1] || '';
-        try {
-          const regex = new RegExp(searchPattern, 'g');
-          value = value.replace(regex, replacement);
-        } catch (e) {
-          value = value.replace(new RegExp(RuleEngine.escapeRegex(searchPattern), 'g'), replacement);
-        }
+        // 使用安全的替换方法
+        value = SafeRegex.safeReplace(value, searchPattern, replacement);
       } else {
-        try {
-          const regex = new RegExp(trimmedPattern, 'g');
-          value = value.replace(regex, '');
-        } catch (e) {
-          value = value.replace(new RegExp(RuleEngine.escapeRegex(trimmedPattern), 'g'), '');
-        }
+        // 使用安全的替换方法
+        value = SafeRegex.safeReplace(value, trimmedPattern, '');
       }
     }
 
@@ -243,13 +242,15 @@ export class RuleEngine {
 
         let value = RuleEngine.extractJsonValue(jsonData, jsonPath);
 
+        // 验证输入安全性
+        if (!SafeRegex.isInputSafe(value)) {
+          Logger.warn(RuleEngine.TAG, '输入内容未通过安全检查');
+          return value.trim();
+        }
+
         for (const pattern of replacePatterns) {
-          try {
-            const regex = new RegExp(pattern.trim(), 'g');
-            value = value.replace(regex, '');
-          } catch (e) {
-            value = value.replace(new RegExp(RuleEngine.escapeRegex(pattern.trim()), 'g'), '');
-          }
+          // 使用安全的替换方法
+          value = SafeRegex.safeReplace(value, pattern.trim(), '');
         }
 
         return value.trim();
@@ -433,8 +434,21 @@ export class RuleEngine {
         pattern = pattern.substring(7);
       }
 
-      const regex = new RegExp(pattern, 'gi');
-      const match = html.match(regex);
+      // 验证输入安全性
+      if (!SafeRegex.isInputSafe(html)) {
+        Logger.warn(RuleEngine.TAG, '输入内容未通过安全检查');
+        return '';
+      }
+
+      // 净化正则表达式模式
+      const sanitizedPattern = SafeRegex.sanitizePattern(pattern);
+      if (!sanitizedPattern) {
+        Logger.warn(RuleEngine.TAG, '正则表达式模式为空或无效');
+        return '';
+      }
+
+      // 使用安全的匹配方法
+      const match = SafeRegex.safeMatch(sanitizedPattern, html, 'gi');
 
       if (match) {
         return match[1] || match[0];
@@ -456,12 +470,27 @@ export class RuleEngine {
         pattern = pattern.substring(7);
       }
 
-      const results: string[] = [];
-      const regex = new RegExp(pattern, 'gi');
-      let match: RegExpExecArray | null;
+      // 验证输入安全性
+      if (!SafeRegex.isInputSafe(html)) {
+        Logger.warn(RuleEngine.TAG, '输入内容未通过安全检查');
+        return [];
+      }
 
-      while ((match = regex.exec(html)) !== null) {
-        results.push(match[1] || match[0]);
+      // 净化正则表达式模式
+      const sanitizedPattern = SafeRegex.sanitizePattern(pattern);
+      if (!sanitizedPattern) {
+        Logger.warn(RuleEngine.TAG, '正则表达式模式为空或无效');
+        return [];
+      }
+
+      // 使用安全的全局匹配方法
+      const matches = SafeRegex.safeMatchAll(sanitizedPattern, html, 'gi');
+      const results: string[] = [];
+
+      for (const match of matches) {
+        const group1 = match.getGroup(1);
+        const group0 = match.getGroup(0);
+        results.push(group1 !== undefined ? group1 : (group0 !== undefined ? group0 : ''));
       }
 
       return results;

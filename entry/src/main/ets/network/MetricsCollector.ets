@@ -1,10 +1,11 @@
 /**
  * MetricsCollector - 指标收集器
  * 负责收集和管理请求指标
+ * 增强版：添加URL和请求体脱敏处理
  */
 
 import { RequestMetrics } from './interfaces/IHttpClient';
-import { Logger } from '../utils/Logger';
+import { Logger, LogLevel } from '../utils/Logger';
 import { DEFAULTS } from './HttpClientConfig';
 
 /**
@@ -16,6 +17,19 @@ export interface SuccessStats {
   failed: number;
   successRate: number;
 }
+
+/**
+ * 敏感URL参数列表
+ */
+const SENSITIVE_URL_PARAMS: string[] = [
+  'token', 'access_token', 'refresh_token', 'auth', 'key',
+  'api_key', 'apikey', 'secret', 'session', 'session_id',
+  'password', 'passwd', 'pwd', 'private_key', 'signature',
+  'sign', 'code', 'authorization_code', 'state',
+  'verify_code', 'verification_code', 'reset_token'
+];
+
+const MASK = '******';
 
 /**
  * 指标收集器
@@ -110,16 +124,76 @@ export class MetricsCollector {
   }
 
   /**
+   * 脱敏处理URL
+   * 移除敏感查询参数的值
+   */
+  private sanitizeUrl(url: string): string {
+    if (!url) return '';
+    
+    let sanitized = url;
+    
+    for (const param of SENSITIVE_URL_PARAMS) {
+      // 匹配 ?param=value 或 &param=value 格式
+      const patterns = [
+        new RegExp(`([?&]${param}=)([^&\\s]+)`, 'gi'),
+      ];
+      
+      for (const pattern of patterns) {
+        sanitized = sanitized.replace(pattern, `$1${MASK}`);
+      }
+    }
+    
+    return sanitized;
+  }
+
+  /**
    * 记录日志
+   * 增强版：使用脱敏后的URL
    */
   private logMetrics(metrics: RequestMetrics): void {
-    const logMsg = `[${metrics.method}] ${metrics.url} - ${metrics.success ? 'Success' : 'Failed'} - ${metrics.duration}ms`;
+    // 脱敏处理URL
+    const sanitizedUrl = this.sanitizeUrl(metrics.url || '');
+    
+    // 构建日志消息，不包含敏感信息
+    const logMsg = `[${metrics.method}] ${sanitizedUrl} - ${metrics.success ? 'Success' : 'Failed'} - ${metrics.duration}ms`;
+    
+    // 错误信息也需要脱敏
+    const sanitizedError = metrics.error ? this.sanitizeErrorMessage(metrics.error) : '';
+    const fullLogMsg = sanitizedError ? `${logMsg} - Error: ${sanitizedError}` : logMsg;
     
     if (metrics.success) {
-      Logger.info(this.tag, logMsg);
+      Logger.info(this.tag, fullLogMsg);
     } else {
-      Logger.error(this.tag, logMsg);
+      Logger.error(this.tag, fullLogMsg);
     }
+  }
+  
+  /**
+   * 脱敏处理错误消息
+   */
+  private sanitizeErrorMessage(error: string): string {
+    if (!error) return '';
+    
+    let sanitized = error;
+    
+    // 移除可能的敏感信息
+    for (const param of SENSITIVE_URL_PARAMS) {
+      const patterns = [
+        new RegExp(`(${param}[=:]\\s*)[^\\s,;]+`, 'gi'),
+        new RegExp(`"${param}"\\s*:\\s*"[^"]*"`, 'gi'),
+        new RegExp(`'${param}'\\s*:\\s*'[^']*'`, 'gi'),
+      ];
+      
+      for (const pattern of patterns) {
+        sanitized = sanitized.replace(pattern, `$1${MASK}`);
+      }
+    }
+    
+    // 移除可能的token/密钥
+    sanitized = sanitized.replace(/\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*/g, '[JWT_TOKEN]');
+    sanitized = sanitized.replace(/\b[A-Za-z0-9+/]{40,}={0,2}\b/g, '[BASE64_DATA]');
+    
+    return sanitized;
   }
 }
 

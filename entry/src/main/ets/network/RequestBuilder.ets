@@ -2,7 +2,7 @@
  * RequestBuilder - 请求构建器
  * 负责构建HTTP请求选项和URL
  */
-import http from '@ohos.net.http';
+import { http } from '@kit.NetworkKit';
 import {
   HttpRequestConfig,
   HttpMethod,

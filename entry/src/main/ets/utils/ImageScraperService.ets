@@ -1,6 +1,6 @@
-import http from '@ohos.net.http';
-import fs from '@ohos.file.fs';
-import common from '@ohos.app.ability.common';
+import { http } from '@kit.NetworkKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
 import { Logger } from './Logger';
 import { RequestThrottler } from './RequestThrottler';
 import { NetworkManager } from './NetworkManager';

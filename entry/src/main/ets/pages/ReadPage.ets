@@ -24,7 +24,7 @@ import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
 import { showToast } from '../utils/ToastUtils';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 
 @Entry
 @ComponentV2

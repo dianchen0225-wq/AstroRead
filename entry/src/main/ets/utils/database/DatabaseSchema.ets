@@ -1,5 +1,6 @@
-import relationalStore from '@ohos.data.relationalStore';
+import { relationalStore } from '@kit.ArkData';
 import { Logger } from '../Logger';
+import { SqlSecurityUtils } from '../SqlSecurityUtils';
 
 export class DatabaseSchema {
   private static readonly TAG = 'DatabaseSchema';
@@ -108,6 +109,37 @@ export class DatabaseSchema {
     )`
   ];
 
+    /**
+     * 索引创建语句
+     * 用于提升查询性能
+     */
+    static readonly INDEX_SQL: string[] = [
+      // book 表索引
+      'CREATE INDEX IF NOT EXISTS idx_book_source_id ON book (book_source_id)',
+      'CREATE INDEX IF NOT EXISTS idx_book_name ON book (name)',
+      'CREATE INDEX IF NOT EXISTS idx_book_author ON book (author)',
+      'CREATE INDEX IF NOT EXISTS idx_book_add_time ON book (add_time)',
+
+      // book_source 表索引
+      'CREATE INDEX IF NOT EXISTS idx_book_source_enabled ON book_source (enabled)',
+      'CREATE INDEX IF NOT EXISTS idx_book_source_name ON book_source (name)',
+      'CREATE INDEX IF NOT EXISTS idx_book_source_sort ON book_source (sort)',
+
+      // chapter 表索引
+      'CREATE INDEX IF NOT EXISTS idx_chapter_book_id ON chapter (book_id)',
+      'CREATE INDEX IF NOT EXISTS idx_chapter_order ON chapter (chapter_order)',
+      'CREATE INDEX IF NOT EXISTS idx_chapter_url ON chapter (url)',
+
+      // bookmark 表索引
+      'CREATE INDEX IF NOT EXISTS idx_bookmark_book_id ON bookmark (book_id)',
+      'CREATE INDEX IF NOT EXISTS idx_bookmark_chapter_id ON bookmark (chapter_id)',
+      'CREATE INDEX IF NOT EXISTS idx_bookmark_create_time ON bookmark (create_time)',
+
+      // book_category_relation 表索引
+      'CREATE INDEX IF NOT EXISTS idx_category_relation_book ON book_category_relation (book_id)',
+      'CREATE INDEX IF NOT EXISTS idx_category_relation_category ON book_category_relation (category_id)'
+    ];
+
   /**
    * 创建所有数据库表
    */
@@ -140,6 +172,7 @@ export class DatabaseSchema {
 
   /**
    * 检查列是否存在，如果不存在则添加
+   * 使用SqlSecurityUtils防止SQL注入
    */
   private static async addColumnIfNotExists(
     rdbStore: relationalStore.RdbStore,
@@ -148,7 +181,9 @@ export class DatabaseSchema {
     columnDefinition: string
   ): Promise<void> {
     try {
-      const tableInfo = await rdbStore.querySql(`PRAGMA table_info(${tableName})`);
+      // 使用SqlSecurityUtils构建安全的查询
+      const safeTableInfoQuery = SqlSecurityUtils.buildTableInfoQuery(tableName);
+      const tableInfo = await rdbStore.querySql(safeTableInfoQuery);
       const columnNames: string[] = [];
       while (tableInfo.goToNextRow()) {
         const nameIndex = tableInfo.getColumnIndex('name');
@@ -161,7 +196,8 @@ export class DatabaseSchema {
         return;
       }
 
-      const sql = `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`;
+      // 使用SqlSecurityUtils构建安全的ALTER TABLE语句
+      const sql = SqlSecurityUtils.buildAddColumnSql(tableName, columnName, columnDefinition);
       await rdbStore.executeSql(sql);
       Logger.info(DatabaseSchema.TAG, `成功为表 ${tableName} 添加列 ${columnName}`);
     } catch (error) {
@@ -177,10 +213,13 @@ export class DatabaseSchema {
 
   /**
    * 迁移chapter表的order列到chapter_order列
+   * 使用SqlSecurityUtils防止SQL注入
    */
   static async migrateChapterOrderColumn(rdbStore: relationalStore.RdbStore): Promise<void> {
     try {
-      const tableInfo = await rdbStore.querySql(`PRAGMA table_info(chapter)`);
+      // 使用SqlSecurityUtils构建安全的查询
+      const safeTableInfoQuery = SqlSecurityUtils.buildTableInfoQuery('chapter');
+      const tableInfo = await rdbStore.querySql(safeTableInfoQuery);
       const columnNames: string[] = [];
       while (tableInfo.goToNextRow()) {
         const nameIndex = tableInfo.getColumnIndex('name');

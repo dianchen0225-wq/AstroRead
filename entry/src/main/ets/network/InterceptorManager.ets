@@ -14,16 +14,25 @@ import {
 
 type RequestInterceptorHandler = (config: HttpRequestConfig) => HttpRequestConfig | Promise<HttpRequestConfig>;
 type RequestErrorHandler = (error: HttpError) => HttpError | Promise<HttpError>;
-type ResponseInterceptorHandler = (response: HttpResponse<ESObject>) => HttpResponse<ESObject> | Promise<HttpResponse<ESObject>>;
+type ResponseInterceptorHandler<T = ESObject> = (response: HttpResponse<T>) => HttpResponse<T> | Promise<HttpResponse<T>>;
 type ResponseErrorHandler = (error: HttpError) => HttpError | Promise<HttpError>;
-interface InternalRequestInterceptor extends RequestInterceptor {
+
+interface InternalRequestInterceptor {
+  id: string;
+  priority: number;
   handler: RequestInterceptorHandler;
   errorHandler?: RequestErrorHandler;
+  onRequest?: (config: HttpRequestConfig) => HttpRequestConfig | Promise<HttpRequestConfig>;
+  onRequestError?: RequestErrorHandler;
 }
 
-interface InternalResponseInterceptor extends ResponseInterceptor {
-  handler: ResponseInterceptorHandler;
+interface InternalResponseInterceptor {
+  id: string;
+  priority: number;
+  handler: ResponseInterceptorHandler<ESObject>;
   errorHandler?: ResponseErrorHandler;
+  onResponse?: ResponseInterceptorHandler<ESObject>;
+  onResponseError?: ResponseErrorHandler;
 }
 
 interface InterceptorOptions {
@@ -129,7 +138,7 @@ export class InterceptorManager {
     return processedResponse as HttpResponse<T>;
   }
 
-  private async handleInterceptorError(error: ESObject, errorHandler?: RequestErrorHandler | ResponseErrorHandler): Promise<HttpError> {
+  private async handleInterceptorError(error: Object | null, errorHandler?: RequestErrorHandler | ResponseErrorHandler): Promise<HttpError> {
     const typedError = this.normalizeError(error);
     if (errorHandler) {
       const httpError = this.toHttpError(typedError);
@@ -154,7 +163,7 @@ export class InterceptorManager {
     return httpError;
   }
 
-  private normalizeError(error: ESObject): Error {
+  private normalizeError(error: Object | null): Error {
     if (error instanceof Error) {
       return error;
     }

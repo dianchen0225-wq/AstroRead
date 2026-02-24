@@ -73,4 +73,7 @@ export interface BookSource {
   addTime: number;
   status?: BookSourceStatus;
   validation?: BookSourceValidation;
+  keywordEncoding?: string;
+  keywordSeparator?: string;
+  advancedQuerySupport?: boolean;
 }

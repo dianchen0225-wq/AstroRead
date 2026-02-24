@@ -3,7 +3,7 @@
  * 封装 HarmonyOS Toast 提示功能
  */
 
-import promptAction from '@ohos.promptAction';
+import { promptAction } from '@kit.ArkUI';
 import { Logger } from './Logger';
 
 const TAG = 'ToastUtils';

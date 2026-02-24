@@ -2,11 +2,14 @@
  * JavaScript引擎封装类
  * 使用HarmonyOS内置WebView执行JavaScript代码
  * 用于解析阅读APP格式的书源
+ * 
+ * 安全增强：使用统一的 JSSecurityConfig 进行安全验证
  */
 
-import webview from '@ohos.web.webview';
+import { webview } from '@kit.ArkWeb';
 import { Logger } from './Logger';
 import { HTMLParser } from './HTMLParser';
+import { JSSecurityConfig, SecurityValidationResult, SAFE_GLOBALS, FORBIDDEN_GLOBALS } from './JSSecurityConfig';
 
 export interface JSExecutionResult {
   success: boolean;
@@ -41,76 +44,17 @@ interface ValidationResult {
   error?: string;
 }
 
-const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
-  maxScriptLength: 50000,
-  maxExecutionTime: 5000,
-  maxNestedDepth: 10
-};
-
-const FORBIDDEN_PATTERNS: RegExp[] = [
-  /eval\s*\(/gi,
-  /Function\s*\(/gi,
-  /new\s+Function\s*\(/gi,
-  /document\.\s*/gi,
-  /window\.\s*/gi,
-  /globalThis\.\s*/gi,
-  /process\.\s*/gi,
-  /require\s*\(/gi,
-  /import\s+/gi,
-  /WebSocket\s*\(/gi,
-  /XMLHttpRequest\s*\(/gi,
-  /fetch\s*\(/gi,
-  /localStorage/gi,
-  /sessionStorage/gi,
-  /indexedDB/gi,
-  /openDatabase/gi,
-  /Worker\s*\(/gi,
-  /SharedArrayBuffer/gi,
-  /Atomics\./gi,
-  /__proto__/gi,
-  /prototype\s*\[/gi,
-  /constructor\s*\(/gi,
-  /Object\.defineProperty/gi,
-  /Object\.setPrototypeOf/gi,
-  /Reflect\./gi,
-  /Proxy\s*\(/gi,
-  /\.innerHTML\s*=/gi,
-  /\.outerHTML\s*=/gi,
-  /alert\s*\(/gi,
-  /confirm\s*\(/gi,
-  /prompt\s*\(/gi,
-  /this\s*\[\s*['"]/gi,
-  /\.constructor\b/gi,
-  /\.prototype\b/gi,
-  /Object\.getPrototypeOf/gi,
-  /Object\.create\s*\(/gi,
-  /delete\s+\w+\s*\.\s*\w+/gi,
-  /with\s*\(/gi,
-  /debugger\b/gi
-];
-
-const DANGEROUS_KEYWORDS: string[] = [
-  'eval', 'Function', 'constructor', 'prototype', '__proto__',
-  'defineProperty', 'getOwnPropertyDescriptor', 'setPrototypeOf',
-  'getPrototypeOf', 'create', 'Proxy', 'Reflect', 'require',
-  'import', 'process', 'global', 'globalThis', 'module', 'exports'
-];
-
 export class JSEngine {
   private static instance: JSEngine | null = null;
   private webController: webview.WebviewController | null = null;
   private isInitialized: boolean = false;
   private readonly TAG = 'JSEngine';
-  private securityConfig: SecurityConfig;
+  private securityConfig: JSSecurityConfig;
   private pendingOperations: Set<Promise<JSExecutionResult>> = new Set();
   private isDestroying: boolean = false;
 
-  private constructor(config: Partial<SecurityConfig> = {}) {
-    this.securityConfig = {
-      maxScriptLength: config.maxScriptLength ?? DEFAULT_SECURITY_CONFIG.maxScriptLength,
-      maxExecutionTime: config.maxExecutionTime ?? DEFAULT_SECURITY_CONFIG.maxExecutionTime,
-      maxNestedDepth: config.maxNestedDepth ?? DEFAULT_SECURITY_CONFIG.maxNestedDepth
-    };
+  private constructor() {
+    this.securityConfig = JSSecurityConfig.getInstance();
   }
 
   static getInstance(): JSEngine {
@@ -143,83 +87,21 @@ export class JSEngine {
   }
 
   validateScript(script: string): ValidationResult {
-    if (!script || script.trim().length === 0) {
-      const result: ValidationResult = { valid: false, error: '脚本为空' };
-      return result;
-    }
-
-    if (script.length > this.securityConfig.maxScriptLength) {
-      const result: ValidationResult = { valid: false, error: `脚本长度超过限制 (${this.securityConfig.maxScriptLength}字符)` };
-      return result;
-    }
-
-    for (const pattern of FORBIDDEN_PATTERNS) {
-      pattern.lastIndex = 0;
-      if (pattern.test(script)) {
-        Logger.warn(this.TAG, `脚本包含禁止的模式: ${pattern.source}`);
-        const result: ValidationResult = { valid: false, error: `脚本包含不安全的代码模式` };
-        return result;
-      }
-    }
-
-    const bracketCount = (script.match(/\(/g) || []).length;
-    const closeBracketCount = (script.match(/\)/g) || []).length;
-    if (Math.abs(bracketCount - closeBracketCount) > this.securityConfig.maxNestedDepth) {
-      const result: ValidationResult = { valid: false, error: '脚本嵌套深度超过限制' };
-      return result;
-    }
-
-    const braceCount = (script.match(/\{/g) || []).length;
-    const closeBraceCount = (script.match(/\}/g) || []).length;
-    if (Math.abs(braceCount - closeBraceCount) > this.securityConfig.maxNestedDepth) {
-      const result: ValidationResult = { valid: false, error: '脚本括号不匹配' };
-      return result;
-    }
-
-    const keywordCheck = this.checkDangerousKeywords(script);
-    if (!keywordCheck.valid) {
-      const result: ValidationResult = { valid: false, error: keywordCheck.error || '脚本包含危险关键字' };
-      return result;
-    }
-
-    const result: ValidationResult = { valid: true };
-    return result;
-  }
-
-  private checkDangerousKeywords(script: string): ValidationResult {
-    const normalizedScript = script.replace(/\s+/g, ' ').toLowerCase();
+    // 使用统一的安全配置进行验证
+    const result = this.securityConfig.validateScript(script);
     
-    for (const keyword of DANGEROUS_KEYWORDS) {
-      const patterns = [
-        new RegExp(`\\b${keyword}\\s*\\(`, 'i'),
-        new RegExp(`\\.${keyword}\\b`, 'i'),
-        new RegExp(`\\b${keyword}\\s*:`, 'i'),
-      ];
-      
-      for (const pattern of patterns) {
-        pattern.lastIndex = 0;
-        if (pattern.test(normalizedScript)) {
-          return { valid: false, error: `检测到危险关键字: ${keyword}` };
-        }
-      }
+    if (!result.valid) {
+      return { valid: false, error: result.error };
     }
     
     return { valid: true };
   }
 
   sanitizeInput(input: string): string {
-    return input
-      .replace(/\\/g, '\\\\')
-      .replace(/`/g, '\\`')
-      .replace(/\$/g, '\\$')
-      .replace(/"/g, '\\"')
-      .replace(/'/g, "\\'")
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
+    return this.securityConfig.sanitizeInput(input);
   }
 
-  async execute(script: string, timeout: number = 5000): Promise<JSExecutionResult> {
+  async execute(script: string, timeout?: number): Promise<JSExecutionResult> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -241,7 +123,8 @@ export class JSEngine {
       };
     }
 
-    const actualTimeout = Math.min(timeout, this.securityConfig.maxExecutionTime);
+    const config = this.securityConfig.getConfig();
+    const actualTimeout = Math.min(timeout ?? config.maxExecutionTime, config.maxExecutionTime);
 
     const operationPromise = new Promise<JSExecutionResult>((resolve) => {
       let resolved = false;
@@ -359,8 +242,17 @@ export class JSEngine {
   }
 
   async executeSearchUrlScript(script: string, keyword: string, page: number = 1, baseUrl: string = ''): Promise<string> {
+    // 净化输入
     const sanitizedKeyword = this.sanitizeInput(keyword);
-    const parser = HTMLParser.getInstance();
+    const sanitizedBaseUrl = this.sanitizeInput(baseUrl);
+    
+    // 提取并验证 JS 代码
+    const jsCode = script.replace('@js:', '');
+    const validation = this.validateScript(jsCode);
+    if (!validation.valid) {
+      Logger.error(this.TAG, `搜索URL脚本安全验证失败: ${validation.error}`);
+      return '';
+    }
 
     const envScript = `
       (function() {
@@ -421,9 +313,9 @@ export class JSEngine {
 
         const key = "${sanitizedKeyword}";
         const page = ${page};
-        const baseUrl = "${baseUrl}";
+        const baseUrl = "${sanitizedBaseUrl}";
 
-        ${script.replace('@js:', '')}
+        ${jsCode}
       })();
     `;
 
@@ -438,7 +330,16 @@ export class JSEngine {
   }
 
   async executeRuleScript(html: string, rule: string): Promise<string> {
+    // 净化输入
     const sanitizedHtml = this.sanitizeInput(html);
+    
+    // 提取并验证 JS 代码
+    const jsCode = rule.replace('@js:', '').replace('<js>', '').replace('</js>', '');
+    const validation = this.validateScript(jsCode);
+    if (!validation.valid) {
+      Logger.error(this.TAG, `规则脚本安全验证失败: ${validation.error}`);
+      return '';
+    }
 
     const envScript = `
       (function() {
@@ -475,7 +376,7 @@ export class JSEngine {
         const result = "${sanitizedHtml}";
 
         // 用户规则
-        ${rule.replace('@js:', '').replace('<js>', '').replace('</js>', '')}
+        ${jsCode}
       })();
     `;
 

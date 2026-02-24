@@ -2,7 +2,8 @@ import { Logger } from './Logger';
 import { CssSelectorParser } from './CssSelectorParser';
 import { EntityDecoder } from '../core/utils/EntityDecoder';
 import { EnhancedJSEngine } from './EnhancedJSEngine';
-import { RuleEngine } from './RuleEngine';
+import XPathEngine from './XPathEngine';
+import { SafeRegex } from './SafeRegex';
 
 export type RuleMode = 'Default' | 'XPath' | 'Json' | 'Regex' | 'Js';
 
@@ -72,14 +73,6 @@ export class AnalyzeRule {
       if (context.source) this.ruleContext.source = context.source;
     }
     this.jsEngine = EnhancedJSEngine.getInstance();
-    this.syncToRuleEngine();
-  }
-
-  private syncToRuleEngine(): void {
-    RuleEngine.setContext({
-      baseUrl: this.ruleContext.baseUrl,
-      variables: this.ruleContext.variables
-    });
   }
 
   setContent(content: string, baseUrl?: string): AnalyzeRule {
@@ -93,25 +86,22 @@ export class AnalyzeRule {
       this.baseUrl = baseUrl;
       this.ruleContext.baseUrl = baseUrl;
     }
-    this.syncToRuleEngine();
     return this;
   }
 
   setBaseUrl(baseUrl: string): AnalyzeRule {
     this.baseUrl = baseUrl;
     this.ruleContext.baseUrl = baseUrl;
-    this.syncToRuleEngine();
     return this;
   }
 
   setVariable(key: string, value: string): AnalyzeRule {
     this.ruleContext.variables.set(key, value);
-    RuleEngine.putVariable(key, value);
     return this;
   }
 
   getVariable(key: string): string {
-    return RuleEngine.getVariable(key);
+    return this.ruleContext.variables.get(key) || '';
   }
 
   getString(rule: string, isUrl: boolean = false): Promise<string> {
@@ -364,7 +354,7 @@ export class AnalyzeRule {
       
       switch (rule.mode) {
         case 'Regex':
-          result = RuleEngine.parseRuleList(`@regex:${rule.rule}`, result.length > 0 ? result.join('\n') : this.content);
+          result = this.executeRegexElements(rule.rule, result.length > 0 ? result.join('\n') : this.content);
           break;
         case 'Js':
           const jsResult = await this.evalJS(rule.rule);
@@ -373,12 +363,14 @@ export class AnalyzeRule {
           }
           break;
         case 'Json':
-          result = RuleEngine.parseRuleList(`@json:${rule.rule}`, result.length > 0 ? result.join('\n') : this.content);
+          result = this.executeJsonElements(rule.rule, result.length > 0 ? result.join('\n') : this.content);
           break;
         case 'XPath':
+          result = XPathEngine.selectElements(result.length > 0 ? result.join('\n') : this.content, rule.rule);
+          break;
         case 'Default':
         default:
-          result = RuleEngine.parseRuleList(rule.rule, result.length > 0 ? result.join('\n') : this.content);
+          result = CssSelectorParser.selectElements(result.length > 0 ? result.join('\n') : this.content, rule.rule);
           break;
       }
     }
@@ -391,14 +383,14 @@ export class AnalyzeRule {
       case 'Js':
         return String(await this.evalJS(rule.rule) || '');
       case 'Json':
-        return RuleEngine.parseRule(`@json:${rule.rule}`, content);
+        return this.executeJsonRule(rule.rule, content);
       case 'XPath':
-        return CssSelectorParser.extractValue(content, rule.rule);
+        return XPathEngine.selectFirst(content, rule.rule);
       case 'Regex':
-        return RuleEngine.parseRule(`@regex:${rule.rule}`, content);
+        return this.executeRegexRule(rule.rule, content);
       case 'Default':
       default:
-        return RuleEngine.parseRule(rule.rule, content);
+        return CssSelectorParser.extractValue(content, rule.rule);
     }
   }
 
@@ -411,15 +403,169 @@ export class AnalyzeRule {
         }
         return jsResult ? [String(jsResult)] : [];
       case 'Json':
-        return RuleEngine.parseRuleList(`@json:${rule.rule}`, content);
+        return this.executeJsonRuleList(rule.rule, content);
       case 'XPath':
-        return CssSelectorParser.selectElements(content, rule.rule);
+        return XPathEngine.selectElements(content, rule.rule);
       case 'Regex':
-        return RuleEngine.parseRuleList(`@regex:${rule.rule}`, content);
+        return this.executeRegexRuleList(rule.rule, content);
       case 'Default':
       default:
-        return RuleEngine.parseRuleList(rule.rule, content);
+        return CssSelectorParser.selectElements(content, rule.rule);
     }
+  }
+
+  private executeJsonRule(rule: string, content: string): string {
+    try {
+      const jsonData = this.parseJsonContent(content);
+      if (jsonData === null) return '';
+      return this.extractJsonValue(jsonData, rule);
+    } catch (e) {
+      Logger.error(AnalyzeRule.TAG, `JSON规则解析失败: ${e}`);
+      return '';
+    }
+  }
+
+  private parseJsonContent(content: string): JsonValue | null {
+    try {
+      return JSON.parse(content) as JsonValue;
+    } catch {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0]) as JsonValue;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  }
+
+  private executeJsonRuleList(rule: string, content: string): string[] {
+    try {
+      const jsonData = this.parseJsonContent(content);
+      if (jsonData === null) return [];
+      
+      const result = this.extractJsonValuePath(jsonData, rule);
+      if (Array.isArray(result)) {
+        return this.convertJsonArrayToStringArray(result);
+      }
+      return result ? [String(result)] : [];
+    } catch (e) {
+      Logger.error(AnalyzeRule.TAG, `JSON规则列表解析失败: ${e}`);
+      return [];
+    }
+  }
+
+  private convertJsonArrayToStringArray(arr: JsonValue[]): string[] {
+    const result: string[] = [];
+    for (const item of arr) {
+      if (typeof item === 'object' && item !== null) {
+        result.push(JSON.stringify(item));
+      } else {
+        result.push(String(item));
+      }
+    }
+    return result;
+  }
+
+  private executeJsonElements(rule: string, content: string): string[] {
+    return this.executeJsonRuleList(rule, content);
+  }
+
+  private executeRegexRule(rule: string, content: string): string {
+    try {
+      const match = SafeRegex.safeMatch(rule, content);
+      if (match) {
+        return match[1] || match[0];
+      }
+      return '';
+    } catch (e) {
+      Logger.error(AnalyzeRule.TAG, `正则规则解析失败: ${e}`);
+      return '';
+    }
+  }
+
+  private executeRegexRuleList(rule: string, content: string): string[] {
+    try {
+      const matches = SafeRegex.safeMatchAll(rule, content);
+      const results: string[] = [];
+      
+      for (const match of matches) {
+        results.push(match[1] || match[0]);
+      }
+      
+      return results;
+    } catch (e) {
+      Logger.error(AnalyzeRule.TAG, `正则规则列表解析失败: ${e}`);
+      return [];
+    }
+  }
+
+  private executeRegexElements(rule: string, content: string): string[] {
+    return this.executeRegexRuleList(rule, content);
+  }
+
+  private extractJsonValue(data: JsonValue | null, path: string): string {
+    const value = this.extractJsonValuePath(data, path);
+    if (value === null || value === undefined) {
+      return '';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    return '';
+  }
+
+  private extractJsonValuePath(data: JsonValue | null, path: string): JsonValue | undefined {
+    if (!data || !path) {
+      return data;
+    }
+    
+    let processedPath = path.trim();
+    
+    if (processedPath.startsWith('$')) {
+      processedPath = processedPath.substring(1);
+      if (processedPath.startsWith('.')) {
+        processedPath = processedPath.substring(1);
+      }
+    }
+    
+    if (!processedPath || processedPath === '.') {
+      return data;
+    }
+    
+    const parts = processedPath.split(/[.\[\]]+/).filter((p: string) => p.length > 0);
+    let current: JsonValue | undefined = data;
+    
+    for (const part of parts) {
+      if (current === null || current === undefined) {
+        return undefined;
+      }
+      
+      if (part === '*') {
+        continue;
+      }
+      
+      const index = parseInt(part, 10);
+      if (!isNaN(index)) {
+        if (Array.isArray(current)) {
+          current = current[index];
+        } else {
+          return undefined;
+        }
+      } else if (typeof current === 'object' && !Array.isArray(current) && current !== null) {
+        const objMap = current as Map<string, JsonValue>;
+        current = objMap.get(part);
+      } else {
+        return undefined;
+      }
+    }
+    
+    return current;
   }
 
   private async evalJS(jsCode: string): Promise<JsonValue> {
@@ -453,16 +599,14 @@ export class AnalyzeRule {
     if (!rule.replaceRegex) return content;
     
     try {
-      const regex = this.getOrCreateRegex(rule.replaceRegex);
-      
       if (rule.replaceFirst) {
-        const match = content.match(regex);
+        const match = SafeRegex.safeMatch(rule.replaceRegex, content);
         if (match) {
-          return match[0].replace(regex, rule.replacement);
+          return SafeRegex.safeReplace(match[0], rule.replaceRegex, rule.replacement);
         }
         return '';
       } else {
-        return content.replace(regex, rule.replacement);
+        return SafeRegex.safeReplace(content, rule.replaceRegex, rule.replacement);
       }
     } catch (e) {
       Logger.warn(AnalyzeRule.TAG, `替换正则执行失败: ${e}`);

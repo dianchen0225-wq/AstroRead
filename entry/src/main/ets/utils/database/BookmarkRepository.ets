@@ -1,4 +1,4 @@
-import relationalStore from '@ohos.data.relationalStore';
+import { relationalStore } from '@kit.ArkData';
 import { Bookmark } from '../../models/Bookmark';
 import { Logger } from '../Logger';
 

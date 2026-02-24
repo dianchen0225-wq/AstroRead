@@ -1,5 +1,5 @@
-import relationalStore from '@ohos.data.relationalStore';
-import common from '@ohos.app.ability.common';
+import { relationalStore } from '@kit.ArkData';
+import { common } from '@kit.AbilityKit';
 import { DatabaseSchema } from './database/DatabaseSchema';
 import { BookRepository } from './database/BookRepository';
 import { BookSourceRepository, PagedBookSourcesResult } from './database/BookSourceRepository';

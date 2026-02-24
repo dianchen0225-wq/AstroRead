@@ -4,7 +4,7 @@ import { ImageScrapeManager, BookImageResult, ScrapeProgress } from './ImageScra
 import { ImageScraperService, ImageDownloadResult, ImageScrapeStats } from './ImageScraperService';
 import { ImageDetector, ImageCandidate } from './ImageDetector';
 import { Logger } from './Logger';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 
 export interface ImageEnhancedBook extends Book {
   localCoverPath?: string;

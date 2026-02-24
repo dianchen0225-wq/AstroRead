@@ -6,7 +6,7 @@ import { NetworkManager } from '../utils/NetworkManager';
 import { IdGenerator } from '../utils/IdGenerator';
 import { ParsedChapterItem } from '../utils/ContentParser';
 import { Logger } from '../utils/Logger';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 
 export interface PagedChaptersResult {
   chapters: Chapter[];
@@ -41,6 +41,24 @@ export class ChapterViewModel {
   }
 
   /**
+   * 清理资源，防止内存泄漏
+   * 在页面销毁时调用
+   */
+  destroy(): void {
+    Logger.info(ChapterViewModel.TAG, '销毁 ChapterViewModel，清理资源');
+    
+    // 清理缓存
+    this.clearContentCache();
+    
+    // 清理 context 引用，防止内存泄漏
+    this.context = null;
+    
+    // 清理 networkManager 的 context 引用
+    const nullContext: common.UIAbilityContext | null = null;
+    this.networkManager.setContext(nullContext);
+  }
+
+  /**
    * 获取书籍的章节列表
    */
   async getChapters(bookId: string): Promise<Chapter[]> {
@@ -61,25 +79,51 @@ export class ChapterViewModel {
     pageSize: number = DEFAULT_PAGE_SIZE
   ): Promise<PagedChaptersResult> {
     const startTime = Date.now();
-    
+
     try {
+      // 参数边界检查
+      const safePage = Math.max(1, Math.floor(page));
+      const safePageSize = Math.max(1, Math.min(pageSize, 500)); // 限制最大每页数量
+
       const allChapters = await this.getChaptersByBookId(bookId);
       const totalCount = allChapters.length;
-      
-      const startIndex = (page - 1) * pageSize;
-      const endIndex = Math.min(startIndex + pageSize, totalCount);
-      
+
+      // 边界检查：如果总数为0，直接返回空结果
+      if (totalCount === 0) {
+        return {
+          chapters: [],
+          totalCount: 0,
+          currentPage: safePage,
+          pageSize: safePageSize,
+          hasMore: false
+        };
+      }
+
+      const startIndex = (safePage - 1) * safePageSize;
+      const endIndex = Math.min(startIndex + safePageSize, totalCount);
+
+      // 边界检查：如果起始索引超出范围，返回空结果
+      if (startIndex >= totalCount) {
+        return {
+          chapters: [],
+          totalCount: totalCount,
+          currentPage: safePage,
+          pageSize: safePageSize,
+          hasMore: false
+        };
+      }
+
       const chapters = allChapters.slice(startIndex, endIndex);
       const hasMore = endIndex < totalCount;
-      
+
       const elapsed = Date.now() - startTime;
-      Logger.info(ChapterViewModel.TAG, `分页获取章节: 页${page}, 每页${pageSize}, 总数${totalCount}, 耗时${elapsed}ms`);
-      
+      Logger.info(ChapterViewModel.TAG, `分页获取章节: 页${safePage}, 每页${safePageSize}, 总数${totalCount}, 耗时${elapsed}ms`);
+
       return {
         chapters: chapters,
         totalCount: totalCount,
-        currentPage: page,
-        pageSize: pageSize,
+        currentPage: safePage,
+        pageSize: safePageSize,
         hasMore: hasMore
       };
     } catch (error) {
@@ -369,22 +413,73 @@ export class ChapterViewModel {
    * 获取下一章
    */
   async getNextChapter(currentChapter: Chapter, chapters: Chapter[]): Promise<Chapter | null> {
-    const currentIndex = chapters.findIndex((ch: Chapter) => ch.id === currentChapter.id);
-    if (currentIndex >= 0 && currentIndex < chapters.length - 1) {
-      return chapters[currentIndex + 1];
+    // 空值检查
+    if (!currentChapter || !chapters || chapters.length === 0) {
+      return null;
     }
-    return null;
+
+    const currentIndex = chapters.findIndex((ch: Chapter) => ch.id === currentChapter.id);
+
+    // 边界检查：未找到当前章节或已是最后一章
+    if (currentIndex < 0 || currentIndex >= chapters.length - 1) {
+      return null;
+    }
+
+    return chapters[currentIndex + 1];
   }
 
   /**
    * 获取上一章
    */
   async getPrevChapter(currentChapter: Chapter, chapters: Chapter[]): Promise<Chapter | null> {
-    const currentIndex = chapters.findIndex((ch: Chapter) => ch.id === currentChapter.id);
-    if (currentIndex > 0) {
-      return chapters[currentIndex - 1];
+    // 空值检查
+    if (!currentChapter || !chapters || chapters.length === 0) {
+      return null;
     }
-    return null;
+
+    const currentIndex = chapters.findIndex((ch: Chapter) => ch.id === currentChapter.id);
+
+    // 边界检查：未找到当前章节或已是第一章
+    if (currentIndex <= 0) {
+      return null;
+    }
+
+    return chapters[currentIndex - 1];
+  }
+
+  /**
+   * 根据索引安全获取章节
+   * @param chapters 章节列表
+   * @param index 章节索引
+   * @returns 章节对象或null
+   */
+  getChapterByIndex(chapters: Chapter[], index: number): Chapter | null {
+    // 空值检查
+    if (!chapters || chapters.length === 0) {
+      return null;
+    }
+
+    // 边界检查
+    const safeIndex = Math.floor(index);
+    if (safeIndex < 0 || safeIndex >= chapters.length) {
+      Logger.warn(ChapterViewModel.TAG, `章节索引越界: ${safeIndex}, 总数: ${chapters.length}`);
+      return null;
+    }
+
+    return chapters[safeIndex];
+  }
+
+  /**
+   * 安全获取章节索引
+   * @param chapters 章节列表
+   * @param chapterId 章节ID
+   * @returns 章节索引，未找到返回-1
+   */
+  getChapterIndex(chapters: Chapter[], chapterId: string): number {
+    if (!chapters || chapters.length === 0 || !chapterId) {
+      return -1;
+    }
+    return chapters.findIndex((ch: Chapter) => ch.id === chapterId);
   }
 
 }

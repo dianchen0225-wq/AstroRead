@@ -1,5 +1,5 @@
-import fileIo from '@ohos.file.fs';
-import util from '@ohos.util';
+import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { DatabaseManager } from './DatabaseManager';
 import { Book } from '../models/Book';
 import { BookSource } from '../models/BookSource';
@@ -8,7 +8,7 @@ import { BookCategory } from '../models/BookCategory';
 import { Chapter } from '../models/Book';
 import { Bookmark } from '../models/Bookmark';
 import { Logger } from './Logger';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 
 export interface BackupData {
   version: string;

@@ -9,6 +9,7 @@ import SourceValidator from './SourceValidator';
 import { databaseManager } from './DatabaseManager';
 import { Logger } from './Logger';
 import { util } from '@kit.ArkTS';
+import { SecurityUtils } from './SecurityUtils';
 
 /**
  * 导入结果接口
@@ -527,6 +528,7 @@ class SourceImportManager {
   
   /**
    * 执行内容安全检查 - 增强安全防护
+   * 修复了 JSON 中 JavaScript 代码深度检查不足的问题
    */
   private performContentSafetyCheck(content: string): SafetyCheckResult {
     const errors: string[] = [];
@@ -554,6 +556,16 @@ class SourceImportManager {
     // 检查特殊字符注入
     if (this.containsDangerousCharacters(content)) {
       errors.push('检测到危险字符');
+    }
+    
+    // 新增：深度检查 JSON 中的 header 字段
+    if (this.containsMaliciousHeaders(content)) {
+      errors.push('检测到请求头中的恶意代码');
+    }
+    
+    // 新增：检查 JavaScript 代码注入
+    if (this.containsJavaScriptInjection(content)) {
+      errors.push('检测到 JavaScript 代码注入');
     }
     
     return {
@@ -617,6 +629,111 @@ class SourceImportManager {
     
     for (const pattern of dangerousChars) {
       if (pattern.test(content)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 新增：检查请求头中的恶意代码
+   */
+  private containsMaliciousHeaders(content: string): boolean {
+    try {
+      type JsonValue = string | number | boolean | null | JsonObject | JsonArray;
+      class JsonObject {
+        entries: Array<[string, JsonValue]> = [];
+        constructor(entries: Array<[string, JsonValue]>) {
+          this.entries = entries;
+        }
+      }
+      interface JsonArray extends Array<JsonValue> {}
+      
+      const parsedRaw: object = JSON.parse(content) as object;
+      const parsedEntries: Array<[string, JsonValue]> = Object.entries(parsedRaw) as Array<[string, JsonValue]>;
+      const parsed: JsonObject = new JsonObject(parsedEntries);
+
+      const checkHeaders = (obj: JsonValue): boolean => {
+        if (!obj || typeof obj !== 'object') return false;
+
+        if (Array.isArray(obj)) {
+          for (const item of obj) {
+            if (checkHeaders(item)) return true;
+          }
+          return false;
+        }
+
+        const jsonObj = obj as JsonObject;
+        const entries = jsonObj.entries;
+        for (let i = 0; i < entries.length; i++) {
+          const key = entries[i][0];
+          const value = entries[i][1];
+          if (key.toLowerCase() === 'header' && typeof value === 'string') {
+            const maliciousPatterns = [
+              /javascript:/gi,
+              /vbscript:/gi,
+              /eval\s*\(/gi,
+              /function\s*\(/gi,
+              /=>\s*\{/g,
+              /<script/gi,
+              /on\w+\s*=/gi,
+            ];
+            
+            for (const pattern of maliciousPatterns) {
+              if (pattern.test(value)) {
+                Logger.warn(this.TAG, `检测到 header 字段中的恶意代码`);
+                return true;
+              }
+            }
+          }
+          
+          if (typeof value === 'object' && value !== null) {
+            if (checkHeaders(value)) return true;
+          }
+        }
+        
+        return false;
+      };
+      
+      return checkHeaders(parsed);
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  /**
+   * 新增：检查 JavaScript 代码注入
+   */
+  private containsJavaScriptInjection(content: string): boolean {
+    const jsInjectionPatterns = [
+      // 函数定义
+      /function\s*\w*\s*\([^)]*\)\s*\{/gi,
+      // 箭头函数
+      /\(\s*\)\s*=>\s*\{/g,
+      /\w+\s*=>\s*\{/g,
+      // 立即执行函数
+      /\(\s*function\s*\(\s*\)\s*\{/gi,
+      /\(\s*\)\s*=>/g,
+      // 危险的全局对象访问
+      /window\s*\.\s*\w+/gi,
+      /document\s*\.\s*\w+/gi,
+      /globalThis\s*\.\s*\w+/gi,
+      // 动态代码执行
+      /eval\s*\(/gi,
+      /Function\s*\(/gi,
+      /setTimeout\s*\(\s*["']/gi,
+      /setInterval\s*\(\s*["']/gi,
+      // 原型链污染
+      /__proto__/g,
+      /prototype\s*\.\s*\w+\s*=/g,
+      // 构造函数
+      /constructor\s*\.\s*\w+/gi,
+    ];
+    
+    for (const pattern of jsInjectionPatterns) {
+      if (pattern.test(content)) {
+        Logger.warn(this.TAG, `检测到 JavaScript 代码注入模式: ${pattern.source}`);
         return true;
       }
     }
@@ -902,38 +1019,51 @@ class SourceImportManager {
 
   /**
    * 验证文件路径安全性 - 增强版
+   * 修复了路径遍历漏洞，支持多重编码绕过检测
+   */
+  /**
+   * 检查文件路径是否安全
+   * 使用SecurityUtils进行深度安全检查，修复路径遍历漏洞
    */
   private isSafeFilePath(filePath: string): boolean {
-    if (!filePath || filePath.length > 4096) {
-      return false;
-    }
-
-    if (filePath.includes('\0')) {
-      return false;
-    }
-
-    const normalizedPath = this.normalizePath(filePath);
+    // 使用SecurityUtils的深度解码和路径检查
+    const decodedPath = SecurityUtils.deepDecodePath(filePath);
+    const normalizedPath = SecurityUtils.normalizePath(decodedPath);
     
-    if (normalizedPath.includes('..')) {
+    // 长度检查
+    if (!filePath || filePath.length > 4096) {
+      Logger.warn(this.TAG, '文件路径为空或过长');
       return false;
     }
 
+    // 使用SecurityUtils验证扩展名
+    if (!SecurityUtils.isAllowedExtension(normalizedPath)) {
+      Logger.warn(this.TAG, `文件路径扩展名不合法: ${normalizedPath}`);
+      return false;
+    }
+
+    // 检查空字符注入
+    if (filePath.includes('\0') || filePath.includes('%00')) {
+      Logger.warn(this.TAG, '文件路径包含空字节');
+      return false;
+    }
+
+    // 检查双斜杠
     if (normalizedPath.includes('//') || normalizedPath.includes('\\\\')) {
+      Logger.warn(this.TAG, '文件路径包含双斜杠');
       return false;
     }
 
+    // 检查危险的字符和模式
     const dangerousPatterns = [
-      /\.\./,
-      /~\//,
-      /\$\(/,
-      /\$\{/,
-      /`/,
-      /\|/,
-      /;/,
-      /&/,
-      /\$\(/,
-      />/,
-      /</
+      /~\//,                     // 用户主目录
+      /\$\(/, /\$\{/,            // 命令注入
+      /`/,                       // 命令替换
+      /\|/,                      // 管道
+      /;|&/,                     // 命令分隔符
+      />|</,                     // 重定向
+      /\x0a|\x0d/,               // 换行符
+      /%0a|%0d|%0A|%0D/i,       // URL 编码换行符
     ];
 
     for (const pattern of dangerousPatterns) {
@@ -943,16 +1073,35 @@ class SourceImportManager {
       }
     }
 
-    const allowedExtensions = ['.json', '.txt', '.xml'];
-    const hasValidExtension = allowedExtensions.some((ext: string) => normalizedPath.toLowerCase().endsWith(ext));
-
-    if (!hasValidExtension) {
+    // 检查 Unicode 规范化攻击
+    const unicodeDots = /\.\u002e|\u002e\./;
+    if (unicodeDots.test(normalizedPath)) {
+      Logger.warn(this.TAG, '文件路径包含Unicode点字符攻击');
       return false;
     }
 
+    // 检查路径中的非法字符
+    // 只允许字母、数字、下划线、连字符、点、斜杠和冒号 (Windows 盘符)
     const safePathPattern = /^[a-zA-Z0-9_\-./\\:]+$/;
     if (!safePathPattern.test(normalizedPath)) {
+      Logger.warn(this.TAG, `文件路径包含非法字符: ${normalizedPath}`);
       return false;
+    }
+
+    // 检查绝对路径是否指向允许的目录
+    // 禁止访问系统目录
+    const forbiddenPaths = [
+      '/etc/', '/usr/', '/bin/', '/sbin/', '/lib/', '/lib64/',
+      '/boot/', '/dev/', '/proc/', '/sys/', '/root/', '/home/',
+      'C:/Windows/', 'C:/Program Files/', 'C:/ProgramData/',
+      '/System/', '/Applications/', '/Library/',
+    ];
+    
+    for (const forbidden of forbiddenPaths) {
+      if (normalizedPath.toLowerCase().startsWith(forbidden.toLowerCase())) {
+        Logger.warn(this.TAG, `文件路径指向禁止访问的系统目录: ${forbidden}`);
+        return false;
+      }
     }
 
     return true;

@@ -1,8 +1,8 @@
 import { LocalBook, LocalChapter, TxtParseResult, LocalBookMetadata } from '../models/LocalBook';
 import { Logger } from './Logger';
 import { IdGenerator } from './IdGenerator';
-import fs from '@ohos.file.fs';
-import common from '@ohos.app.ability.common';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
 
 export class LocalFileParser {
   private static readonly TAG = 'LocalFileParser';
@@ -175,4 +175,3 @@ export class LocalFileParser {
   }
 }
 
-import util from '@ohos.util';

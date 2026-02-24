@@ -5,9 +5,9 @@ import { LocalFileParser } from '../utils/LocalFileParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Logger } from '../utils/Logger';
 import { NavigationManager } from '../common/NavigationManager';
-import common from '@ohos.app.ability.common';
-import picker from '@ohos.file.picker';
-import fs from '@ohos.file.fs';
+import { common } from '@kit.AbilityKit';
+import { picker } from '@kit.CoreFileKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 
 @Entry
 @ComponentV2

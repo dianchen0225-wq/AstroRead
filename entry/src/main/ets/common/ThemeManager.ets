@@ -5,7 +5,7 @@
 
 import { preferences } from '@kit.ArkData';
 import { Logger } from '../utils/Logger';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 
 const THEME_PREFERENCES_NAME = 'theme_preferences';
 const THEME_MODE_KEY = 'theme_mode';

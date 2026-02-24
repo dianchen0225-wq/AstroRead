@@ -4,7 +4,7 @@ import { ChapterViewModel } from './ChapterViewModel';
 import { BookmarkViewModel } from './BookmarkViewModel';
 import { CategoryViewModel } from './CategoryViewModel';
 import { ReadConfigViewModel } from './ReadConfigViewModel';
-import common from '@ohos.app.ability.common';
+import { common } from '@kit.AbilityKit';
 
 export class ViewModelManager {
   private static instance: ViewModelManager | null = null;
@@ -102,6 +102,15 @@ export class ViewModelManager {
   }
   
   clearAll(): void {
+    // 调用各个 ViewModel 的销毁方法，防止内存泄漏
+    if (this.bookViewModel !== null) {
+      this.bookViewModel.destroy();
+    }
+    
+    if (this.chapterViewModel !== null) {
+      this.chapterViewModel.destroy();
+    }
+    
     this.bookViewModel = null;
     this.bookSourceViewModel = null;
     this.chapterViewModel = null;

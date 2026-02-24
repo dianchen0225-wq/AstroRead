@@ -1,12 +1,15 @@
 /**
  * WebReader - 基于 Web 组件的阅读器实现
  * 使用 Web 组件渲染 HTML 内容，支持 CSS 样式和复杂排版
+ * 增强版：添加安全配置、CSP头处理、XSS防护
  */
 
-import webview from '@ohos.web.webview';
+import { webview } from '@kit.ArkWeb';
 import { themeManager } from '../common/ThemeManager';
 import { ReadConfig } from '../models/ReadConfig';
 import { Logger } from '../utils/Logger';
+import { HtmlUtils } from '../utils/HtmlUtils';
+import { ContentPurifier } from '../utils/ContentPurifier';
 
 // 阅读器配置接口
 export interface WebReaderConfig {
@@ -17,6 +20,39 @@ export interface WebReaderConfig {
   textColor: string;
   theme: 'light' | 'dark' | 'sepia';
 }
+
+// 安全配置接口
+export interface WebSecurityConfig {
+  enableJavaScript: boolean;
+  enableDomStorage: boolean;
+  enableFileAccess: boolean;
+  enableContentSecurityPolicy: boolean;
+  allowedDomains: string[];
+  blockMixedContent: boolean;
+  enableSafeBrowsing: boolean;
+}
+
+// CSP配置
+const CSP_HEADER = `default-src 'self'; ` +
+  `script-src 'self' 'unsafe-inline'; ` +
+  `style-src 'self' 'unsafe-inline'; ` +
+  `img-src 'self' data: https: http:; ` +
+  `font-src 'self' data:; ` +
+  `connect-src 'self' https: http:; ` +
+  `frame-ancestors 'none'; ` +
+  `form-action 'self'; ` +
+  `base-uri 'self';`;
+
+// 默认安全配置
+const DEFAULT_SECURITY_CONFIG: WebSecurityConfig = {
+  enableJavaScript: false,  // 默认禁用JavaScript
+  enableDomStorage: false,  // 默认禁用DOM存储
+  enableFileAccess: false,  // 默认禁用文件访问
+  enableContentSecurityPolicy: true,  // 默认启用CSP
+  allowedDomains: [],  // 允许的域名列表（空表示只允许本地内容）
+  blockMixedContent: true,  // 默认阻止混合内容
+  enableSafeBrowsing: true  // 默认启用安全浏览
+};
 
 /**
  * WebReader 组件
@@ -34,6 +70,8 @@ export struct WebReader {
     textColor: '#333333',
     theme: 'light'
   };
+  // 安全配置
+  @Prop securityConfig: WebSecurityConfig = DEFAULT_SECURITY_CONFIG;
   @State isReady: boolean = false;
 
   // 回调函数
@@ -66,16 +104,32 @@ export struct WebReader {
 
   /**
    * 构建阅读器 HTML 模板
+   * 增强版：添加CSP头和安全meta标签
    */
   private buildReaderHtml(content: string, isHtml: boolean = true): string {
     const safeContent = this.processContent(content, isHtml);
     const themeStyles = this.getThemeStyles();
+    
+    // 构建CSP meta标签
+    const cspMeta = this.securityConfig.enableContentSecurityPolicy 
+      ? `<meta http-equiv="Content-Security-Policy" content="${CSP_HEADER}">`
+      : '';
+    
+    // 安全相关的meta标签
+    const securityMetas = `
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+  <meta name="referrer" content="no-referrer">
+  ${cspMeta}
+    `;
 
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  ${securityMetas}
   <title>阅读器</title>
   <style>
     * {
@@ -271,88 +325,23 @@ export struct WebReader {
 
   /**
    * 深度清理 HTML 内容，防止 XSS 攻击
+   * 增强版：使用 ContentPurifier 进行多层次XSS防护
    */
   private sanitizeHtml(html: string): string {
     if (!html) return '';
 
-    let sanitized = html;
-
-    const dangerousTags = [
-      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-      /<script\b[^>]*>/gi,
-      /<\/script>/gi,
-      /<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi,
-      /<iframe\b[^>]*>/gi,
-      /<\/iframe>/gi,
-      /<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi,
-      /<object\b[^>]*>/gi,
-      /<\/object>/gi,
-      /<embed\b[^>]*>/gi,
-      /<applet\b[^<]*(?:(?!<\/applet>)<[^<]*)*<\/applet>/gi,
-      /<applet\b[^>]*>/gi,
-      /<\/applet>/gi,
-      /<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi,
-      /<form\b[^>]*>/gi,
-      /<\/form>/gi,
-      /<input\b[^>]*>/gi,
-      /<button\b[^>]*>/gi,
-      /<\/button>/gi,
-      /<select\b[^>]*>/gi,
-      /<\/select>/gi,
-      /<textarea\b[^>]*>/gi,
-      /<\/textarea>/gi,
-      /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
-      /<link\b[^>]*>/gi,
-      /<meta\b[^>]*>/gi,
-      /<base\b[^>]*>/gi,
-    ];
-
-    for (const pattern of dangerousTags) {
-      sanitized = sanitized.replace(pattern, '');
-    }
-
-    const eventHandlers = [
-      'onload', 'onerror', 'onclick', 'onmouseover', 'onmouseout', 'onmouseenter',
-      'onmouseleave', 'onmousedown', 'onmouseup', 'onmousemove', 'onkeydown',
-      'onkeyup', 'onkeypress', 'onfocus', 'onblur', 'onchange', 'onsubmit',
-      'onreset', 'onselect', 'onabort', 'oncanplay', 'oncanplaythrough',
-      'ondurationchange', 'onemptied', 'onended', 'oninput', 'oninvalid',
-      'onloadstart', 'onloadeddata', 'onloadedmetadata', 'onpause', 'onplay',
-      'onplaying', 'onprogress', 'onratechange', 'onseeked', 'onseeking',
-      'onstalled', 'onsuspend', 'ontimeupdate', 'onvolumechange', 'onwaiting',
-      'oncopy', 'oncut', 'onpaste', 'ondrag', 'ondragend', 'ondragenter',
-      'ondragleave', 'ondragover', 'ondragstart', 'ondrop', 'onscroll',
-      'onwheel', 'ontouchstart', 'ontouchmove', 'ontouchend', 'ontouchcancel',
-      'onanimationstart', 'onanimationend', 'onanimationiteration',
-      'ontransitionend', 'oncontextmenu', 'onpointerdown', 'onpointermove',
-      'onpointerup', 'onpointercancel', 'onpointerover', 'onpointerout',
-      'onpointerenter', 'onpointerleave', 'ongotpointercapture', 'onlostpointercapture'
-    ];
-
-    for (const handler of eventHandlers) {
-      const patterns = [
-        new RegExp(`\\s+${handler}\\s*=\\s*"[^"]*"`, 'gi'),
-        new RegExp(`\\s+${handler}\\s*=\\s*'[^']*'`, 'gi'),
-        new RegExp(`\\s+${handler}\\s*=\\s*[^\\s>]+`, 'gi'),
-      ];
-      for (const pattern of patterns) {
-        sanitized = sanitized.replace(pattern, '');
-      }
-    }
-
-    sanitized = sanitized.replace(/javascript\s*:/gi, 'blocked:');
-    sanitized = sanitized.replace(/vbscript\s*:/gi, 'blocked:');
-    sanitized = sanitized.replace(/data\s*:\s*text\/html/gi, 'blocked:');
-    sanitized = sanitized.replace(/expression\s*\(/gi, 'blocked(');
-
-    sanitized = sanitized.replace(/src\s*=\s*["']?\s*javascript:/gi, 'src="blocked:"');
-    sanitized = sanitized.replace(/href\s*=\s*["']?\s*javascript:/gi, 'href="blocked:"');
-    sanitized = sanitized.replace(/action\s*=\s*["']?\s*javascript:/gi, 'action="blocked:"');
-    sanitized = sanitized.replace(/formaction\s*=\s*["']?\s*javascript:/gi, 'formaction="blocked:"');
-
-    sanitized = sanitized.replace(/<\s*!--[\s\S]*?--\s*>/g, '');
-
-    return sanitized;
+    // 第一步：使用 ContentPurifier 进行深度净化
+    const purified = ContentPurifier.sanitizeHtml(html);
+    
+    // 第二步：使用 HtmlUtils 进行二次净化
+    return HtmlUtils.sanitizeHtml(purified, {
+      allowTags: ['p', 'br', 'b', 'i', 'u', 'strong', 'em', 'span', 'div', 'a', 'img', 
+                  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote',
+                  'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'td', 'th'],
+      allowAttrs: ['href', 'src', 'alt', 'title', 'class'],
+      allowDataAttrs: false,
+      removeComments: true
+    });
   }
 
   /**
@@ -451,9 +440,21 @@ export struct WebReader {
         .width('100%')
         .height('100%')
         .backgroundColor(this.config.backgroundColor)
-        .javaScriptAccess(true)
-        .domStorageAccess(true)
-        .fileAccess(true)
+        // 安全配置 - 根据配置启用/禁用功能
+        .javaScriptAccess(this.securityConfig.enableJavaScript)
+        .domStorageAccess(this.securityConfig.enableDomStorage)
+        .fileAccess(this.securityConfig.enableFileAccess)
+        // 额外的安全配置
+        .geolocationAccess(false)  // 禁用地理位置访问
+        .mediaPlayGestureAccess(true)  // 需要用户手势才能播放媒体
+        .multiWindowAccess(false)  // 禁用多窗口
+        .webDebuggingAccess(false)  // 禁用Web调试
+        .mixedMode(this.securityConfig.blockMixedContent ? webview.MixedMode.None : webview.MixedMode.All)
+        .darkMode(webview.WebDarkMode.Off)  // 禁用自动暗色模式
+        .cacheMode(webview.CacheMode.Default)
+        .textZoomRatio(100)  // 固定文本缩放比例
+        .initialScale(1)  // 初始缩放比例
+        .overviewModeAccess(false)  // 禁用概览模式
         .onPageBegin(() => {
           this.isReady = true;
           Logger.debug(this.TAG, 'WebView ready');
@@ -468,9 +469,55 @@ export struct WebReader {
             Logger.error(this.TAG, `WebView HTTP error: ${event.response.getResponseCode()}`);
           }
         })
+        // 安全事件处理
+        .onSslErrorEventReceive((event) => {
+          // SSL错误时拒绝继续
+          if (event && event.handler) {
+            event.handler.cancel();
+          }
+          Logger.warn(this.TAG, 'SSL error detected, request blocked');
+        })
+        .onRenderExited(() => {
+          Logger.warn(this.TAG, 'WebView render process exited');
+        })
+        .onRefreshAccessedHistory((event) => {
+          // 记录访问历史（可用于检测可疑URL）
+          if (event && event.url) {
+            Logger.debug(this.TAG, `Accessed: ${event.url}`);
+          }
+        })
     }
     .width('100%')
     .height('100%')
+  }
+  
+  /**
+   * 更新安全配置
+   */
+  public updateSecurityConfig(config: Partial<WebSecurityConfig>): void {
+    this.securityConfig = { ...this.securityConfig, ...config };
+    Logger.info(this.TAG, 'Security config updated');
+  }
+  
+  /**
+   * 检查URL是否在允许的域名列表中
+   */
+  public isUrlAllowed(url: string): boolean {
+    if (!url) return false;
+    
+    // 如果允许的域名列表为空，只允许本地内容
+    if (this.securityConfig.allowedDomains.length === 0) {
+      return url.startsWith('data:') || url.startsWith('about:blank');
+    }
+    
+    try {
+      const urlObj = new URL(url);
+      return this.securityConfig.allowedDomains.some(domain => 
+        urlObj.hostname === domain || urlObj.hostname.endsWith('.' + domain)
+      );
+    } catch {
+      return false;
+    }
   }
 }
 

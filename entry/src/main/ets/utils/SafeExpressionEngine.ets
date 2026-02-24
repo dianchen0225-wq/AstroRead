@@ -6,6 +6,7 @@
 
 import { Logger } from './Logger';
 import { util } from '@kit.ArkTS';
+import { JSSecurityConfig, SecurityValidationResult } from './JSSecurityConfig';
 
 export interface ExpressionContext {
   key?: string;
@@ -26,8 +27,10 @@ export class SafeExpressionEngine {
   private readonly TAG = 'SafeExpressionEngine';
 
   private functions: Map<string, SafeFunction> = new Map();
+  private securityConfig: JSSecurityConfig;
 
   private constructor() {
+    this.securityConfig = JSSecurityConfig.getInstance();
     this.registerBuiltInFunctions();
   }
 
@@ -292,14 +295,36 @@ export class SafeExpressionEngine {
 
   evaluate(expression: string, context: ExpressionContext = {}): string | number | boolean | object | null {
     try {
+      // 表达式长度限制
+      const config = this.securityConfig.getConfig();
+      if (expression.length > config.maxScriptLength) {
+        Logger.error(this.TAG, `表达式长度超过限制: ${expression.length} > ${config.maxScriptLength}`);
+        return '';
+      }
+
+      // 安全验证表达式
+      const validation = this.validateExpression(expression);
+      if (!validation.valid) {
+        Logger.error(this.TAG, `表达式安全验证失败: ${validation.error}`);
+        return '';
+      }
+
       const trimmed = expression.trim();
       
       if (trimmed === '') {
         return '';
       }
 
+      // 净化上下文输入
+      const sanitizedContext: ExpressionContext = {
+        key: context.key ? this.securityConfig.sanitizeInput(context.key) : undefined,
+        page: context.page,
+        baseUrl: context.baseUrl ? this.securityConfig.sanitizeInput(context.baseUrl) : undefined,
+        result: context.result ? this.securityConfig.sanitizeInput(context.result) : undefined
+      };
+
       if (this.isSimpleString(trimmed)) {
-        return this.replaceVariables(trimmed, context);
+        return this.replaceVariables(trimmed, sanitizedContext);
       }
 
       if (this.isSimpleNumber(trimmed)) {
@@ -307,22 +332,76 @@ export class SafeExpressionEngine {
       }
 
       if (this.isSimpleVariable(trimmed)) {
-        return this.getVariable(trimmed, context);
+        return this.getVariable(trimmed, sanitizedContext);
       }
 
       if (this.isTemplateString(trimmed)) {
-        return this.evaluateTemplateString(trimmed, context);
+        return this.evaluateTemplateString(trimmed, sanitizedContext);
       }
 
       if (this.isSimpleExpression(trimmed)) {
-        return this.evaluateSimpleExpression(trimmed, context);
+        return this.evaluateSimpleExpression(trimmed, sanitizedContext);
       }
 
-      return this.evaluateComplexExpression(trimmed, context);
+      return this.evaluateComplexExpression(trimmed, sanitizedContext);
     } catch (error) {
       Logger.error(this.TAG, `表达式求值失败: ${expression}, 错误: ${error}`);
       return '';
     }
+  }
+
+  /**
+   * 验证表达式安全性
+   */
+  private validateExpression(expression: string): SecurityValidationResult {
+    // 检查禁止的模式
+    const forbiddenPatterns = [
+      /eval\s*\(/gi,
+      /Function\s*\(/gi,
+      /require\s*\(/gi,
+      /import\s+/gi,
+      /process\./gi,
+      /global\./gi,
+      /window\./gi,
+      /document\./gi,
+      /__proto__/gi,
+      /constructor\s*\(/gi,
+      /prototype\s*\[/gi,
+    ];
+
+    for (const pattern of forbiddenPatterns) {
+      pattern.lastIndex = 0;
+      if (pattern.test(expression)) {
+        return {
+          valid: false,
+          error: `表达式包含禁止的模式: ${pattern.source}`,
+          severity: 'high'
+        };
+      }
+    }
+
+    // 检查危险关键字
+    const dangerousKeywords = [
+      'eval', 'Function', 'constructor', 'prototype', '__proto__',
+      'require', 'import', 'process', 'global', 'window', 'document'
+    ];
+
+    const normalizedExpr = expression.toLowerCase();
+    for (const keyword of dangerousKeywords) {
+      if (normalizedExpr.includes(keyword.toLowerCase())) {
+        // 更精确的检查
+        const keywordPattern = new RegExp(`\\b${keyword}\\b`, 'i');
+        if (keywordPattern.test(expression)) {
+          return {
+            valid: false,
+            error: `表达式包含危险关键字: ${keyword}`,
+            severity: 'high'
+          };
+        }
+      }
+    }
+
+    return { valid: true };
   }
 
   evaluateAsString(expression: string, context: ExpressionContext = {}): string {

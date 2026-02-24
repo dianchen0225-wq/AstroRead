@@ -1,4 +1,7 @@
 import { Logger } from './Logger';
+import { HtmlUtils } from './HtmlUtils';
+import { TextCleaner } from '../core/utils/TextCleaner';
+import { StringUtils } from './StringUtils';
 
 export interface ValidationRule {
   name: string;
@@ -82,29 +85,9 @@ const JUNK_PATTERNS: RegExp[] = [
 
 export class DataValidator {
   private static instance: DataValidator | null = null;
-  private htmlEntityMap: Map<string, string> = new Map();
 
   private constructor() {
-    this.initHtmlEntityMap();
-  }
-
-  private initHtmlEntityMap(): void {
-    this.htmlEntityMap.set('&lt;', '<');
-    this.htmlEntityMap.set('&gt;', '>');
-    this.htmlEntityMap.set('&amp;', '&');
-    this.htmlEntityMap.set('&quot;', '"');
-    this.htmlEntityMap.set('&apos;', "'");
-    this.htmlEntityMap.set('&nbsp;', ' ');
-    this.htmlEntityMap.set('&copy;', '©');
-    this.htmlEntityMap.set('&reg;', '®');
-    this.htmlEntityMap.set('&trade;', '™');
-    this.htmlEntityMap.set('&mdash;', '—');
-    this.htmlEntityMap.set('&ndash;', '–');
-    this.htmlEntityMap.set('&hellip;', '…');
-    this.htmlEntityMap.set('&lsquo;', '\u2018');
-    this.htmlEntityMap.set('&rsquo;', '\u2019');
-    this.htmlEntityMap.set('&ldquo;', '\u201C');
-    this.htmlEntityMap.set('&rdquo;', '\u201D');
+    // 使用 HtmlUtils 替代 htmlEntityMap
   }
 
   static getInstance(): DataValidator {
@@ -256,11 +239,11 @@ export class DataValidator {
     }
 
     if (opts.stripHtmlTags) {
-      result = result.replace(/<[^>]+>/g, '');
+      result = HtmlUtils.removeHtmlTags(result);
     }
 
     if (opts.decodeEntities) {
-      result = this.decodeHtmlEntities(result);
+      result = HtmlUtils.decodeHtmlEntities(result);
     }
 
     for (const pattern of JUNK_PATTERNS) {
@@ -268,9 +251,8 @@ export class DataValidator {
     }
 
     if (opts.normalizeWhitespace) {
-      result = result.replace(/\r\n/g, '\n');
-      result = result.replace(/\r/g, '\n');
-      result = result.replace(/[ \t]+/g, ' ');
+      result = TextCleaner.cleanLineBreaks(result);
+      result = TextCleaner.normalizeWhitespace(result);
     }
 
     if (opts.removeEmptyLines) {
@@ -312,59 +294,12 @@ export class DataValidator {
     };
   }
 
-  private decodeHtmlEntities(text: string): string {
-    let result = text;
-
-    this.htmlEntityMap.forEach((char: string, entity: string) => {
-      result = result.replace(new RegExp(entity, 'gi'), char);
-    });
-
-    result = result.replace(/&#(\d+);/g, (_match: string, code: string): string => {
-      return String.fromCharCode(parseInt(code, 10));
-    });
-
-    result = result.replace(/&#x([0-9a-fA-F]+);/g, (_match: string, code: string): string => {
-      return String.fromCharCode(parseInt(code, 16));
-    });
-
-    return result;
-  }
-
   private isValidUrl(url: string): boolean {
-    try {
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        return false;
-      }
-      const urlPattern = /^https?:\/\/[^\s<>"{}|\\^`\[\]]+/;
-      return urlPattern.test(url);
-    } catch {
-      return false;
-    }
+    return StringUtils.isValidUrl(url);
   }
 
   extractTextFromHtml(html: string): string {
-    let text = html;
-
-    text = text.replace(/<br\s*\/?>/gi, '\n');
-    text = text.replace(/<\/p>/gi, '\n');
-    text = text.replace(/<\/div>/gi, '\n');
-    text = text.replace(/<\/li>/gi, '\n');
-    text = text.replace(/<li[^>]*>/gi, '• ');
-    text = text.replace(/<h[1-6][^>]*>/gi, '\n');
-    text = text.replace(/<\/h[1-6]>/gi, '\n');
-
-    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-    text = text.replace(/<!--[\s\S]*?-->/g, '');
-    text = text.replace(/<[^>]+>/g, '');
-
-    text = this.decodeHtmlEntities(text);
-
-    text = text.replace(/\n\s*\n\s*\n/g, '\n\n');
-    text = text.replace(/[ \t]+/g, ' ');
-    text = text.trim();
-
-    return text;
+    return HtmlUtils.extractText(html);
   }
 
   sanitizeUrl(url: string): string {

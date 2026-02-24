@@ -1,4 +1,4 @@
-import relationalStore from '@ohos.data.relationalStore';
+import { relationalStore } from '@kit.ArkData';
 import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../../models/BookSource';
 import { Logger } from '../Logger';
 

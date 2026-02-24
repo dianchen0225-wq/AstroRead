@@ -1,5 +1,5 @@
-import { BookSource } from '../../models/BookSource';
-import { Book } from '../../models/Book';
+import { BookSource } from '../models/BookSource';
+import { Book } from '../models/Book';
 import {
   PagedSearchResult,
   SourceSearchStats,
@@ -7,12 +7,12 @@ import {
   DEFAULT_PAGINATION_CONFIG,
   SearchResultBuilder,
   SearchProgress
-} from '../../models/SearchResult';
-import { AnalyzeRule } from '../parser/AnalyzeRule';
-import { ContentProcessor } from '../content/ContentProcessor';
-import { ReplaceRule } from '../../models/ContentFilter';
-import { Logger } from '../performance/Logger';
-import { EntityDecoder } from '../../core/utils/EntityDecoder';
+} from '../models/SearchResult';
+import { AnalyzeRule } from './AnalyzeRule';
+import { ContentProcessor } from './ContentProcessor';
+import { ReplaceRule } from '../models/ContentFilter';
+import { Logger } from './Logger';
+import { EntityDecoder } from '../core/utils/EntityDecoder';
 import { http } from '@kit.NetworkKit';
 
 export interface SearchResult {
