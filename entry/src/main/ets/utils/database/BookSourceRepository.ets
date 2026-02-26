@@ -1,6 +1,6 @@
 import { relationalStore } from '@kit.ArkData';
-import { BookSource, SearchRule, FindRule, ChapterRule, ContentRule } from '../../models/BookSource';
-import { Logger } from '../Logger';
+import { BookSource, SearchRule, ExploreRule, TocRule, ContentRule } from '../../models/BookSource';
+import { Logger } from '../performance/Logger';
 
 const DB_ENABLED_TRUE: number = 1;
 const DB_ENABLED_FALSE: number = 0;
@@ -223,14 +223,14 @@ export class BookSourceRepository {
       'id': bookSource.id,
       'name': bookSource.name,
       'url': bookSource.url,
-      'enabled': bookSource.enabled ? DB_ENABLED_TRUE : DB_ENABLED_FALSE,
-      'header': bookSource.header || null,
-      'search_url': bookSource.searchUrl,
-      'search_rule': JSON.stringify(bookSource.searchRule),
-      'find_rule': bookSource.findRule ? JSON.stringify(bookSource.findRule) : null,
-      'chapter_rule': JSON.stringify(bookSource.chapterRule),
-      'content_rule': JSON.stringify(bookSource.contentRule),
-      'rule_type': bookSource.ruleType,
+      'enabled': bookSource.metadata.enabled ? DB_ENABLED_TRUE : DB_ENABLED_FALSE,
+      'header': bookSource.networkConfig?.header || null,
+      'search_url': bookSource.legacy.searchUrl,
+      'search_rule': JSON.stringify(bookSource.rules.searchRule),
+      'find_rule': bookSource.rules.exploreRule ? JSON.stringify(bookSource.rules.exploreRule) : null,
+      'chapter_rule': JSON.stringify(bookSource.rules.tocRule),
+      'content_rule': JSON.stringify(bookSource.rules.contentRule),
+      'rule_type': bookSource.legacy.ruleType,
       'sort': bookSource.sort || DB_DEFAULT_SORT,
       'last_update_time': Date.now(),
       'add_time': bookSource.addTime || Date.now()
@@ -349,7 +349,7 @@ export class BookSourceRepository {
       };
 
       const chapterRuleJson = this.parseJson(resultSet.getString(chapterRuleIndex));
-      const chapterRule: ChapterRule = {
+      const tocRule: TocRule = {
         chapterList: chapterRuleJson.chapterList as string || '',
         chapterName: chapterRuleJson.chapterName as string || '',
         chapterUrl: chapterRuleJson.chapterUrl as string || '',
@@ -364,10 +364,10 @@ export class BookSourceRepository {
         replaceRule: contentRuleJson.replaceRule as string | undefined
       };
 
-      let findRule: FindRule | undefined = undefined;
+      let exploreRule: ExploreRule | undefined = undefined;
       if (!resultSet.isColumnNull(findRuleIndex)) {
         const findRuleJson = this.parseJson(resultSet.getString(findRuleIndex));
-        findRule = {
+        exploreRule = {
           url: findRuleJson.url as string || '',
           bookList: findRuleJson.bookList as string || '',
           name: findRuleJson.name as string || '',
@@ -378,22 +378,40 @@ export class BookSourceRepository {
         };
       }
 
+      const enabled = resultSet.getLong(enabledIndex) === DB_ENABLED_TRUE;
+      const header = resultSet.isColumnNull(headerIndex)
+        ? undefined
+        : resultSet.getString(headerIndex) || undefined;
+
       return {
         id: resultSet.getString(idIndex) || '',
         name: resultSet.getString(nameIndex) || '',
         url: resultSet.getString(urlIndex) || '',
-        enabled: resultSet.getLong(enabledIndex) === DB_ENABLED_TRUE,
-        header: resultSet.isColumnNull(headerIndex)
-          ? undefined
-          : resultSet.getString(headerIndex) || '',
-        searchUrl: resultSet.getString(searchUrlIndex) || '',
-        searchRule: searchRule,
-        findRule: findRule,
-        chapterRule: chapterRule,
-        contentRule: contentRule,
-        ruleType: (resultSet.getString(ruleTypeIndex) || 'xpath') as 'xpath' | 'jsonpath' | 'regex',
+        metadata: {
+          enabled: enabled,
+          enabledExplore: exploreRule !== undefined
+        },
+        visualConfig: {
+          bookSourceType: 'text',
+          customOrder: resultSet.getLong(sortIndex) || DB_DEFAULT_SORT,
+          weight: 0,
+          respondTime: 180000,
+          lastUpdateTime: resultSet.getLong(lastUpdateTimeIndex) || DB_DEFAULT_TIME
+        },
+        rules: {
+          searchRule: searchRule,
+          exploreRule: exploreRule,
+          tocRule: tocRule,
+          contentRule: contentRule
+        },
+        networkConfig: {
+          header: header
+        },
+        legacy: {
+          searchUrl: resultSet.getString(searchUrlIndex) || '',
+          ruleType: (resultSet.getString(ruleTypeIndex) || 'auto') as 'xpath' | 'jsonpath' | 'regex' | 'auto'
+        },
         sort: resultSet.getLong(sortIndex) || DB_DEFAULT_SORT,
-        lastUpdateTime: resultSet.getLong(lastUpdateTimeIndex) || DB_DEFAULT_TIME,
         addTime: resultSet.getLong(addTimeIndex) || DB_DEFAULT_TIME
       };
     }
@@ -403,16 +421,26 @@ export class BookSourceRepository {
         id: '',
         name: '',
         url: '',
-        enabled: true,
-        header: undefined,
-        searchUrl: '',
-        searchRule: { bookList: '', name: '', author: '', bookUrl: '', cover: undefined, intro: undefined, nextUrl: undefined },
-        findRule: undefined,
-        chapterRule: { chapterList: '', chapterName: '', chapterUrl: '', nextUrl: undefined },
-        contentRule: { content: '', nextUrl: undefined, prevUrl: undefined, replaceRule: undefined },
-        ruleType: 'xpath' as 'xpath' | 'jsonpath' | 'regex',
+        metadata: {
+          enabled: true,
+          enabledExplore: false
+        },
+        visualConfig: {
+          bookSourceType: 'text',
+          customOrder: 0,
+          weight: 0,
+          respondTime: 180000,
+          lastUpdateTime: 0
+        },
+        rules: {
+          searchRule: { bookList: '', name: '', author: '', bookUrl: '', cover: undefined, intro: undefined, nextUrl: undefined },
+          contentRule: { content: '', nextUrl: undefined, prevUrl: undefined }
+        },
+        legacy: {
+          searchUrl: '',
+          ruleType: 'auto'
+        },
         sort: 0,
-        lastUpdateTime: 0,
         addTime: 0
       };
     }

@@ -1,6 +1,6 @@
 import { relationalStore } from '@kit.ArkData';
 import { Bookmark } from '../../models/Bookmark';
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 
 export class BookmarkRepository {
   private static readonly TAG = 'BookmarkRepository';

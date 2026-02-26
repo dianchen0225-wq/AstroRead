@@ -1,21 +1,33 @@
 import { ReadConfig, DEFAULT_READ_CONFIG } from '../models/ReadConfig';
-import { databaseManager } from '../utils/DatabaseManager';
-import { Logger } from '../utils/Logger';
+import { databaseManager } from '../utils/file/DatabaseManager';
+import { Logger } from '../utils/performance/Logger';
+import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
 
 export class ReadConfigViewModel {
   private readConfig: ReadConfig = DEFAULT_READ_CONFIG;
   private readonly databaseManager = databaseManager;
   private static readonly TAG = 'ReadConfigViewModel';
 
-  // 静态属性：默认阅读配置
   static DEFAULT_READ_CONFIG: ReadConfig = DEFAULT_READ_CONFIG;
 
   /**
-   * 加载阅读配置
+   * 加载阅读配置（带缓存）
    */
   async loadReadConfig(): Promise<ReadConfig> {
+    const startTime = Date.now();
+    
     try {
+      const cached = dataCacheManager.get<ReadConfig>(CacheKeys.READ_CONFIG);
+      if (cached !== null) {
+        Logger.debug(ReadConfigViewModel.TAG, `使用缓存阅读配置, 耗时: ${Date.now() - startTime}ms`);
+        this.readConfig = cached;
+        return cached;
+      }
+      
       this.readConfig = await this.databaseManager.getOrCreateReadConfig();
+      dataCacheManager.set(CacheKeys.READ_CONFIG, this.readConfig);
+      
+      Logger.info(ReadConfigViewModel.TAG, `加载阅读配置完成, 耗时: ${Date.now() - startTime}ms`);
       return this.readConfig;
     } catch (error) {
       Logger.error(ReadConfigViewModel.TAG, `加载阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -25,7 +37,6 @@ export class ReadConfigViewModel {
 
   async updateReadConfig(config: Partial<ReadConfig>): Promise<void> {
     try {
-      // 使用对象合并替代 spread 操作
       const updatedConfig: ReadConfig = {
         fontSize: config.fontSize !== undefined ? config.fontSize : this.readConfig.fontSize,
         lineSpacing: config.lineSpacing !== undefined ? config.lineSpacing : this.readConfig.lineSpacing,
@@ -38,10 +49,14 @@ export class ReadConfigViewModel {
         autoScroll: config.autoScroll !== undefined ? config.autoScroll : this.readConfig.autoScroll,
         scrollSpeed: config.scrollSpeed !== undefined ? config.scrollSpeed : this.readConfig.scrollSpeed,
         fontFamily: config.fontFamily !== undefined ? config.fontFamily : this.readConfig.fontFamily,
-        margins: config.margins !== undefined ? config.margins : this.readConfig.margins
+        margins: config.margins !== undefined ? config.margins : this.readConfig.margins,
+        volumeKeyPageTurn: config.volumeKeyPageTurn !== undefined ? config.volumeKeyPageTurn : this.readConfig.volumeKeyPageTurn,
+        clickPageTurn: config.clickPageTurn !== undefined ? config.clickPageTurn : this.readConfig.clickPageTurn
       };
       this.readConfig = updatedConfig;
       await this.databaseManager.updateReadConfig(this.readConfig);
+      
+      dataCacheManager.set(CacheKeys.READ_CONFIG, this.readConfig);
     } catch (error) {
       Logger.error(ReadConfigViewModel.TAG, `更新阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));
@@ -53,9 +68,14 @@ export class ReadConfigViewModel {
   }
 
   /**
-   * 获取阅读配置（异步版本）
+   * 获取阅读配置（异步版本，带缓存）
    */
   async getReadConfig(): Promise<ReadConfig> {
+    const cached = dataCacheManager.get<ReadConfig>(CacheKeys.READ_CONFIG);
+    if (cached !== null) {
+      this.readConfig = cached;
+      return cached;
+    }
     return await this.loadReadConfig();
   }
 
@@ -66,6 +86,7 @@ export class ReadConfigViewModel {
     try {
       this.readConfig = DEFAULT_READ_CONFIG;
       await this.databaseManager.updateReadConfig(this.readConfig);
+      dataCacheManager.set(CacheKeys.READ_CONFIG, this.readConfig);
     } catch (error) {
       Logger.error(ReadConfigViewModel.TAG, `重置阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));

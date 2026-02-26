@@ -21,23 +21,20 @@ import { SettingsPage } from './SettingsPage';
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { window } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { NavigationManager, NavParams } from '../common/NavigationManager';
-import BookDetailPage from './BookDetailPage';
-import ReadPage from './ReadPage';
-import ImportPage from './ImportPage';
-import { router } from '@kit.ArkUI';
-import hilog from '@ohos.hilog';
+import { BookDetailPage } from './BookDetailPage';
+import { ReadPage } from './ReadPage';
+import { ImportPage } from './ImportPage';
 
 enum PageIndex {
   Home = 0,
   Search = 1,
   Bookshelf = 2,
   Source = 3,
-  Settings = 4,
-  More = 5
+  Settings = 4
 }
 
 @Entry
@@ -83,6 +80,14 @@ struct MainPage {
           this.currentReadChapterIndex = 0;
           this.currentReadChapterUrl = '';
           this.currentImportPage = '';
+        } else if (pageName === 'BookshelfPage') {
+          this.currentPageIndex = PageIndex.Bookshelf;
+        } else if (pageName === 'SearchPage') {
+          this.currentPageIndex = PageIndex.Search;
+        } else if (pageName === 'SourcePage') {
+          this.currentPageIndex = PageIndex.Source;
+        } else if (pageName === 'SettingsPage') {
+          this.currentPageIndex = PageIndex.Settings;
         }
       });
   }
@@ -143,11 +148,6 @@ struct MainPage {
             SettingsPage()
           }
           .tabBar(this.buildTabBar(PageIndex.Settings))
-
-          TabContent() {
-            this.buildMorePage()
-          }
-          .tabBar(this.buildTabBar(PageIndex.More))
         }
         .barMode(BarMode.Fixed)
         .barHeight(56 + this.safeAreaBottom)
@@ -204,26 +204,6 @@ struct MainPage {
     .padding({ bottom: this.safeAreaBottom })
   }
 
-  @Builder
-  buildMorePage() {
-    Column() {
-      Text('更多功能')
-        .fontSize(24)
-        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-        .fontWeight(600)
-        .margin({ top: 100 })
-
-      Text('敬请期待...')
-        .fontSize(14)
-        .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-        .margin({ top: 16 })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-    .justifyContent(FlexAlign.Start)
-  }
-
   getTabIconText(index: PageIndex): string {
     switch (index) {
       case PageIndex.Home:
@@ -236,8 +216,6 @@ struct MainPage {
         return '📖';
       case PageIndex.Settings:
         return '⚙️';
-      case PageIndex.More:
-        return '⋯';
       default:
         return '🏠';
     }
@@ -255,8 +233,6 @@ struct MainPage {
         return '书源';
       case PageIndex.Settings:
         return '设置';
-      case PageIndex.More:
-        return '更多';
       default:
         return '首页';
     }

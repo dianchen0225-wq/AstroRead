@@ -5,10 +5,10 @@
 
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
-import { performanceMonitor, PerformanceMetrics, PerformanceWarning } from '../utils/PerformanceMonitor';
-import { smartSourceSelector } from '../utils/SmartSourceSelector';
-import { GCOptimizer } from '../utils/ObjectPool';
-import { Logger } from '../utils/Logger';
+import { performanceMonitor, PerformanceMetrics, PerformanceWarning } from '../utils/performance/PerformanceMonitor';
+import { smartSourceSelector } from '../utils/search/SmartSourceSelector';
+import { GCOptimizer } from '../utils/cache/ObjectPool';
+import { Logger } from '../utils/performance/Logger';
 
 @ComponentV2
 export struct PerformanceMonitorPage {
@@ -289,7 +289,7 @@ export struct PerformanceMonitorPage {
           .margin({ left: 8 })
           .onClick(() => {
             const stats = GCOptimizer.getStats();
-            Logger.info('PerformanceMonitorPage', stats);
+            Logger.info('PerformanceMonitorPage', JSON.stringify(stats));
           })
       }
       .width('100%')

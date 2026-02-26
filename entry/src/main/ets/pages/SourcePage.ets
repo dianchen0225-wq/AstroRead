@@ -15,19 +15,21 @@
 
 import { themeManager } from '../common/ThemeManager';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
+import { NavigationManager } from '../common/NavigationManager';
 import { ImportResult, DeleteResult } from '../viewmodel/BookSourceViewModel';
 import { BookSource } from '../models/BookSource';
-import { SecurityScanResult, SecurityRisk, SecurityRiskLevel } from '../utils/SourceSandbox';
+import { SecurityScanResult, SecurityRisk, SecurityRiskLevel } from '../utils/security/SourceSandbox';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { picker } from '@kit.CoreFileKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import { DesignSystem } from '../common/DesignSystem';
-import { Logger } from '../utils/Logger';
-import { NetworkManager } from '../utils/NetworkManager';
-import { SourceImportTaskPool } from '../utils/SourceImportTaskPool';
-import { showToast } from '../utils/ToastUtils';
+import { Logger } from '../utils/performance/Logger';
+import { NetworkManager } from '../utils/network/NetworkManager';
+import { SourceImportTaskPool } from '../utils/validation/SourceImportTaskPool';
+import { showToast } from '../utils/content/ToastUtils';
+import { BackButton } from '../components/BackButton';
 
 export interface SourceItemData {
   name: string;
@@ -118,8 +120,8 @@ export struct SourcePage {
         .map((source: BookSource) => {
           const item: SourceItemData = {
             name: source.name,
-            status: source.enabled ? '正常' : '已禁用',
-            enabled: source.enabled,
+            status: source.metadata.enabled ? '正常' : '已禁用',
+            enabled: source.metadata.enabled,
             id: source.id,
             isValidating: false
           };
@@ -152,8 +154,8 @@ export struct SourcePage {
         .map((source: BookSource) => {
           const item: SourceItemData = {
             name: source.name,
-            status: source.enabled ? '正常' : '已禁用',
-            enabled: source.enabled,
+            status: source.metadata.enabled ? '正常' : '已禁用',
+            enabled: source.metadata.enabled,
             id: source.id,
             isValidating: false
           };
@@ -177,7 +179,7 @@ export struct SourcePage {
     const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
     const source: BookSource | null = await bookSourceViewModel.getBookSourceById(id);
     if (source) {
-      const enabled: boolean = !source.enabled;
+      const enabled: boolean = !source.metadata.enabled;
       await bookSourceViewModel.toggleBookSource(id, enabled);
       await this.loadSources();
     }
@@ -513,10 +515,10 @@ export struct SourcePage {
           
           if (isValid) {
             validCount++;
-            source.enabled = true;
+            source.metadata.enabled = true;
           } else {
             invalidCount++;
-            source.enabled = false;
+            source.metadata.enabled = false;
           }
           
           await bookSourceViewModel.upsertBookSource(source);
@@ -565,7 +567,7 @@ export struct SourcePage {
       Logger.info('SourcePage', `开始验证书源: ${source.name}`);
       const isValid = await bookSourceViewModel.testBookSource(source);
 
-      source.enabled = isValid;
+      source.metadata.enabled = isValid;
       await bookSourceViewModel.upsertBookSource(source);
 
       item.status = isValid ? '正常' : '失效';
@@ -746,23 +748,20 @@ export struct SourcePage {
     Stack() {
       Column() {
         Row() {
-          Row() {
-            Text('‹')
-              .fontSize(20)
-              .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          }
-          .width(32)
-          .height(32)
-          .borderRadius(16)
-          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-          .justifyContent(FlexAlign.Center)
-          .margin({ right: 15 })
+          BackButton({
+            buttonSize: 'medium',
+            style: 'default',
+            onBack: () => {
+              NavigationManager.getInstance().navigateBack();
+            }
+          })
 
           Text($r('app.string.source_management'))
             .fontSize(18)
             .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
             .fontWeight(600)
             .layoutWeight(1)
+            .margin({ left: DesignSystem.Spacing.sm })
           
           if (this.totalCount > 0) {
             Text(`(${this.sourceList.length}/${this.totalCount})`)
@@ -772,7 +771,7 @@ export struct SourcePage {
           }
         }
         .width('100%')
-        .padding({ left: 15, right: 20, top: 15, bottom: 15 })
+        .padding({ left: DesignSystem.Spacing.md, right: DesignSystem.Spacing.lg, top: 15, bottom: 15 })
         .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
         .border({
           width: { bottom: 1 },

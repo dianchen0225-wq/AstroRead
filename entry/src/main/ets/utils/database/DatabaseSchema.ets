@@ -1,6 +1,6 @@
 import { relationalStore } from '@kit.ArkData';
-import { Logger } from '../Logger';
-import { SqlSecurityUtils } from '../SqlSecurityUtils';
+import { Logger } from '../performance/Logger';
+import { SqlSecurityUtils } from '../security/SqlSecurityUtils';
 
 export class DatabaseSchema {
   private static readonly TAG = 'DatabaseSchema';
@@ -66,6 +66,8 @@ export class DatabaseSchema {
       scroll_speed INTEGER DEFAULT 50,
       font_family TEXT DEFAULT 'HarmonyOS Sans',
       margins TEXT,
+      volume_key_page_turn INTEGER DEFAULT 1,
+      click_page_turn INTEGER DEFAULT 1,
       update_time INTEGER DEFAULT 0
     )`,
     

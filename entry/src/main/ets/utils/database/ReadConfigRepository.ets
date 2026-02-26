@@ -1,6 +1,6 @@
 import { relationalStore } from '@kit.ArkData';
 import { ReadConfig, MarginsConfig, DEFAULT_READ_CONFIG } from '../../models/ReadConfig';
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 
 export class ReadConfigRepository {
   private static readonly TAG = 'ReadConfigRepository';
@@ -32,7 +32,6 @@ export class ReadConfigRepository {
           } catch (error) {
             Logger.warn(ReadConfigRepository.TAG, `解析边距配置失败，使用默认值`);
           }
-
           const config: ReadConfig = {
             fontSize: this.safeGetLong(resultSet, 'font_size', DEFAULT_READ_CONFIG.fontSize),
             lineSpacing: this.safeGetDouble(resultSet, 'line_spacing', DEFAULT_READ_CONFIG.lineSpacing),
@@ -45,7 +44,9 @@ export class ReadConfigRepository {
             autoScroll: this.safeGetLong(resultSet, 'auto_scroll', 0) === 1,
             scrollSpeed: this.safeGetLong(resultSet, 'scroll_speed', DEFAULT_READ_CONFIG.scrollSpeed),
             fontFamily: this.safeGetString(resultSet, 'font_family', DEFAULT_READ_CONFIG.fontFamily),
-            margins: margins
+            margins: margins,
+            volumeKeyPageTurn: this.safeGetLong(resultSet, 'volume_key_page_turn', 1) === 1,
+            clickPageTurn: this.safeGetLong(resultSet, 'click_page_turn', 1) === 1
           };
           resultSet.close();
           return config;
@@ -70,9 +71,10 @@ export class ReadConfigRepository {
         autoScroll: DEFAULT_READ_CONFIG.autoScroll,
         scrollSpeed: DEFAULT_READ_CONFIG.scrollSpeed,
         fontFamily: DEFAULT_READ_CONFIG.fontFamily,
-        margins: { top: DEFAULT_READ_CONFIG.margins.top, bottom: DEFAULT_READ_CONFIG.margins.bottom, left: DEFAULT_READ_CONFIG.margins.left, right: DEFAULT_READ_CONFIG.margins.right }
+        margins: { top: DEFAULT_READ_CONFIG.margins.top, bottom: DEFAULT_READ_CONFIG.margins.bottom, left: DEFAULT_READ_CONFIG.margins.left, right: DEFAULT_READ_CONFIG.margins.right },
+        volumeKeyPageTurn: DEFAULT_READ_CONFIG.volumeKeyPageTurn,
+        clickPageTurn: DEFAULT_READ_CONFIG.clickPageTurn
       };
-
       const valueBucket: relationalStore.ValuesBucket = {
         'id': 'default',
         'font_size': defaultConfig.fontSize,
@@ -86,6 +88,8 @@ export class ReadConfigRepository {
         'scroll_speed': defaultConfig.scrollSpeed,
         'font_family': defaultConfig.fontFamily,
         'margins': JSON.stringify(defaultConfig.margins),
+        'volume_key_page_turn': defaultConfig.volumeKeyPageTurn ? 1 : 0,
+        'click_page_turn': defaultConfig.clickPageTurn ? 1 : 0,
         'update_time': Date.now()
       };
 
@@ -109,7 +113,9 @@ export class ReadConfigRepository {
         autoScroll: DEFAULT_READ_CONFIG.autoScroll,
         scrollSpeed: DEFAULT_READ_CONFIG.scrollSpeed,
         fontFamily: DEFAULT_READ_CONFIG.fontFamily,
-        margins: { top: DEFAULT_READ_CONFIG.margins.top, bottom: DEFAULT_READ_CONFIG.margins.bottom, left: DEFAULT_READ_CONFIG.margins.left, right: DEFAULT_READ_CONFIG.margins.right }
+        margins: { top: DEFAULT_READ_CONFIG.margins.top, bottom: DEFAULT_READ_CONFIG.margins.bottom, left: DEFAULT_READ_CONFIG.margins.left, right: DEFAULT_READ_CONFIG.margins.right },
+        volumeKeyPageTurn: DEFAULT_READ_CONFIG.volumeKeyPageTurn,
+        clickPageTurn: DEFAULT_READ_CONFIG.clickPageTurn
       };
     }
   }

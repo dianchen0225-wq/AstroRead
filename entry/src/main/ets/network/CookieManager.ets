@@ -4,7 +4,7 @@
  * 支持 domain 匹配、path 匹配、secure、httpOnly、sameSite 等属性
  */
 
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 
 interface CookieData {
   name: string;

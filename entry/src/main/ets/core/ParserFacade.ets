@@ -26,7 +26,7 @@ import { JSONParserAdapter } from './adapters/JSONParserAdapter';
 import { XMLParserAdapter } from './adapters/XMLParserAdapter';
 import { HTMLParserAdapter } from './adapters/HTMLParserAdapter';
 import { CSVParserAdapter } from './adapters/CSVParserAdapter';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { util } from '@kit.ArkTS';
 
 // JSON 值包装接口

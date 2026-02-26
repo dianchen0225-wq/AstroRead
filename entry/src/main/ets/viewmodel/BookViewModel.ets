@@ -8,15 +8,17 @@ import {
   SearchStopCondition,
   DEFAULT_STOP_CONDITION
 } from '../models/SearchResult';
-import { BookFoundCallback, SearchOptions } from '../utils/BookSourceSearchEngine';
-import { databaseManager } from '../utils/DatabaseManager';
-import { NetworkManager } from '../utils/NetworkManager';
-import SearchEnhancer from '../utils/SearchEnhancer';
-import { BookSourceSearchEngine } from '../utils/BookSourceSearchEngine';
-import { Logger } from '../utils/Logger';
-import { IdGenerator } from '../utils/IdGenerator';
+import { BookFoundCallback, SearchOptions } from '../utils/search/BookSourceSearchEngine';
+import { databaseManager } from '../utils/file/DatabaseManager';
+import { NetworkManager } from '../utils/network/NetworkManager';
+import SearchEnhancer from '../utils/search/SearchEnhancer';
+import { BookSourceSearchEngine } from '../utils/search/BookSourceSearchEngine';
+import { Logger } from '../utils/performance/Logger';
+import { IdGenerator } from '../utils/content/IdGenerator';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
+import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
+import { pageStateManager, PageIds } from '../utils/cache/PageStateManager';
 
 const SEARCH_HISTORY_KEY = 'search_history';
 const MAX_SEARCH_HISTORY = 20;
@@ -76,16 +78,40 @@ export class BookViewModel {
   }
 
   /**
-   * 加载所有书籍
+   * 加载所有书籍（带缓存）
    */
   async loadAllBooks(): Promise<Book[]> {
+    const startTime = Date.now();
+    
     try {
+      const cached = dataCacheManager.get<Book[]>(CacheKeys.ALL_BOOKS);
+      if (cached !== null) {
+        Logger.debug('BookViewModel', `使用缓存书籍列表: ${cached.length}本, 耗时: ${Date.now() - startTime}ms`);
+        this.books = cached;
+        return cached;
+      }
+      
+      Logger.info('BookViewModel', '从数据库加载书籍列表');
       this.books = await this.databaseManager.getAllBooks();
+      dataCacheManager.set(CacheKeys.ALL_BOOKS, this.books);
+      
+      Logger.info('BookViewModel', `加载书籍完成: ${this.books.length}本, 耗时: ${Date.now() - startTime}ms`);
       return this.books;
     } catch (error) {
       Logger.error('BookViewModel', `加载书籍失败：${error}`);
       throw (error instanceof Error ? error : new Error(String(error)));
     }
+  }
+  
+  /**
+   * 强制刷新书籍列表（数据变更后调用）
+   */
+  async refreshBooks(): Promise<Book[]> {
+    Logger.info('BookViewModel', '强制刷新书籍列表');
+    dataCacheManager.invalidate(CacheKeys.ALL_BOOKS);
+    dataCacheManager.updateVersion(CacheKeys.ALL_BOOKS);
+    pageStateManager.notifyDataChanged(PageIds.BOOKSHELF);
+    return this.loadAllBooks();
   }
 
   async getAllBooks(): Promise<Book[]> {
@@ -112,7 +138,7 @@ export class BookViewModel {
       const bookId = book.id || IdGenerator.generateUUID();
       book.id = bookId;
       await this.databaseManager.upsertBook(book);
-      await this.loadAllBooks();
+      await this.refreshBooks();
       return bookId;
     } catch (error) {
       Logger.error('BookViewModel', `添加书籍失败：${error}`);
@@ -143,7 +169,7 @@ export class BookViewModel {
   async deleteBook(bookId: string): Promise<void> {
     try {
       await this.databaseManager.deleteBook(bookId);
-      await this.loadAllBooks();
+      await this.refreshBooks();
     } catch (error) {
       Logger.error('BookViewModel', `删除书籍失败：${error}`);
       throw (error instanceof Error ? error : new Error(String(error)));
@@ -158,7 +184,7 @@ export class BookViewModel {
       for (const bookId of bookIds) {
         await this.databaseManager.deleteBook(bookId);
       }
-      await this.loadAllBooks();
+      await this.refreshBooks();
     } catch (error) {
       Logger.error('BookViewModel', `批量删除书籍失败：${error}`);
       throw (error instanceof Error ? error : new Error(String(error)));

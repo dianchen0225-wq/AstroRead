@@ -1,7 +1,7 @@
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 import { Result, ErrorCode } from '../../core/Result';
-import { BaseParser, IParser, ParserResult, ParserType, ParseOptions } from '../IParser';
-import { ScriptEngine, ScriptContext } from '../ScriptEngine';
+import { BaseParser, IParser, ParserResult, ParserType, ParseOptions } from '../parser/IParser';
+import { ScriptEngine, ScriptContext } from '../scripting/ScriptEngine';
 
 export class JSParser extends BaseParser {
   readonly type: ParserType = ParserType.JS;

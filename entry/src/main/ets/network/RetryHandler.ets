@@ -4,7 +4,7 @@
  */
 
 import { RetryConfig, HttpRequestConfig, HttpError, HttpErrorCode } from './interfaces/IHttpClient';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 
 interface ExtendedRetryConfig extends RetryConfig {
   retryableErrorPatterns?: RegExp[];

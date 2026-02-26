@@ -1,6 +1,6 @@
 import { relationalStore } from '@kit.ArkData';
 import { Book } from '../../models/Book';
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 
 export class BookRepository {
   private rdbStore: relationalStore.RdbStore;

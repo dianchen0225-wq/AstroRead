@@ -4,7 +4,7 @@
  */
 
 import { RequestCacheConfig, CacheStats, HttpResponse } from './interfaces/IHttpClient';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 interface CacheEntry {
   key: string;
   response: HttpResponse;

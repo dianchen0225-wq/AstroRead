@@ -3,17 +3,51 @@
  * 测试正则表达式安全执行功能
  */
 
-import { SafeRegex } from '../SafeRegex';
+import { SafeRegex } from '../security/SafeRegex';
+
+// 测试用例接口定义
+interface SafeExecuteTestCase {
+  pattern: RegExp;
+  input: string;
+  expected: string[] | null;
+  description: string;
+}
+
+interface ValidatePatternTestCase {
+  pattern: RegExp;
+  shouldBeValid: boolean;
+  description: string;
+}
+
+interface EscapeStringTestCase {
+  input: string;
+  expected: string;
+  description: string;
+}
+
+interface CreateSafeRegexTestCase {
+  pattern: string;
+  flags: string;
+  shouldSucceed: boolean;
+  description: string;
+}
+
+interface SafeTestTestCase {
+  pattern: RegExp;
+  input: string;
+  expected: boolean;
+  description: string;
+}
 
 export class SafeRegexTest {
-  private passed: number = 0;
-  private failed: number = 0;
+  passed: number = 0;
+  failed: number = 0;
 
   /**
    * 测试安全的正则表达式执行
    */
   testSafeExecute(): boolean {
-    const testCases = [
+    const testCases: SafeExecuteTestCase[] = [
       {
         pattern: /hello/g,
         input: 'hello world hello',
@@ -131,7 +165,7 @@ export class SafeRegexTest {
    * 测试正则表达式验证
    */
   testValidatePattern(): boolean {
-    const testCases = [
+    const testCases: ValidatePatternTestCase[] = [
       {
         pattern: /simple/,
         shouldBeValid: true,
@@ -186,7 +220,7 @@ export class SafeRegexTest {
    * 测试字符串转义
    */
   testEscapeString(): boolean {
-    const testCases = [
+    const testCases: EscapeStringTestCase[] = [
       {
         input: 'hello.world',
         expected: 'hello\\.world',
@@ -241,7 +275,7 @@ export class SafeRegexTest {
    * 测试创建安全正则
    */
   testCreateSafeRegex(): boolean {
-    const testCases = [
+    const testCases: CreateSafeRegexTestCase[] = [
       {
         pattern: 'hello',
         flags: '',
@@ -311,7 +345,7 @@ export class SafeRegexTest {
    * 测试测试方法（仅测试，不提取）
    */
   testSafeTest(): boolean {
-    const testCases = [
+    const testCases: SafeTestTestCase[] = [
       {
         pattern: /hello/,
         input: 'hello world',

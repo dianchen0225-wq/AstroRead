@@ -4,14 +4,14 @@
  * 提供标准化的接口调用方式
  */
 
-import { HTMLParser, ParseResult } from '../utils/HTMLParser';
-import { ContentParser, ParsedBookItem, ParsedChapterItem, ReplaceRuleConfig } from '../utils/ContentParser';
-import { RuleEngine, RuleContext, ParsedUrl } from '../utils/RuleEngine';
-import { BookSourceManager, SearchBooksResult } from '../utils/BookSourceManager';
-import { BookSourceSearchEngine, SearchOptions, SearchResult, SearchConfig } from '../utils/BookSourceSearchEngine';
-import NetworkAdapter, { NetworkRequestOptions } from '../utils/NetworkAdapter';
+import { HTMLParser, ParseResult } from '../utils/parser/HTMLParser';
+import { ContentParser, ParsedBookItem, ParsedChapterItem, ReplaceRuleConfig } from '../utils/parser/ContentParser';
+import { RuleEngine, RuleContext, ParsedUrl } from '../utils/parser/RuleEngine';
+import { BookSourceManager, SearchBooksResult } from '../utils/validation/BookSourceManager';
+import { BookSourceSearchEngine, SearchOptions, SearchResult, SearchConfig } from '../utils/search/BookSourceSearchEngine';
+import NetworkAdapter, { NetworkRequestOptions } from '../utils/network/NetworkAdapter';
 import { BookSource } from '../models/BookSource';
-import { DebugResult, ValidationResult } from '../utils/BookSourceDebugger';
+import { DebugResult, ValidationResult } from '../utils/validation/BookSourceDebugger';
 
 export class AstroReadFacade {
   private static instance: AstroReadFacade | null = null;

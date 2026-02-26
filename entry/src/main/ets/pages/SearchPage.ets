@@ -4,12 +4,13 @@ import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { BookSource } from '../models/BookSource';
 import { Book, SourceStatus } from '../models/Book';
 import { PagedSearchResult, SearchProgress } from '../models/SearchResult';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { NavigationManager, NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
-import { NetworkManager } from '../utils/NetworkManager';
-import { purifyIntro } from '../utils/ContentPurifier';
-import { sourceValidatorService, BatchValidationProgress } from '../utils/SourceValidatorService';
+import { NetworkManager } from '../utils/network/NetworkManager';
+import { purifyIntro } from '../utils/content/ContentPurifier';
+import { sourceValidatorService, BatchValidationProgress } from '../utils/validation/SourceValidatorService';
+import { BackButton } from '../components/BackButton';
 
 export interface RankColor {
   light: string;
@@ -422,22 +423,12 @@ export struct SearchPage {
   @Builder
   buildHeader() {
     Row() {
-      Row() {
-        Text('‹')
-          .fontSize(DesignSystem.Typography.size.xl)
-          .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-      }
-      .width(40)
-      .height(40)
-      .borderRadius(DesignSystem.BorderRadius.md)
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-      .justifyContent(FlexAlign.Center)
-      .border({
-        width: 1,
-        color: DesignSystem.getBorderColor(this.isLightMode)
-      })
-      .onClick(() => {
-        NavigationManager.getInstance().navigateBack();
+      BackButton({
+        buttonSize: 'medium',
+        style: 'default',
+        onBack: () => {
+          NavigationManager.getInstance().navigateBack();
+        }
       })
 
       Text($r('app.string.search_books'))
@@ -449,7 +440,7 @@ export struct SearchPage {
     }
     .width('100%')
     .padding({
-      left: DesignSystem.Spacing.lg,
+      left: DesignSystem.Spacing.md,
       right: DesignSystem.Spacing.lg,
       top: this.safeAreaTop + DesignSystem.Spacing.md,
       bottom: DesignSystem.Spacing.md
@@ -816,8 +807,8 @@ export struct SearchPage {
       }, (book: Book, index: number) => `book_${index}_${book.name}_${book.bookSourceId}_${book.sourceStatus}`)
     }
     .width('100%')
-    .height(this.searchResults.length * 120 + 20)
-    .cachedCount(5)
+    .layoutWeight(1)
+    .cachedCount(10)
     .nestedScroll({
       scrollForward: NestedScrollMode.PARENT_FIRST,
       scrollBackward: NestedScrollMode.SELF_FIRST

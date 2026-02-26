@@ -7,9 +7,9 @@
 import { webview } from '@kit.ArkWeb';
 import { themeManager } from '../common/ThemeManager';
 import { ReadConfig } from '../models/ReadConfig';
-import { Logger } from '../utils/Logger';
-import { HtmlUtils } from '../utils/HtmlUtils';
-import { ContentPurifier } from '../utils/ContentPurifier';
+import { Logger } from '../utils/performance/Logger';
+import { HtmlUtils } from '../utils/content/HtmlUtils';
+import { ContentPurifier } from '../utils/content/ContentPurifier';
 
 // 阅读器配置接口
 export interface WebReaderConfig {

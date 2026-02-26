@@ -3,10 +3,10 @@
  * 基于 WebReader 实现 EPUB 内容渲染
  */
 
-import { EPUBParser, EPUBBook, EPUBChapter } from '../utils/EPUBParser';
+import { EPUBParser, EPUBBook, EPUBChapter } from '../utils/parser/EPUBParser';
 import { WebReader, WebReaderConfig } from './WebReader';
 import { themeManager } from '../common/ThemeManager';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 
 @Component
 export struct EPUBReader {

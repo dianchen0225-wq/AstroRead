@@ -1,9 +1,9 @@
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { LocalBook, LocalChapter } from '../models/LocalBook';
-import { LocalFileParser } from '../utils/LocalFileParser';
+import { LocalFileParser } from '../utils/parser/LocalFileParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { NavigationManager } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
@@ -115,7 +115,7 @@ struct LocalBookPage {
         .justifyContent(FlexAlign.Center)
         .margin({ right: 15 })
         .onClick(() => {
-          NavigationManager.getInstance().goBack();
+          NavigationManager.getInstance().navigateBack();
         })
 
         Text('本地书籍')
@@ -330,4 +330,4 @@ struct LocalBookPage {
   }
 }
 
-export default LocalBookPage;
+export { LocalBookPage };

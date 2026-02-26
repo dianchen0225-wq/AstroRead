@@ -28,7 +28,7 @@ import { CookieManager } from './CookieManager';
 import { RequestBuilder } from './RequestBuilder';
 import { ResponseParser } from './ResponseParser';
 import { MetricsCollector } from './MetricsCollector';
-import { Logger, LogLevel } from '../utils/Logger';
+import { Logger, LogLevel } from '../utils/performance/Logger';
 
 /**
  * 敏感字段列表（用于请求体脱敏）

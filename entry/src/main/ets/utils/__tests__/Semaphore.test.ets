@@ -3,17 +3,17 @@
  * 测试信号量并发控制功能
  */
 
-import { Semaphore, ReadWriteLock, ConcurrencyController } from '../Semaphore';
+import { Semaphore, ReadWriteLock, ConcurrencyController, SemaphoreStats } from '../performance/Semaphore';
 
 export class SemaphoreTest {
-  private passed: number = 0;
-  private failed: number = 0;
+  passed: number = 0;
+  failed: number = 0;
 
   /**
    * 测试基本信号量功能
    */
   async testBasicSemaphore(): Promise<boolean> {
-    const semaphore = new Semaphore({ permits: 2, name: 'test-basic' });
+    const semaphore: Semaphore = new Semaphore({ permits: 2, name: 'test-basic' });
 
     try {
       // 测试初始状态
@@ -42,8 +42,9 @@ export class SemaphoreTest {
       console.log('✅ testBasicSemaphore passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testBasicSemaphore: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testBasicSemaphore: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -53,14 +54,14 @@ export class SemaphoreTest {
    * 测试信号量阻塞
    */
   async testSemaphoreBlocking(): Promise<boolean> {
-    const semaphore = new Semaphore({ permits: 1, name: 'test-blocking' });
+    const semaphore: Semaphore = new Semaphore({ permits: 1, name: 'test-blocking' });
 
     try {
       // 获取唯一许可
       await semaphore.acquire();
 
       // 尝试非阻塞获取（应该失败）
-      const acquired = semaphore.tryAcquire();
+      const acquired: boolean = semaphore.tryAcquire();
       if (acquired) {
         console.error('❌ testSemaphoreBlocking: 应该无法获取许可');
         this.failed++;
@@ -71,7 +72,7 @@ export class SemaphoreTest {
       semaphore.release();
 
       // 现在应该可以获取
-      const acquired2 = semaphore.tryAcquire();
+      const acquired2: boolean = semaphore.tryAcquire();
       if (!acquired2) {
         console.error('❌ testSemaphoreBlocking: 应该可以获取许可');
         this.failed++;
@@ -83,8 +84,9 @@ export class SemaphoreTest {
       console.log('✅ testSemaphoreBlocking passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testSemaphoreBlocking: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testSemaphoreBlocking: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -94,16 +96,16 @@ export class SemaphoreTest {
    * 测试带超时的获取
    */
   async testTryAcquireWithTimeout(): Promise<boolean> {
-    const semaphore = new Semaphore({ permits: 1, name: 'test-timeout' });
+    const semaphore: Semaphore = new Semaphore({ permits: 1, name: 'test-timeout' });
 
     try {
       // 获取唯一许可
       await semaphore.acquire();
 
       // 尝试带超时的获取（应该超时）
-      const startTime = Date.now();
-      const acquired = await semaphore.tryAcquireWithTimeout(100);
-      const endTime = Date.now();
+      const startTime: number = Date.now();
+      const acquired: boolean = await semaphore.tryAcquireWithTimeout(100);
+      const endTime: number = Date.now();
 
       if (acquired) {
         console.error('❌ testTryAcquireWithTimeout: 应该超时');
@@ -119,7 +121,7 @@ export class SemaphoreTest {
 
       // 释放并重新获取
       semaphore.release();
-      const acquired2 = await semaphore.tryAcquireWithTimeout(100);
+      const acquired2: boolean = await semaphore.tryAcquireWithTimeout(100);
       if (!acquired2) {
         console.error('❌ testTryAcquireWithTimeout: 应该成功获取');
         this.failed++;
@@ -131,8 +133,9 @@ export class SemaphoreTest {
       console.log('✅ testTryAcquireWithTimeout passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testTryAcquireWithTimeout: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testTryAcquireWithTimeout: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -142,11 +145,11 @@ export class SemaphoreTest {
    * 测试execute方法
    */
   async testExecute(): Promise<boolean> {
-    const semaphore = new Semaphore({ permits: 1, name: 'test-execute' });
-    let executed = false;
+    const semaphore: Semaphore = new Semaphore({ permits: 1, name: 'test-execute' });
+    let executed: boolean = false;
 
     try {
-      const result = await semaphore.execute(async () => {
+      const result: string = await semaphore.execute(async () => {
         executed = true;
         return 'success';
       });
@@ -173,8 +176,9 @@ export class SemaphoreTest {
       console.log('✅ testExecute passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testExecute: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testExecute: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -184,7 +188,7 @@ export class SemaphoreTest {
    * 测试批量操作
    */
   async testBatchOperations(): Promise<boolean> {
-    const semaphore = new Semaphore({ permits: 3, name: 'test-batch' });
+    const semaphore: Semaphore = new Semaphore({ permits: 3, name: 'test-batch' });
 
     try {
       // 批量获取
@@ -206,8 +210,9 @@ export class SemaphoreTest {
       console.log('✅ testBatchOperations passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testBatchOperations: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testBatchOperations: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -217,7 +222,7 @@ export class SemaphoreTest {
    * 测试动态调整许可数
    */
   async testDynamicPermits(): Promise<boolean> {
-    const semaphore = new Semaphore({ permits: 2, name: 'test-dynamic' });
+    const semaphore: Semaphore = new Semaphore({ permits: 2, name: 'test-dynamic' });
 
     try {
       // 减少许可
@@ -239,8 +244,9 @@ export class SemaphoreTest {
       console.log('✅ testDynamicPermits passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testDynamicPermits: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testDynamicPermits: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -250,7 +256,7 @@ export class SemaphoreTest {
    * 测试读写锁
    */
   async testReadWriteLock(): Promise<boolean> {
-    const rwLock = new ReadWriteLock('test-rw');
+    const rwLock: ReadWriteLock = new ReadWriteLock('test-rw');
 
     try {
       // 测试读锁（应该允许多个）
@@ -265,9 +271,9 @@ export class SemaphoreTest {
       await rwLock.acquireWrite();
 
       // 尝试获取读锁（应该阻塞）
-      const readAcquired = await Promise.race([
+      const readAcquired: boolean = await Promise.race([
         rwLock.tryAcquireWithTimeout(50),
-        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 100))
+        new Promise<boolean>((resolve: (value: boolean) => void) => setTimeout(() => resolve(false), 100))
       ]);
 
       if (readAcquired) {
@@ -281,8 +287,9 @@ export class SemaphoreTest {
       console.log('✅ testReadWriteLock passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testReadWriteLock: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testReadWriteLock: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -292,14 +299,14 @@ export class SemaphoreTest {
    * 测试并发控制器
    */
   async testConcurrencyController(): Promise<boolean> {
-    const controller = new ConcurrencyController(2);
+    const controller: ConcurrencyController = new ConcurrencyController(2);
 
     try {
       // 获取信号量
       await controller.acquire('resource1');
 
       // 执行操作
-      const result = await controller.execute('resource2', async () => {
+      const result: string = await controller.execute('resource2', async () => {
         return 'executed';
       });
 
@@ -313,7 +320,7 @@ export class SemaphoreTest {
       controller.release('resource1');
 
       // 获取统计
-      const stats = controller.getAllStats();
+      const stats: SemaphoreStats[] = controller.getAllStats();
       if (stats.length !== 2) {
         console.error('❌ testConcurrencyController: 统计数量错误');
         this.failed++;
@@ -323,8 +330,9 @@ export class SemaphoreTest {
       console.log('✅ testConcurrencyController passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testConcurrencyController: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testConcurrencyController: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }
@@ -334,7 +342,7 @@ export class SemaphoreTest {
    * 测试统计信息
    */
   async testStatistics(): Promise<boolean> {
-    const semaphore = new Semaphore({ permits: 2, name: 'test-stats' });
+    const semaphore: Semaphore = new Semaphore({ permits: 2, name: 'test-stats' });
 
     try {
       // 获取并释放几次
@@ -343,7 +351,7 @@ export class SemaphoreTest {
       await semaphore.acquire();
       semaphore.release();
 
-      const stats = semaphore.getStats();
+      const stats: SemaphoreStats = semaphore.getStats();
 
       if (stats.name !== 'Semaphore:test-stats') {
         console.error('❌ testStatistics: 名称错误');
@@ -372,8 +380,9 @@ export class SemaphoreTest {
       console.log('✅ testStatistics passed');
       this.passed++;
       return true;
-    } catch (error) {
-      console.error(`❌ testStatistics: 异常 ${error instanceof Error ? error.message : String(error)}`);
+    } catch (err) {
+      const errorMessage: string = err instanceof Error ? err.message : String(err);
+      console.error(`❌ testStatistics: 异常 ${errorMessage}`);
       this.failed++;
       return false;
     }

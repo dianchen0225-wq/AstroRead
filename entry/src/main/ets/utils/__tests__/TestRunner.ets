@@ -7,6 +7,13 @@ import securityUtilsTest from './SecurityUtils.test';
 import safeRegexTest from './SafeRegex.test';
 import semaphoreTest from './Semaphore.test';
 
+// 定义统计信息接口
+interface TestStats {
+  passed: number;
+  failed: number;
+  total: number;
+}
+
 export class TestRunner {
   private static instance: TestRunner | null = null;
   private passed: number = 0;
@@ -34,21 +41,21 @@ export class TestRunner {
     console.log('  SecurityUtils 测试');
     console.log('─────────────────────────────────────────────────');
     const securityResult = await securityUtilsTest.runAllTests();
-    this.updateStats(securityUtilsTest);
+    this.updateStats(securityUtilsTest.passed, securityUtilsTest.failed);
 
     // 运行正则表达式测试
     console.log('\n─────────────────────────────────────────────────');
     console.log('  SafeRegex 测试');
     console.log('─────────────────────────────────────────────────');
     const regexResult = await safeRegexTest.runAllTests();
-    this.updateStats(safeRegexTest);
+    this.updateStats(safeRegexTest.passed, safeRegexTest.failed);
 
     // 运行信号量测试
     console.log('\n─────────────────────────────────────────────────');
     console.log('  Semaphore 测试');
     console.log('─────────────────────────────────────────────────');
     const semaphoreResult = await semaphoreTest.runAllTests();
-    this.updateStats(semaphoreTest);
+    this.updateStats(semaphoreTest.passed, semaphoreTest.failed);
 
     const endTime = Date.now();
     const duration = endTime - startTime;
@@ -77,15 +84,15 @@ export class TestRunner {
   /**
    * 更新统计
    */
-  private updateStats(testInstance: { passed: number; failed: number }): void {
-    this.passed += testInstance.passed;
-    this.failed += testInstance.failed;
+  private updateStats(passed: number, failed: number): void {
+    this.passed += passed;
+    this.failed += failed;
   }
 
   /**
    * 获取统计信息
    */
-  getStats(): { passed: number; failed: number; total: number } {
+  getStats(): TestStats {
     return {
       passed: this.passed,
       failed: this.failed,
@@ -105,10 +112,3 @@ export class TestRunner {
 // 导出单例
 const testRunner = TestRunner.getInstance();
 export default testRunner;
-
-// 如果直接运行此文件，执行测试
-if (require.main === module) {
-  testRunner.runAllTests().then(success => {
-    process.exit(success ? 0 : 1);
-  });
-}

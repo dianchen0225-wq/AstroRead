@@ -17,7 +17,7 @@ import {
   ParseMetadata
 } from '../interfaces/IParser';
 import { ParserError, ParserWarning, ParserErrorCode, ParseResultBuilder } from './ParserError';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { util } from '@kit.ArkTS';
 
 interface CacheEntry<T> {

@@ -5,7 +5,7 @@
  */
 
 import { RequestMetrics } from './interfaces/IHttpClient';
-import { Logger, LogLevel } from '../utils/Logger';
+import { Logger, LogLevel } from '../utils/performance/Logger';
 import { DEFAULTS } from './HttpClientConfig';
 
 /**

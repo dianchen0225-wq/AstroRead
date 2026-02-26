@@ -5,12 +5,12 @@
 
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
-import { FileManager, FileInfo } from '../utils/FileManager';
-import { TXTParser } from '../utils/TXTParser';
-import { EPUBParser } from '../utils/EPUBParser';
+import { FileManager, FileInfo } from '../utils/file/FileManager';
+import { TXTParser } from '../utils/parser/TXTParser';
+import { EPUBParser } from '../utils/parser/EPUBParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book, Chapter } from '../models/Book';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import NavigationManager, { NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 
@@ -378,4 +378,4 @@ struct ImportPage {
   }
 }
 
-export default ImportPage;
+export { ImportPage };

@@ -1,7 +1,7 @@
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 import { Result, ErrorCode } from '../../core/Result';
-import { BaseParser, IParser, ParserResult, ParserType, ParseOptions } from '../IParser';
-import { XPathEngine } from '../XPathEngine';
+import { BaseParser, IParser, ParserResult, ParserType, ParseOptions } from '../parser/IParser';
+import { XPathEngine } from '../parser/XPathEngine';
 
 export class XPathParser extends BaseParser {
   readonly type: ParserType = ParserType.XPATH;

@@ -4,7 +4,7 @@
  */
 
 import { BookSource } from '../models/BookSource';
-import { BookSourceDebugger, DebugStep, DebugResult, BookInfo, ChapterInfo } from '../utils/BookSourceDebugger';
+import { BookSourceDebugger, DebugStep, DebugResult, BookInfo, ChapterInfo } from '../utils/validation/BookSourceDebugger';
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 

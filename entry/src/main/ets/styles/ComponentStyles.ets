@@ -4,19 +4,32 @@
  * 使用 $r 分层参数引用资源颜色，支持颜色模式自动切换
  */
 
+export interface TypographyStyle {
+  size: number;
+  weight: number;
+  lineHeight: number;
+}
+
+export interface ShadowStyle {
+  radius: number;
+  color: string;
+  offsetX: number;
+  offsetY: number;
+}
+
 export class AppTypography {
-  static readonly H1 = { size: 30, weight: 700, lineHeight: 36 };
-  static readonly H2 = { size: 24, weight: 600, lineHeight: 30 };
-  static readonly H3 = { size: 20, weight: 600, lineHeight: 26 };
-  static readonly H4 = { size: 17, weight: 600, lineHeight: 22 };
-  static readonly H5 = { size: 15, weight: 500, lineHeight: 20 };
-  
-  static readonly BODY_LARGE = { size: 17, weight: 400, lineHeight: 26 };
-  static readonly BODY_MEDIUM = { size: 15, weight: 400, lineHeight: 24 };
-  static readonly BODY_SMALL = { size: 13, weight: 400, lineHeight: 20 };
-  
-  static readonly CAPTION = { size: 11, weight: 400, lineHeight: 16 };
-  static readonly LABEL = { size: 13, weight: 500, lineHeight: 18 };
+  static readonly H1: TypographyStyle = { size: 30, weight: 700, lineHeight: 36 };
+  static readonly H2: TypographyStyle = { size: 24, weight: 600, lineHeight: 30 };
+  static readonly H3: TypographyStyle = { size: 20, weight: 600, lineHeight: 26 };
+  static readonly H4: TypographyStyle = { size: 17, weight: 600, lineHeight: 22 };
+  static readonly H5: TypographyStyle = { size: 15, weight: 500, lineHeight: 20 };
+
+  static readonly BODY_LARGE: TypographyStyle = { size: 17, weight: 400, lineHeight: 26 };
+  static readonly BODY_MEDIUM: TypographyStyle = { size: 15, weight: 400, lineHeight: 24 };
+  static readonly BODY_SMALL: TypographyStyle = { size: 13, weight: 400, lineHeight: 20 };
+
+  static readonly CAPTION: TypographyStyle = { size: 11, weight: 400, lineHeight: 16 };
+  static readonly LABEL: TypographyStyle = { size: 13, weight: 500, lineHeight: 18 };
 }
 
 export class AppSpacing {
@@ -40,10 +53,10 @@ export class AppBorderRadius {
 }
 
 export class AppShadows {
-  static readonly SM = { radius: 4, color: 'rgba(0,0,0,0.06)', offsetX: 0, offsetY: 2 };
-  static readonly MD = { radius: 8, color: 'rgba(0,0,0,0.08)', offsetX: 0, offsetY: 4 };
-  static readonly LG = { radius: 16, color: 'rgba(0,0,0,0.1)', offsetX: 0, offsetY: 8 };
-  static readonly XL = { radius: 24, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 12 };
+  static readonly SM: ShadowStyle = { radius: 4, color: 'rgba(0,0,0,0.06)', offsetX: 0, offsetY: 2 };
+  static readonly MD: ShadowStyle = { radius: 8, color: 'rgba(0,0,0,0.08)', offsetX: 0, offsetY: 4 };
+  static readonly LG: ShadowStyle = { radius: 16, color: 'rgba(0,0,0,0.1)', offsetX: 0, offsetY: 8 };
+  static readonly XL: ShadowStyle = { radius: 24, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 12 };
 }
 
 export class AppAnimation {

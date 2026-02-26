@@ -1,6 +1,6 @@
 import { router } from '@kit.ArkUI';
-import { logCollector, LogEntry } from '../utils/LogCollector';
-import { Logger } from '../utils/Logger';
+import { logCollector, LogEntry } from '../utils/performance/LogCollector';
+import { Logger } from '../utils/performance/Logger';
 
 @Entry
 @Component

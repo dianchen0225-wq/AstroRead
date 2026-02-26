@@ -18,9 +18,10 @@ import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { NavigationManager, NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
+import { BackButton } from '../components/BackButton';
 
 @Entry
 @ComponentV2
@@ -216,19 +217,12 @@ struct BookDetailPage {
   build() {
     Column() {
       Row() {
-        Row() {
-          Text('‹')
-            .fontSize(20)
-            .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-        }
-        .width(32)
-        .height(32)
-        .borderRadius(16)
-        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-        .justifyContent(FlexAlign.Center)
-        .margin({ right: 15 })
-        .onClick(() => {
-          NavigationManager.getInstance().navigateBack();
+        BackButton({
+          buttonSize: 'medium',
+          style: 'default',
+          onBack: () => {
+            NavigationManager.getInstance().navigateBack();
+          }
         })
 
         Text('书籍详情')
@@ -236,6 +230,7 @@ struct BookDetailPage {
           .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
           .fontWeight(600)
           .layoutWeight(1)
+          .margin({ left: DesignSystem.Spacing.sm })
 
         Button(this.isAdded ? '已添加' : '添加书架')
           .fontSize(14)
@@ -255,7 +250,7 @@ struct BookDetailPage {
           })
       }
       .width('100%')
-      .padding({ left: 15, right: 20, top: 15, bottom: 15 })
+      .padding({ left: DesignSystem.Spacing.md, right: DesignSystem.Spacing.lg, top: 15, bottom: 15 })
       .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
       .border({
         width: { bottom: 1 },
@@ -443,4 +438,4 @@ struct BookDetailPage {
   }
 }
 
-export default BookDetailPage;
+export { BookDetailPage };

@@ -1,4 +1,4 @@
-import { ScriptEngine, ScriptContext } from '../utils/ScriptEngine';
+import { ScriptEngine, ScriptContext } from '../../utils/scripting/ScriptEngine';
 
 export class ScriptEngineTest {
   private passed: number = 0;

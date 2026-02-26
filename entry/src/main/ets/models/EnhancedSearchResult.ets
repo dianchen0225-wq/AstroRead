@@ -4,7 +4,7 @@
  */
 
 import { Book } from './Book';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 
 export interface PagedSearchResult {
   books: Book[];
@@ -261,8 +261,8 @@ export class EnhancedSearchResultBuilder {
     if (this.config.enableSourceWeight) {
       try {
         // 动态导入以避免循环依赖
-        const sourceHealthManagerModule = import('../utils/SourceHealthManager');
-        sourceHealthManagerModule.then(module => {
+        const sourceHealthManagerModule = import('../utils/SourceHealthManager.js');
+        sourceHealthManagerModule.then((module: SourceHealthManagerModule) => {
           const sourceScore = module.sourceHealthManager.getSourceScore(book.bookSourceId);
           const sourceWeight = sourceScore / 100; // 转换为 0-1 权重
           score = score * (0.7 + 0.3 * sourceWeight); // 70%内容分 + 30%书源质量
@@ -270,7 +270,7 @@ export class EnhancedSearchResultBuilder {
           Logger.debug('EnhancedSearchResultBuilder', `无法获取书源质量: ${error.message}`);
         });
       } catch (error) {
-        Logger.debug('EnhancedSearchResultBuilder', `无法获取书源质量: ${error}`);
+        Logger.debug('EnhancedSearchResultBuilder', `无法获取书源质量: ${(error as Error).message}`);
       }
     }
 
@@ -344,6 +344,22 @@ export interface RelevanceStats {
   avgScore: number;
   minScore: number;
   maxScore: number;
+}
+
+/**
+ * SourceHealthManager 接口
+ * 用于动态导入时的类型定义
+ */
+interface SourceHealthManager {
+  getSourceScore(sourceId: string): number;
+}
+
+/**
+ * SourceHealthManager 模块接口
+ * 用于动态导入时的类型定义
+ */
+interface SourceHealthManagerModule {
+  sourceHealthManager: SourceHealthManager;
 }
 
 export default EnhancedSearchResultBuilder;

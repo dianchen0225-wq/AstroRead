@@ -1,6 +1,6 @@
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 import { Result, ErrorCode } from '../../core/Result';
-import { BaseParser, IParser, ParserResult, ParserType, ParseOptions, JsonValue, JsonData } from '../IParser';
+import { BaseParser, IParser, ParserResult, ParserType, ParseOptions, JsonValue, JsonData } from '../parser/IParser';
 
 export class JsonPathParser extends BaseParser {
   readonly type: ParserType = ParserType.JSON;

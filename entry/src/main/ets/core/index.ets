@@ -14,7 +14,7 @@ export * from './ParserError';
 export * from './ParserAdapter';
 export * from './ParserFacade';
 export * from './Result';
-export * from '../utils/ParserCore';
+export * from '../utils/parser/ParserCore';
 
 export { EntityDecoder } from './utils/EntityDecoder';
 export { PositionTracker } from './utils/PositionTracker';

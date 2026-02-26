@@ -1,12 +1,17 @@
 import { Chapter } from '../models/Book';
 import { ChapterContent } from '../models/Book';
 import { BookSource } from '../models/BookSource';
-import { DatabaseManager } from '../utils/DatabaseManager';
-import { NetworkManager } from '../utils/NetworkManager';
-import { IdGenerator } from '../utils/IdGenerator';
-import { ParsedChapterItem } from '../utils/ContentParser';
-import { Logger } from '../utils/Logger';
+import { DatabaseManager } from '../utils/file/DatabaseManager';
+import { NetworkManager } from '../utils/network/NetworkManager';
+import { IdGenerator } from '../utils/content/IdGenerator';
+import { ParsedChapterItem } from '../utils/parser/ContentParser';
+import { Logger } from '../utils/performance/Logger';
 import { common } from '@kit.AbilityKit';
+import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
+import { PerformanceManager } from '../utils/performance/PerformanceManager';
+import { ProgressiveContentLoader, LoadState, ProgressiveLoadResult } from '../utils/performance/ProgressiveContentLoader';
+import { ParseTaskPriority } from '../utils/performance/ParseTaskQueue';
+import { ReadingState } from '../utils/performance/ReadingBehaviorMonitor';
 
 export interface PagedChaptersResult {
   chapters: Chapter[];
@@ -14,6 +19,13 @@ export interface PagedChaptersResult {
   currentPage: number;
   pageSize: number;
   hasMore: boolean;
+}
+
+export interface ChapterContentProgressiveOptions {
+  onProgress?: (progress: number) => void;
+  onPartialContent?: (content: string) => void;
+  onComplete?: (content: ChapterContent) => void;
+  onError?: (error: Error) => void;
 }
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -29,11 +41,14 @@ interface ContentCacheEntry {
 export class ChapterViewModel {
   private readonly databaseManager = DatabaseManager.getInstance();
   private readonly networkManager = NetworkManager.getInstance();
+  private readonly performanceManager = PerformanceManager.getInstance();
+  private readonly progressiveLoader = ProgressiveContentLoader.getInstance();
   private context: common.UIAbilityContext | null = null;
   private static readonly TAG = 'ChapterViewModel';
   
   private contentCache: Map<string, ContentCacheEntry> = new Map();
   private readonly cacheTTL: number = 30 * 60 * 1000;
+  private progressiveCallbacks: Map<string, (result: ProgressiveLoadResult) => void> = new Map();
 
   setContext(context: common.UIAbilityContext): void {
     this.context = context;
@@ -47,27 +62,111 @@ export class ChapterViewModel {
   destroy(): void {
     Logger.info(ChapterViewModel.TAG, '销毁 ChapterViewModel，清理资源');
     
-    // 清理缓存
     this.clearContentCache();
+    this.progressiveCallbacks.clear();
+    this.currentBookId = null;
+    this.currentBookSource = null;
+    this.currentChapters = [];
     
-    // 清理 context 引用，防止内存泄漏
     this.context = null;
     
-    // 清理 networkManager 的 context 引用
     const nullContext: common.UIAbilityContext | null = null;
     this.networkManager.setContext(nullContext);
   }
 
   /**
-   * 获取书籍的章节列表
+   * 设置书籍上下文，启用渐进式加载
+   */
+  setBookContext(bookId: string, chapters: Chapter[], bookSource: BookSource): void {
+    this.currentBookId = bookId;
+    this.currentBookSource = bookSource;
+    this.currentChapters = chapters;
+    
+    this.progressiveLoader.setBookContext(bookId, chapters, bookSource);
+    this.performanceManager.setBookContext(bookId, chapters, bookSource);
+    
+    Logger.info(ChapterViewModel.TAG, `设置书籍上下文: ${bookId}, 章节数: ${chapters.length}`);
+  }
+
+  /**
+   * 设置当前阅读章节，触发智能预加载
+   */
+  setCurrentChapter(chapterId: string, chapterIndex: number): void {
+    this.progressiveLoader.setCurrentChapter(chapterId, chapterIndex);
+    this.performanceManager.setCurrentChapter(chapterId, chapterIndex);
+    
+    Logger.debug(ChapterViewModel.TAG, `设置当前章节: ${chapterId}, 索引: ${chapterIndex}`);
+  }
+
+  /**
+   * 记录滚动事件（用于行为分析）
+   */
+  recordScroll(direction: 'up' | 'down', distance: number, speed: number): void {
+    this.performanceManager.recordScroll(direction, distance, speed);
+  }
+
+  /**
+   * 记录暂停事件
+   */
+  recordPause(): void {
+    this.performanceManager.recordPause();
+  }
+
+  /**
+   * 记录恢复事件
+   */
+  recordResume(): void {
+    this.performanceManager.recordResume();
+  }
+
+  /**
+   * 记录应用进入后台
+   */
+  recordAppBackground(): void {
+    this.performanceManager.recordAppBackground();
+  }
+
+  /**
+   * 记录应用回到前台
+   */
+  recordAppForeground(): void {
+    this.performanceManager.recordAppForeground();
+  }
+
+  /**
+   * 获取书籍的章节列表（带缓存）
    */
   async getChapters(bookId: string): Promise<Chapter[]> {
+    const startTime = Date.now();
+    
     try {
-      return await this.getChaptersByBookId(bookId);
+      const cacheKey = CacheKeys.CHAPTERS_PREFIX + bookId;
+      const cached = dataCacheManager.get<Chapter[]>(cacheKey);
+      if (cached !== null) {
+        Logger.debug(ChapterViewModel.TAG, `使用缓存章节列表: ${cached.length}章, 耗时: ${Date.now() - startTime}ms`);
+        return cached;
+      }
+      
+      const chapters = await this.getChaptersByBookId(bookId);
+      dataCacheManager.set(cacheKey, chapters);
+      
+      Logger.info(ChapterViewModel.TAG, `加载章节列表: ${chapters.length}章, 耗时: ${Date.now() - startTime}ms`);
+      return chapters;
     } catch (error) {
       Logger.error(ChapterViewModel.TAG, `获取章节失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
+  }
+  
+  /**
+   * 强制刷新章节列表（数据变更后调用）
+   */
+  async refreshChapters(bookId: string): Promise<Chapter[]> {
+    Logger.info(ChapterViewModel.TAG, `强制刷新章节列表: ${bookId}`);
+    const cacheKey = CacheKeys.CHAPTERS_PREFIX + bookId;
+    dataCacheManager.invalidate(cacheKey);
+    dataCacheManager.updateVersion(cacheKey);
+    return this.getChapters(bookId);
   }
 
   /**
@@ -177,8 +276,10 @@ export class ChapterViewModel {
         return chapter;
       });
 
-      // 分批保存大量章节
       await this.batchSaveChaptersInBatches(chapters);
+      
+      const cacheKey = CacheKeys.CHAPTERS_PREFIX + bookId;
+      dataCacheManager.set(cacheKey, chapters);
       
       const elapsed = Date.now() - startTime;
       Logger.info(ChapterViewModel.TAG, `成功保存 ${chapters.length} 个章节, 总耗时: ${elapsed}ms`);
@@ -258,23 +359,45 @@ export class ChapterViewModel {
   }
 
   /**
-   * 获取章节内容
+   * 获取章节内容（带全局缓存）
    */
   async getChapterContent(
     chapterId: string,
     chapterUrl: string,
     bookSource: BookSource
   ): Promise<ChapterContent> {
+    const startTime = Date.now();
+    
     try {
       Logger.info(ChapterViewModel.TAG, `========== 开始获取章节内容 ==========`);
       Logger.info(ChapterViewModel.TAG, `chapterId: ${chapterId}`);
       Logger.info(ChapterViewModel.TAG, `传入的chapterUrl: ${chapterUrl}`);
       Logger.info(ChapterViewModel.TAG, `书源baseUrl: ${bookSource.url}`);
 
-      const cachedContent = this.getFromContentCache(chapterId);
-      if (cachedContent) {
-        Logger.info(ChapterViewModel.TAG, `从缓存获取章节内容: ${chapterId}`);
+      const cacheKey = CacheKeys.CHAPTER_CONTENT_PREFIX + chapterId;
+      const cachedContent = dataCacheManager.get<ChapterContent>(cacheKey);
+      if (cachedContent !== null) {
+        Logger.info(ChapterViewModel.TAG, `从全局缓存获取章节内容: ${chapterId}, 耗时: ${Date.now() - startTime}ms`);
         return cachedContent;
+      }
+
+      const localCached = this.getFromContentCache(chapterId);
+      if (localCached) {
+        Logger.info(ChapterViewModel.TAG, `从本地缓存获取章节内容: ${chapterId}`);
+        return localCached;
+      }
+
+      const progressiveCached = this.progressiveLoader.getCachedContent(chapterId);
+      if (progressiveCached && progressiveCached.state === LoadState.COMPLETE) {
+        Logger.info(ChapterViewModel.TAG, `从渐进式加载缓存获取章节内容: ${chapterId}`);
+        const result: ChapterContent = {
+          chapterId: chapterId,
+          content: progressiveCached.content,
+          nextUrl: undefined,
+          prevUrl: undefined
+        };
+        dataCacheManager.set(cacheKey, result);
+        return result;
       }
 
       let finalChapterUrl = chapterUrl;
@@ -310,14 +433,178 @@ export class ChapterViewModel {
         prevUrl: undefined
       };
       
+      dataCacheManager.set(cacheKey, result);
       this.setToContentCache(chapterId, result);
       
+      Logger.info(ChapterViewModel.TAG, `章节内容获取总耗时: ${Date.now() - startTime}ms`);
       return result;
     } catch (error) {
       Logger.error(ChapterViewModel.TAG, `========== 获取章节内容失败 ==========`);
       Logger.error(ChapterViewModel.TAG, `错误: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to get chapter content: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * 渐进式加载章节内容
+   * 支持内容开始呈现后继续后台加载
+   */
+  async getChapterContentProgressive(
+    chapterId: string,
+    chapterUrl: string,
+    options?: ChapterContentProgressiveOptions
+  ): Promise<ChapterContent> {
+    const startTime = Date.now();
+
+    try {
+      const cacheKey = CacheKeys.CHAPTER_CONTENT_PREFIX + chapterId;
+      const cachedContent = dataCacheManager.get<ChapterContent>(cacheKey);
+      if (cachedContent !== null) {
+        options?.onComplete?.(cachedContent);
+        return cachedContent;
+      }
+
+      const localCached = this.getFromContentCache(chapterId);
+      if (localCached) {
+        options?.onComplete?.(localCached);
+        return localCached;
+      }
+
+      const progressiveCached = this.progressiveLoader.getCachedContent(chapterId);
+      if (progressiveCached && progressiveCached.state === LoadState.COMPLETE) {
+        const result: ChapterContent = {
+          chapterId: chapterId,
+          content: progressiveCached.content,
+          nextUrl: undefined,
+          prevUrl: undefined
+        };
+        dataCacheManager.set(cacheKey, result);
+        options?.onComplete?.(result);
+        return result;
+      }
+
+      if (!this.currentBookSource) {
+        throw new Error('未设置书籍上下文，请先调用 setBookContext');
+      }
+
+      const bookSource = this.currentBookSource;
+      let finalChapterUrl = chapterUrl;
+      
+      if (chapterUrl) {
+        if (chapterUrl.startsWith('http://') || chapterUrl.startsWith('https://')) {
+          finalChapterUrl = chapterUrl;
+        } else if (chapterUrl.startsWith('//')) {
+          const protocol = bookSource.url.startsWith('https') ? 'https:' : 'http:';
+          finalChapterUrl = protocol + chapterUrl;
+        } else {
+          finalChapterUrl = this.resolveChapterUrl(bookSource.url, chapterUrl);
+        }
+      }
+
+      if (!finalChapterUrl) {
+        throw new Error('章节URL为空，无法获取内容');
+      }
+
+      const content = await this.progressiveLoader.loadChapter(
+        chapterId,
+        finalChapterUrl,
+        {
+          priority: ParseTaskPriority.HIGH,
+          callback: (result: ProgressiveLoadResult) => {
+            if (result.state === LoadState.COMPLETE) {
+              const chapterContent: ChapterContent = {
+                chapterId: result.chapterId,
+                content: result.content,
+                nextUrl: undefined,
+                prevUrl: undefined
+              };
+              dataCacheManager.set(cacheKey, chapterContent);
+              options?.onComplete?.(chapterContent);
+            } else if (result.state === LoadState.ERROR) {
+              options?.onError?.(new Error(result.error ?? '加载失败'));
+            } else if (result.state === LoadState.PARTIAL && result.isPartial) {
+              options?.onPartialContent?.(result.content);
+            }
+          },
+          progressCallback: (_id: string, progress: number) => {
+            options?.onProgress?.(progress);
+          }
+        }
+      );
+
+      const result: ChapterContent = {
+        chapterId: chapterId,
+        content: content,
+        nextUrl: undefined,
+        prevUrl: undefined
+      };
+
+      if (content) {
+        dataCacheManager.set(cacheKey, result);
+        this.setToContentCache(chapterId, result);
+      }
+
+      Logger.info(ChapterViewModel.TAG, `渐进式加载完成: ${chapterId}, 耗时: ${Date.now() - startTime}ms`);
+      return result;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      options?.onError?.(err);
+      throw err;
+    }
+  }
+
+  /**
+   * 检查章节是否已缓存
+   */
+  hasChapterCached(chapterId: string): boolean {
+    const cacheKey = CacheKeys.CHAPTER_CONTENT_PREFIX + chapterId;
+    if (dataCacheManager.get<ChapterContent>(cacheKey) !== null) {
+      return true;
+    }
+    if (this.contentCache.has(chapterId)) {
+      return true;
+    }
+    return this.progressiveLoader.hasCachedContent(chapterId);
+  }
+
+  /**
+   * 获取加载进度
+   */
+  getLoadProgress(chapterId: string): number {
+    const progress = this.progressiveLoader.getLoadProgress(chapterId);
+    return progress?.progress ?? 0;
+  }
+
+  /**
+   * 取消章节加载
+   */
+  cancelChapterLoad(chapterId: string): boolean {
+    return this.progressiveLoader.cancelLoad(chapterId);
+  }
+
+  /**
+   * 获取性能统计
+   */
+  getPerformanceStats(): object {
+    return this.performanceManager.getReport();
+  }
+
+  /**
+   * 获取当前资源状态
+   */
+  getResourceStatus(): object {
+    return {
+      level: this.performanceManager.getResourceLevel(),
+      canHandleNewTask: this.performanceManager.canHandleNewTask(),
+      suggestedConcurrency: this.performanceManager.getSuggestedConcurrency()
+    };
+  }
+
+  /**
+   * 获取阅读状态
+   */
+  getReadingState(): ReadingState {
+    return this.performanceManager.getReadingState();
   }
 
   private getFromContentCache(chapterId: string): ChapterContent | null {

@@ -145,12 +145,12 @@ export interface SearchEngineConfig {
  * 默认搜索引擎配置
  */
 export const DEFAULT_SEARCH_ENGINE_CONFIG: SearchEngineConfig = {
-  maxConcurrent: 5,
-  requestInterval: 500,
-  timeout: 10000,
+  maxConcurrent: 8,
+  requestInterval: 300,
+  timeout: 15000,
   maxResultsPerSource: 20,
   enableCache: true,
-  cacheExpiry: 5 * 60 * 1000 // 5分钟
+  cacheExpiry: 10 * 60 * 1000
 };
 
 /**

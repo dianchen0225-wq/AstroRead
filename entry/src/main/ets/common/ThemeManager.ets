@@ -4,7 +4,7 @@
  */
 
 import { preferences } from '@kit.ArkData';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { common } from '@kit.AbilityKit';
 
 const THEME_PREFERENCES_NAME = 'theme_preferences';

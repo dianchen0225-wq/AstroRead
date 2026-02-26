@@ -2,10 +2,12 @@ import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book } from '../models/Book';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { NavigationManager, NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { BookCoverImage } from '../components/BookCoverImage';
+import { pageStateManager, PageIds } from '../utils/cache/PageStateManager';
+import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
 
 type ViewMode = 'list' | 'grid';
 
@@ -20,6 +22,8 @@ export struct BookshelfPage {
   @Param safeAreaTop: number = 0;
   
   private isComponentActive: boolean = false;
+  private isInitialized: boolean = false;
+  private lastDataVersion: number = 0;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -33,22 +37,60 @@ export struct BookshelfPage {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
     
-    this.loadBooks();
+    pageStateManager.registerPage(PageIds.BOOKSHELF, {
+      onFirstLoad: async () => {
+        await this.loadBooks();
+      },
+      onRefresh: async () => {
+        await this.loadBooks(true);
+      },
+      onActivate: () => {
+        Logger.debug('BookshelfPage', '页面激活');
+      },
+      onDeactivate: () => {
+        Logger.debug('BookshelfPage', '页面休眠');
+      }
+    });
+    
+    this.smartLoad();
   }
 
   aboutToDisappear(): void {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
-    this.bookList = [];
+    pageStateManager.onPageDisappear(PageIds.BOOKSHELF);
   }
 
-  async loadBooks(): Promise<void> {
+  async smartLoad(): Promise<void> {
+    if (!this.isComponentActive) return;
+    
+    const currentVersion = dataCacheManager.getVersion(CacheKeys.ALL_BOOKS);
+    
+    if (!this.isInitialized || currentVersion > this.lastDataVersion) {
+      await pageStateManager.onPageAppear(PageIds.BOOKSHELF);
+      this.isInitialized = true;
+      this.lastDataVersion = currentVersion;
+    } else {
+      const cached = dataCacheManager.get<Book[]>(CacheKeys.ALL_BOOKS);
+      if (cached !== null) {
+        this.bookList = cached;
+        Logger.debug('BookshelfPage', `使用缓存数据: ${cached.length}本书`);
+      }
+    }
+  }
+
+  async loadBooks(forceRefresh: boolean = false): Promise<void> {
     if (!this.isComponentActive) return;
     
     this.isLoading = true;
     try {
       const bookViewModel = viewModelManager.getBookViewModel();
-      this.bookList = await bookViewModel.loadAllBooks();
+      if (forceRefresh) {
+        this.bookList = await bookViewModel.refreshBooks();
+      } else {
+        this.bookList = await bookViewModel.loadAllBooks();
+      }
+      this.lastDataVersion = dataCacheManager.getVersion(CacheKeys.ALL_BOOKS);
     } catch (error) {
       Logger.error('BookshelfPage', `加载书籍失败: ${error}`);
     } finally {
@@ -175,7 +217,7 @@ export struct BookshelfPage {
 
   @Builder
   buildContent() {
-    if (this.isLoading) {
+    if (this.isLoading && this.bookList.length === 0) {
       this.buildLoadingState()
     } else if (this.bookList.length === 0) {
       this.buildEmptyState()

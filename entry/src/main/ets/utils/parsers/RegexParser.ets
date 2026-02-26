@@ -1,7 +1,7 @@
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 import { Result, ErrorCode } from '../../core/Result';
-import { BaseParser, IParser, ParserResult, ParserType, ParseOptions } from '../IParser';
-import { SafeRegex } from '../SafeRegex';
+import { BaseParser, IParser, ParserResult, ParserType, ParseOptions } from '../parser/IParser';
+import { SafeRegex } from '../security/SafeRegex';
 
 export class RegexParser extends BaseParser {
   readonly type: ParserType = ParserType.REGEX;

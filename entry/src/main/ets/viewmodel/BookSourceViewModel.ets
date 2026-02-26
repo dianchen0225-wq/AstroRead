@@ -1,17 +1,19 @@
 
-import { BookSource, SearchRule, ChapterRule, ContentRule, BookSourceValidation } from '../models/BookSource';
-import { databaseManager } from '../utils/DatabaseManager';
+import { BookSource, SearchRule, TocRule, ContentRule, BookSourceValidation } from '../models/BookSource';
+import { databaseManager } from '../utils/file/DatabaseManager';
 import { PagedBookSourcesResult } from '../utils/database/BookSourceRepository';
-import { NetworkManager } from '../utils/NetworkManager';
-import SourceImportManager from '../utils/SourceImportManager';
-import SourceValidator from '../utils/SourceValidator';
-import BookSourceParser from '../utils/BookSourceParser';
-import BookSourceManager, { SearchBooksResult, YCKSourceData } from '../utils/BookSourceManager';
-import { Logger } from '../utils/Logger';
-import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from '../utils/SourceSandbox';
+import { NetworkManager } from '../utils/network/NetworkManager';
+import SourceImportManager from '../utils/validation/SourceImportManager';
+import SourceValidator from '../utils/validation/SourceValidator';
+import BookSourceParser from '../utils/parser/BookSourceParser';
+import BookSourceManager, { SearchBooksResult, YCKSourceData } from '../utils/validation/BookSourceManager';
+import { Logger } from '../utils/performance/Logger';
+import SourceSandbox, { SecurityScanResult, SecurityRiskLevel } from '../utils/security/SourceSandbox';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
+import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
+import { pageStateManager, PageIds } from '../utils/cache/PageStateManager';
 
 /**
  * 导入结果接口
@@ -53,7 +55,7 @@ interface ExportBookSourceData {
   bookSourceName: string;
   bookSourceUrl: string;
   ruleSearch: SearchRule;
-  ruleToc: ChapterRule;
+  ruleToc: TocRule;
   ruleContent: ContentRule;
   ruleType: string;
   enabled: boolean;
@@ -227,11 +229,25 @@ export class BookSourceViewModel {
   }
 
   /**
-   * 加载所有启用的书源
+   * 加载所有启用的书源（带缓存）
    */
   async loadEnabledBookSources(): Promise<BookSource[]> {
+    const startTime = Date.now();
+    
     try {
+      const cached = dataCacheManager.get<BookSource[]>(CacheKeys.BOOK_SOURCES);
+      if (cached !== null) {
+        const enabledSources = cached.filter((s: BookSource) => s.metadata.enabled);
+        Logger.debug('BookSourceViewModel', `使用缓存书源: ${enabledSources.length}个, 耗时: ${Date.now() - startTime}ms`);
+        this.bookSources = enabledSources;
+        return enabledSources;
+      }
+      
+      Logger.info('BookSourceViewModel', '从数据库加载书源');
       this.bookSources = await this.databaseManager.getAllEnabledBookSources();
+      dataCacheManager.set(CacheKeys.BOOK_SOURCES, this.bookSources);
+      
+      Logger.info('BookSourceViewModel', `加载书源完成: ${this.bookSources.length}个, 耗时: ${Date.now() - startTime}ms`);
       return this.bookSources;
     } catch (error) {
       Logger.error('BookSourceViewModel', '加载启用的书源失败');
@@ -240,16 +256,40 @@ export class BookSourceViewModel {
   }
 
   /**
-   * 加载所有书源（包括禁用）
+   * 加载所有书源（包括禁用，带缓存）
    */
   async loadAllBookSources(): Promise<BookSource[]> {
+    const startTime = Date.now();
+    
     try {
+      const cached = dataCacheManager.get<BookSource[]>(CacheKeys.BOOK_SOURCES);
+      if (cached !== null) {
+        Logger.debug('BookSourceViewModel', `使用缓存书源(全部): ${cached.length}个, 耗时: ${Date.now() - startTime}ms`);
+        this.bookSources = cached;
+        return cached;
+      }
+      
+      Logger.info('BookSourceViewModel', '从数据库加载所有书源');
       this.bookSources = await this.databaseManager.getAllBookSources();
+      dataCacheManager.set(CacheKeys.BOOK_SOURCES, this.bookSources);
+      
+      Logger.info('BookSourceViewModel', `加载所有书源完成: ${this.bookSources.length}个, 耗时: ${Date.now() - startTime}ms`);
       return this.bookSources;
     } catch (error) {
       Logger.error('BookSourceViewModel', '加载所有书源失败');
       throw new Error('加载书源失败');
     }
+  }
+  
+  /**
+   * 强制刷新书源列表（数据变更后调用）
+   */
+  async refreshBookSources(): Promise<BookSource[]> {
+    Logger.info('BookSourceViewModel', '强制刷新书源列表');
+    dataCacheManager.invalidate(CacheKeys.BOOK_SOURCES);
+    dataCacheManager.updateVersion(CacheKeys.BOOK_SOURCES);
+    pageStateManager.notifyDataChanged(PageIds.SOURCE);
+    return this.loadAllBookSources();
   }
 
   /**
@@ -294,17 +334,15 @@ export class BookSourceViewModel {
    */
   async upsertBookSource(bookSource: BookSource): Promise<void> {
     try {
-      // 确保书源有唯一ID
       if (!bookSource.id || bookSource.id.trim() === '') {
         bookSource.id = util.generateRandomUUID(true);
         Logger.debug('BookSourceViewModel', `为书源生成新ID: ${bookSource.name} -> ${bookSource.id}`);
       }
       
-      // 验证书源数据
       this.validateBookSourceData(bookSource);
       
       await this.databaseManager.upsertBookSource(bookSource);
-      await this.loadEnabledBookSources();
+      await this.refreshBookSources();
     } catch (error) {
       Logger.error('BookSourceViewModel', '添加或更新书源失败');
       throw new Error('添加或更新书源失败');
@@ -322,9 +360,9 @@ export class BookSourceViewModel {
       
       const source = this.bookSources.find((s: BookSource) => s.id === id);
       if (source) {
-        source.enabled = enabled;
+        source.metadata.enabled = enabled;
         await this.databaseManager.upsertBookSource(source);
-        await this.loadEnabledBookSources();
+        await this.refreshBookSources();
       }
     } catch (error) {
       Logger.error('BookSourceViewModel', '切换书源状态失败');
@@ -337,7 +375,6 @@ export class BookSourceViewModel {
    */
   async importBookSources(sources: BookSource[]): Promise<void> {
     try {
-      // 验证输入数据
       if (!sources || !Array.isArray(sources)) {
         throw new Error('无效的书源数据');
       }
@@ -347,7 +384,7 @@ export class BookSourceViewModel {
       }
       
       await this.batchUpsertBookSources(sources);
-      await this.loadEnabledBookSources();
+      await this.refreshBookSources();
     } catch (error) {
       Logger.error('BookSourceViewModel', '导入书源失败');
       throw new Error('导入书源失败');
@@ -397,7 +434,7 @@ export class BookSourceViewModel {
       }
       
       const deletedCount = await this.deleteBookSources(ids);
-      await this.loadEnabledBookSources();
+      await this.refreshBookSources();
       
       const result: DeleteResult = {
         success: true,
@@ -503,7 +540,7 @@ export class BookSourceViewModel {
         };
       }
 
-      if (!bookSource.searchUrl) {
+      if (!bookSource.legacy.searchUrl) {
         Logger.warn('BookSourceViewModel', '书源没有配置搜索URL');
         return {
           isAvailable: false,
@@ -528,8 +565,8 @@ export class BookSourceViewModel {
         { keyword: 'a', priority: 3 }
       ];
 
-      const headersRecord: Record<string, string> | undefined = bookSource.header
-        ? this.parseHeadersSafely(bookSource.header)
+      const headersRecord: Record<string, string> | undefined = bookSource.networkConfig?.header
+        ? this.parseHeadersSafely(bookSource.networkConfig.header)
         : undefined;
       const headers: Map<string, string> | undefined = headersRecord
         ? this.recordToMap(headersRecord)
@@ -546,7 +583,7 @@ export class BookSourceViewModel {
 
       for (let i = 0; i < sortedKeywords.length; i++) {
         const testKeyword = sortedKeywords[i].keyword;
-        let searchUrl = bookSource.searchUrl;
+        let searchUrl = bookSource.legacy.searchUrl;
 
         searchUrl = searchUrl
           .replace(/\{\{key\}\}/g, encodeURIComponent(testKeyword))
@@ -627,14 +664,17 @@ export class BookSourceViewModel {
     failureReason: string
   ): Promise<void> {
     try {
-      bookSource.status = isAvailable ? 'available' : 'unavailable';
+      if (!bookSource.state) {
+        bookSource.state = {};
+      }
+      bookSource.state.status = isAvailable ? 'available' : 'unavailable';
       const validation: BookSourceValidation = {
         lastValidationTime: Date.now(),
         responseTime: responseTime,
         successKeyword: successKeyword,
         failureReason: failureReason
       };
-      bookSource.validation = validation;
+      bookSource.state.validation = validation;
       await this.databaseManager.upsertBookSource(bookSource);
     } catch (error) {
       Logger.error('BookSourceViewModel', `更新书源验证状态失败: ${error}`);
@@ -645,14 +685,17 @@ export class BookSourceViewModel {
     try {
       const source = await this.getBookSourceById(bookSourceId);
       if (source) {
-        source.status = status === 'available' ? 'manual_available' : 'manual_unavailable';
-        source.validation = {
+        if (!source.state) {
+          source.state = {};
+        }
+        source.state.status = status === 'available' ? 'manual_available' : 'manual_unavailable';
+        source.state.validation = {
           lastValidationTime: Date.now(),
           responseTime: 0,
           successKeyword: '',
           failureReason: `用户手动标记为${status === 'available' ? '可用' : '不可用'}`
         };
-        source.enabled = status === 'available';
+        source.metadata.enabled = status === 'available';
         await this.databaseManager.upsertBookSource(source);
         Logger.info('BookSourceViewModel', `书源 ${source.name} 已手动标记为 ${status}`);
       }
@@ -733,8 +776,7 @@ export class BookSourceViewModel {
       // 使用增强的书源导入管理器
       const result = await this.sourceImportManager.importSources(content, format, skipSafetyCheck);
       
-      // 重新加载书源列表
-      await this.loadEnabledBookSources();
+      await this.refreshBookSources();
       
       return {
         success: result.success,
@@ -770,7 +812,7 @@ export class BookSourceViewModel {
       
       // 更新书源状态
       for (const result of results) {
-        result.source.enabled = result.isAvailable;
+        result.source.metadata.enabled = result.isAvailable;
         await this.upsertBookSource(result.source);
       }
       
@@ -839,11 +881,16 @@ export class BookSourceViewModel {
         const exportItem: ExportBookSourceData = {
           bookSourceName: source.name,
           bookSourceUrl: source.url,
-          ruleSearch: source.searchRule,
-          ruleToc: source.chapterRule,
-          ruleContent: source.contentRule,
-          ruleType: source.ruleType,
-          enabled: source.enabled,
+          ruleSearch: source.rules.searchRule,
+          ruleToc: source.rules.tocRule || {
+            chapterList: '',
+            chapterName: '',
+            chapterUrl: '',
+            nextUrl: undefined
+          },
+          ruleContent: source.rules.contentRule,
+          ruleType: source.legacy.ruleType,
+          enabled: source.metadata.enabled,
           customOrder: source.sort
         };
         return exportItem;

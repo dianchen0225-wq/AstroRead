@@ -1,7 +1,7 @@
 import { BookCategory } from '../models/BookCategory';
-import { databaseManager } from '../utils/DatabaseManager';
-import { IdGenerator } from '../utils/IdGenerator';
-import { Logger } from '../utils/Logger';
+import { databaseManager } from '../utils/file/DatabaseManager';
+import { IdGenerator } from '../utils/content/IdGenerator';
+import { Logger } from '../utils/performance/Logger';
 
 export class CategoryViewModel {
   private static readonly TAG = 'CategoryViewModel';

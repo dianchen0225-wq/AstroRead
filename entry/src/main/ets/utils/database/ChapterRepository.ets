@@ -1,6 +1,6 @@
 import { relationalStore } from '@kit.ArkData';
 import { Chapter } from '../../models/Book';
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 
 const DEFAULT_ORDER: number = 0;
 const VIP_FLAG_TRUE: number = 1;

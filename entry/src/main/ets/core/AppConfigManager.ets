@@ -3,8 +3,8 @@
  * 整合网络、数据库、缓存、UI 等所有配置
  */
 
-import { NetworkConfigManager, DEFAULT_NETWORK_CONFIG, AGGRESSIVE_NETWORK_CONFIG, CONSERVATIVE_NETWORK_CONFIG } from '../utils/NetworkConfig';
-import type { AppConfig as NetworkAppConfig } from '../utils/NetworkConfig';
+import { NetworkConfigManager, DEFAULT_NETWORK_CONFIG, AGGRESSIVE_NETWORK_CONFIG, CONSERVATIVE_NETWORK_CONFIG } from '../utils/network/NetworkConfig';
+import type { AppConfig as NetworkAppConfig } from '../utils/network/NetworkConfig';
 
 // ========== 数据库配置 ==========
 export interface DatabaseConfig {

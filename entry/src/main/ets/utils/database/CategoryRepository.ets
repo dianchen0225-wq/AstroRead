@@ -1,6 +1,6 @@
 import { relationalStore } from '@kit.ArkData';
 import { BookCategory } from '../../models/BookCategory';
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 
 export class CategoryRepository {
   private static readonly TAG = 'CategoryRepository';

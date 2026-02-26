@@ -3,7 +3,7 @@
  */
 
 import { Book } from './Book';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 
 export interface PagedSearchResult {
   books: Book[];

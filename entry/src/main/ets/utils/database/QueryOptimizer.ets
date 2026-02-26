@@ -4,7 +4,7 @@
  */
 
 import { relationalStore } from '@kit.ArkData';
-import { Logger } from '../Logger';
+import { Logger } from '../performance/Logger';
 
 /**
  * 查询条件

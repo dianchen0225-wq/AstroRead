@@ -38,6 +38,8 @@ export interface ReadConfig {
   scrollSpeed: number;
   fontFamily: string;
   margins: MarginsConfig;
+  volumeKeyPageTurn: boolean;
+  clickPageTurn: boolean;
 }
 
 /**
@@ -65,5 +67,7 @@ export const DEFAULT_READ_CONFIG: ReadConfig = {
   autoScroll: false,
   scrollSpeed: 50,
   fontFamily: 'HarmonyOS Sans',
-  margins: DEFAULT_MARGINS
+  margins: DEFAULT_MARGINS,
+  volumeKeyPageTurn: true,
+  clickPageTurn: true
 };

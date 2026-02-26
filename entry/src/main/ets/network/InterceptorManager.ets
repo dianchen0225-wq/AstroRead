@@ -14,7 +14,7 @@ import {
 
 type RequestInterceptorHandler = (config: HttpRequestConfig) => HttpRequestConfig | Promise<HttpRequestConfig>;
 type RequestErrorHandler = (error: HttpError) => HttpError | Promise<HttpError>;
-type ResponseInterceptorHandler<T = ESObject> = (response: HttpResponse<T>) => HttpResponse<T> | Promise<HttpResponse<T>>;
+type ResponseInterceptorHandler<T = object> = (response: HttpResponse<T>) => HttpResponse<T> | Promise<HttpResponse<T>>;
 type ResponseErrorHandler = (error: HttpError) => HttpError | Promise<HttpError>;
 
 interface InternalRequestInterceptor {
@@ -29,9 +29,9 @@ interface InternalRequestInterceptor {
 interface InternalResponseInterceptor {
   id: string;
   priority: number;
-  handler: ResponseInterceptorHandler<ESObject>;
+  handler: ResponseInterceptorHandler<object>;
   errorHandler?: ResponseErrorHandler;
-  onResponse?: ResponseInterceptorHandler<ESObject>;
+  onResponse?: ResponseInterceptorHandler<object>;
   onResponseError?: ResponseErrorHandler;
 }
 
@@ -121,10 +121,10 @@ export class InterceptorManager {
   async applyResponseInterceptors<T = void>(response: HttpResponse<T>): Promise<HttpResponse<T>> {
     const sortedInterceptors = this.getSortedResponseInterceptors();
 
-    let processedResponse: HttpResponse<ESObject> = response as HttpResponse<ESObject>;
+    let processedResponse: HttpResponse<object> = response as HttpResponse<object>;
     for (const interceptor of sortedInterceptors) {
       try {
-        const result: HttpResponse<ESObject> | Promise<HttpResponse<ESObject>> = interceptor.handler(processedResponse);
+        const result: HttpResponse<object> | Promise<HttpResponse<object>> = interceptor.handler(processedResponse);
         if (result instanceof Promise) {
           processedResponse = await result;
         } else {
