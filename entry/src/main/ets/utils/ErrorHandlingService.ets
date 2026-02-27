@@ -566,15 +566,11 @@ export class ErrorHandlingService {
   }
 
   private mergeDegradationConfig(base: DegradationConfig, update: Partial<DegradationConfig>): DegradationConfig {
-    const fastFailThreshold: number = update.fastFailThreshold !== undefined ? update.fastFailThreshold : base.fastFailThreshold;
-    const disableAfterConsecutiveFailures: number = update.disableAfterConsecutiveFailures !== undefined ? update.disableAfterConsecutiveFailures : base.disableAfterConsecutiveFailures;
-    const recoveryCheckInterval: number = update.recoveryCheckInterval !== undefined ? update.recoveryCheckInterval : base.recoveryCheckInterval;
-    const minHealthyScore: number = update.minHealthyScore !== undefined ? update.minHealthyScore : base.minHealthyScore;
     return {
-      fastFailThreshold: fastFailThreshold,
-      disableAfterConsecutiveFailures: disableAfterConsecutiveFailures,
-      recoveryCheckInterval: recoveryCheckInterval,
-      minHealthyScore: minHealthyScore
+      fastFailThreshold: update.fastFailThreshold !== undefined ? update.fastFailThreshold : base.fastFailThreshold,
+      disableAfterConsecutiveFailures: update.disableAfterConsecutiveFailures !== undefined ? update.disableAfterConsecutiveFailures : base.disableAfterConsecutiveFailures,
+      recoveryCheckInterval: update.recoveryCheckInterval !== undefined ? update.recoveryCheckInterval : base.recoveryCheckInterval,
+      minHealthyScore: update.minHealthyScore !== undefined ? update.minHealthyScore : base.minHealthyScore
     };
   }
 }

@@ -93,17 +93,20 @@ export class SearchResultBuilder {
     if (success && books.length > 0) {
       for (let i = 0; i < books.length; i++) {
         const book = books[i];
-        
+
         // 跳过无效书籍
         if (!book.name || book.name.trim().length === 0) {
+          Logger.debug('SearchResultBuilder', `跳过无效书籍: 书名为空, 书源=${sourceName}`);
           continue;
         }
-        
+
         // 生成唯一键（使用更严格的去重规则）
         const normalizedName = this.normalizeText(book.name);
         const normalizedAuthor = this.normalizeText(book.author || '');
         const key = `${normalizedName}_${normalizedAuthor}`;
-        
+
+        Logger.debug('SearchResultBuilder', `去重检查: 书名="${book.name}", 标准化="${normalizedName}", 作者="${book.author || ''}", 键="${key}"`);
+
         if (!this.seenKeys.has(key)) {
           this.seenKeys.add(key);
           // 确保书籍有必要的字段
@@ -112,10 +115,14 @@ export class SearchResultBuilder {
           }
           this.allBooks.push(book);
           newBooks.push(book);
+        } else {
+          Logger.debug('SearchResultBuilder', `跳过重复书籍: ${book.name}`);
         }
       }
     }
-    
+
+    Logger.info('SearchResultBuilder', `书源 ${sourceName} 添加完成: 输入${books.length}本, 新增${newBooks.length}本, 总计${this.allBooks.length}本`);
+
     return newBooks;
   }
 
@@ -128,7 +135,7 @@ export class SearchResultBuilder {
       .toLowerCase()
       .trim()
       .replace(/\s+/g, ' ')
-      .replace(/[[:punct:]]/g, '');
+      .replace(/[^\u4e00-\u9fa5a-z0-9]/g, '');
   }
 
   build(page: number = 1): PagedSearchResult {

@@ -1,7 +1,7 @@
 import { Book, SourceStatus, SourceValidationResult } from '../../models/Book';
 import { BookSource } from '../../models/BookSource';
 import { Logger } from '../performance/Logger';
-import { sourceHealthManager } from './SourceHealthManager';
+import { enhancedSourceHealthManager } from '../EnhancedSourceHealthManager';
 import { viewModelManager } from '../../viewmodel/ViewModelManager';
 import { NetworkManager } from '../network/NetworkManager';
 import { smartSourceSelector } from '../search/SmartSourceSelector';
@@ -163,7 +163,7 @@ export class SourceValidatorService {
 
     // 健康度检查
     if (this.validationConfig.enableHealthCheck) {
-      const healthScore = sourceHealthManager.getSourceScore(book.bookSourceId);
+      const healthScore = enhancedSourceHealthManager.getSourceScore(book.bookSourceId);
       if (healthScore < 10) {
         result.status = SourceStatus.INVALID;
         result.errorMessage = '书源健康度过低';

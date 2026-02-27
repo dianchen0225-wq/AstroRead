@@ -29,6 +29,7 @@ import { Logger } from '../utils/performance/Logger';
 import { NetworkManager } from '../utils/network/NetworkManager';
 import { SourceImportTaskPool } from '../utils/validation/SourceImportTaskPool';
 import { showToast } from '../utils/content/ToastUtils';
+import { sourceCleaner, FailedSource } from '../utils/SourceCleaner';
 import { BackButton } from '../components/BackButton';
 
 export interface SourceItemData {
@@ -75,6 +76,10 @@ export struct SourcePage {
   @Local isDeletingDisabled: boolean = false;
   @Local selectedIds: string[] = [];
   @Local showBatchActions: boolean = false;
+  @Local showCleanupDialog: boolean = false;
+  @Local cleanupReport: string = '';
+  @Local isCleaning: boolean = false;
+  @Local failedSources: FailedSource[] = [];
   
   private readonly PAGE_SIZE: number = 50;
   private isComponentActive: boolean = false;
@@ -296,6 +301,65 @@ export struct SourcePage {
       });
     } finally {
       this.isDeletingDisabled = false;
+    }
+  }
+
+  async cleanupFailedSources(): Promise<void> {
+    if (this.isCleaning) return;
+
+    this.isCleaning = true;
+    try {
+      Logger.info('SourcePage', '开始清理失效书源...');
+
+      const failedNames = sourceCleaner.getFailedSourceNames();
+      this.failedSources = sourceCleaner.getAllFailedSources();
+
+      if (failedNames.length === 0) {
+        showToast({
+          message: '没有检测到失效书源',
+          duration: 2000
+        });
+        return;
+      }
+
+      const bookSourceViewModel = viewModelManager.getBookSourceViewModel();
+      const allSources = await bookSourceViewModel.loadAllBookSources();
+
+      const failedIds: string[] = [];
+      for (const source of allSources) {
+        if (failedNames.includes(source.name)) {
+          failedIds.push(source.id);
+        }
+      }
+
+      if (failedIds.length > 0) {
+        const result = await bookSourceViewModel.batchUpdateBookSourcesStatus(failedIds, false);
+
+        sourceCleaner.recordFailedSources();
+
+        this.cleanupReport = sourceCleaner.generateCleanupReport();
+        this.showCleanupDialog = true;
+
+        showToast({
+          message: `已禁用 ${failedIds.length} 个失效书源`,
+          duration: 2000
+        });
+
+        await this.loadSources();
+      } else {
+        showToast({
+          message: '当前书源列表中没有匹配的失效书源',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('SourcePage', `清理失效书源失败: ${error}`);
+      showToast({
+        message: '清理失败',
+        duration: 2000
+      });
+    } finally {
+      this.isCleaning = false;
     }
   }
 
@@ -981,6 +1045,28 @@ export struct SourcePage {
               .enabled(!this.isDeletingDisabled && !this.isImporting && !this.isUpdating)
               .onClick(() => {
                 this.showDeleteDisabledConfirm();
+              })
+
+              Row() {
+                if (this.isCleaning) {
+                  LoadingProgress()
+                    .width(14)
+                    .height(14)
+                    .color('#fff')
+                    .margin({ right: 4 })
+                }
+                Text(this.isCleaning ? '清理中...' : '清理失效')
+                  .fontSize(12)
+                  .fontColor('#fff')
+              }
+              .height(32)
+              .backgroundColor('#ff9800')
+              .borderRadius(8)
+              .padding({ left: 12, right: 12 })
+              .margin({ left: 8 })
+              .enabled(!this.isCleaning && !this.isImporting && !this.isUpdating)
+              .onClick(() => {
+                this.cleanupFailedSources();
               })
             }
             .width('100%')

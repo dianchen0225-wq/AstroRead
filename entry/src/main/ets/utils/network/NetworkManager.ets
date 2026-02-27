@@ -854,6 +854,11 @@ export class NetworkManager {
    * 获取章节列表
    */
   async getChapterList(bookSource: BookSource, bookUrl: string): Promise<ParsedChapterItem[]> {
+    if (!bookUrl || bookUrl.trim() === '') {
+      Logger.error('NetworkManager', '书籍URL为空，无法获取章节列表');
+      throw new Error('Invalid URL format or missing URL');
+    }
+    
     try {
       const headers: HttpHeaderMap | undefined = bookSource.networkConfig?.header
         ? this.parseHeaderString(bookSource.networkConfig.header)

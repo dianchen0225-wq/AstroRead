@@ -3,7 +3,7 @@
  * 用于自动禁用失效的书源
  */
 
-import { Logger } from './Logger';
+import { Logger } from './performance/Logger';
 import { enhancedSourceHealthManager } from './EnhancedSourceHealthManager';
 
 export interface FailedSource {

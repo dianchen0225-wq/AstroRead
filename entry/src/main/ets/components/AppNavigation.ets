@@ -196,7 +196,7 @@ export struct AppNavBar {
       if (action.badge) {
         Text(action.badge)
           .fontSize(DesignSystem.Typography.size.xs)
-          .fontColor(DesignSystem.getButtonTextColor())
+          .fontColor('#FFFFFF')
           .backgroundColor(DesignSystem.getErrorColor(this.isLightMode))
           .borderRadius(DesignSystem.BorderRadius.full)
           .padding({ left: DesignSystem.Spacing.xs, right: DesignSystem.Spacing.xs })
@@ -262,7 +262,7 @@ export struct AppNavBar {
           Row() {
             Text('确定')
               .fontSize(DesignSystem.Typography.size.base)
-              .fontColor(DesignSystem.getButtonTextColor())
+              .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
               .fontWeight(DesignSystem.Typography.weight.medium)
           }
           .layoutWeight(1)

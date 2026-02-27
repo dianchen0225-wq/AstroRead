@@ -7,6 +7,7 @@ import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
 import { FileManager, FileInfo } from '../utils/file/FileManager';
 import { TXTParser } from '../utils/parser/TXTParser';
+import { asyncTXTParser, TXTParseResult, TXTChapter } from '../utils/AsyncTXTParser';
 import { EPUBParser } from '../utils/parser/EPUBParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book, Chapter } from '../models/Book';
@@ -83,19 +84,20 @@ struct ImportPage {
     }
   }
 
-  // 解析并保存TXT
+  // 解析并保存TXT（使用异步解析器避免主线程阻塞）
   async parseAndSaveTXT(filePath: string) {
-    const parseResult = await this.txtParser.parse(filePath);
+    this.importProgress = '正在解析TXT文件...';
+    
+    const parseResult = await asyncTXTParser.parse(filePath, undefined, (progress: number) => {
+      this.importProgress = `解析进度: ${progress}%`;
+    });
 
     if (parseResult.success && parseResult.book && parseResult.chapters) {
-      // 保存到数据库
       const bookViewModel = viewModelManager.getBookViewModel();
       const chapterViewModel = viewModelManager.getChapterViewModel();
 
-      // 添加书籍
       const bookId = await bookViewModel.addBook(parseResult.book);
 
-      // 更新章节的 bookId
       const chapters: Chapter[] = [];
       let chapterIndex = 0;
       for (const ch of parseResult.chapters) {
@@ -110,12 +112,13 @@ struct ImportPage {
         chapters.push(chapter);
       }
 
-      // 保存章节
       await chapterViewModel.saveChapters(bookId, chapters);
 
-      this.importProgress = `成功导入: ${parseResult.book.name}`;
+      this.importProgress = `成功导入: ${parseResult.book.name} (${parseResult.chapters.length}章)`;
+      Logger.info('ImportPage', `TXT导入成功: ${parseResult.book.name}, ${parseResult.chapters.length}章`);
     } else {
       this.importProgress = parseResult.error || '解析失败';
+      Logger.error('ImportPage', `TXT解析失败: ${parseResult.error}`);
     }
   }
 

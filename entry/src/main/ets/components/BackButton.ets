@@ -16,7 +16,7 @@ export struct BackButton {
   @Param buttonSize: 'small' | 'medium' | 'large' = 'medium';
   @Param style: 'default' | 'minimal' | 'circle' = 'default';
   @Param color: string = '';
-  @Param onBack?: () => void;
+  @Param onBack: () => void = () => {};
 
   private themeListener = (isDark: boolean): void => {
     this.isLightMode = !isDark;

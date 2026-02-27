@@ -5,8 +5,8 @@
 
 import taskpool from '@ohos.taskpool';
 import { Book } from '../models/Book';
-import { FileManager } from './FileManager';
-import { Logger } from './Logger';
+import { FileManager } from './file/FileManager';
+import { Logger } from './performance/Logger';
 
 const TAG = 'AsyncTXTParser';
 

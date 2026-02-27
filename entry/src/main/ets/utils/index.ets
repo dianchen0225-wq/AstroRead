@@ -32,7 +32,7 @@ export { default as SourceImportManager } from './validation/SourceImportManager
 export { SourceValidatorService, sourceValidatorService } from './validation/SourceValidatorService';
 export { BookSourceManager } from './validation/BookSourceManager';
 export { BookSourceDebugger } from './validation/BookSourceDebugger';
-export { SourceHealthManager } from './validation/SourceHealthManager';
+export { EnhancedSourceHealthManager, enhancedSourceHealthManager } from './EnhancedSourceHealthManager';
 
 // 日志和监控工具类
 export { Logger } from './performance/Logger';
@@ -69,7 +69,6 @@ export { BackupManager } from './file/BackupManager';
 export { ThemeManager } from '../common/ThemeManager';
 
 // 搜索工具类
-export { SearchEngine } from './search/SearchEngine';
 export { BookSourceSearchEngine } from './search/BookSourceSearchEngine';
 export { EnhancedBookSourceSearchEngine } from './search/EnhancedBookSourceSearchEngine';
 export { default as SearchEnhancer } from './search/SearchEnhancer';
@@ -126,3 +125,10 @@ export type {
   SanitizeOptions,
   LinkInfo
 } from './content/HtmlUtils';
+
+// 其他工具类
+export { AsyncTXTParser, asyncTXTParser, TXTParseResult, TXTChapter } from './AsyncTXTParser';
+export { NetworkDiagnostics, networkDiagnostics, DiagnosticResult, NetworkStatus } from './NetworkDiagnostics';
+export { SourceCleaner, sourceCleaner, FailedSource } from './SourceCleaner';
+export { SearchFixer, searchFixer, FixReport } from './SearchFixer';
+export { ErrorHandlingService, errorHandlingService, ErrorType, ErrorSeverity, DegradationStrategy, ErrorContext } from './ErrorHandlingService';

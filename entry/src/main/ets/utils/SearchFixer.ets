@@ -3,11 +3,11 @@
  * 集成所有修复方案,一键修复搜索功能
  */
 
-import { Logger } from './Logger';
+import { Logger } from './performance/Logger';
 import { sourceCleaner } from './SourceCleaner';
 import { enhancedSourceHealthManager, HealthStatistics } from './EnhancedSourceHealthManager';
 import { networkDiagnostics } from './NetworkDiagnostics';
-import { BookSourceManager } from './BookSourceManager';
+import { BookSourceManager } from './validation/BookSourceManager';
 import { BookSource } from '../models/BookSource';
 
 export interface FixReport {
@@ -69,7 +69,7 @@ export class SearchFixer {
 
       // 将书源同步到健康度管理器
       for (const source of allSources) {
-        enhancedSourceHealthManager.initializeSourceIfNeeded(source.id, source.name, source.url, source.enabled);
+        enhancedSourceHealthManager.initializeSourceIfNeeded(source.id, source.name, source.url, source.metadata.enabled);
       }
 
       // 步骤3: 清理失效书源
@@ -164,7 +164,7 @@ export class SearchFixer {
 
     // 同步到健康度管理器
     for (const source of allSources) {
-      enhancedSourceHealthManager.initializeSourceIfNeeded(source.id, source.name, source.url, source.enabled);
+      enhancedSourceHealthManager.initializeSourceIfNeeded(source.id, source.name, source.url, source.metadata.enabled);
     }
 
     const stats = enhancedSourceHealthManager.getStatistics();

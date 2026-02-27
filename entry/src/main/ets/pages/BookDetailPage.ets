@@ -157,6 +157,10 @@ struct BookDetailPage {
       Logger.info('BookDetailPage', `本地章节数: ${this.chapters.length}`);
 
       if (this.chapters.length === 0 && this.bookSource && this.isComponentActive) {
+        if (!this.book.bookUrl || this.book.bookUrl.trim() === '') {
+          Logger.warn('BookDetailPage', '书籍URL为空，无法从网络获取章节');
+          return;
+        }
         Logger.info('BookDetailPage', '从网络获取章节...');
         Logger.info('BookDetailPage', `书源: ${this.bookSource.name}, URL: ${this.book.bookUrl}`);
         this.chapters = await chapterViewModel.fetchAndSaveChapters(

@@ -230,10 +230,68 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
       const match = element.match(attrRegex);
       return match ? decodeHtmlEntitiesLocal(match[1]) : '';
     } else {
-      // 提取文本内容
-      const textMatch = element.match(/>([^<]*)</);
-      return textMatch ? decodeHtmlEntitiesLocal(textMatch[1].trim()) : '';
+      // 提取文本内容 - 支持嵌套标签
+      return extractAllTextContent(element, decodeHtmlEntitiesLocal);
     }
+  };
+
+  // 辅助函数：递归提取所有文本内容
+  const extractAllTextContent = (html: string, decodeFn: (s: string) => string): string => {
+    if (!html) return '';
+
+    // 移除 script 和 style 标签及其内容
+    let cleaned = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+
+    // 提取所有文本节点（标签之间的内容）
+    const textParts: string[] = [];
+    let lastIndex = 0;
+    let depth = 0;
+    let textStart = 0;
+
+    for (let i = 0; i < cleaned.length; i++) {
+      if (cleaned[i] === '<') {
+        if (depth === 0 && i > textStart) {
+          const text = cleaned.substring(textStart, i);
+          if (text.trim()) {
+            textParts.push(decodeFn(text.trim()));
+          }
+        }
+        depth++;
+        // 检查是否是自闭合标签
+        const remaining = cleaned.substring(i);
+        if (remaining.match(/^<[^>]*\/>/)) {
+          depth--;
+        }
+      } else if (cleaned[i] === '>') {
+        depth--;
+        if (depth < 0) depth = 0;
+        textStart = i + 1;
+      }
+    }
+
+    // 处理末尾的文本
+    if (textStart < cleaned.length) {
+      const text = cleaned.substring(textStart);
+      if (text.trim()) {
+        textParts.push(decodeFn(text.trim()));
+      }
+    }
+
+    // 使用正则表达式作为备选方案（更简单可靠）
+    if (textParts.length === 0) {
+      const textMatches = cleaned.match(/>([^<]+)</g);
+      if (textMatches) {
+        for (const match of textMatches) {
+          const text = match.substring(1, match.length - 1).trim();
+          if (text) {
+            textParts.push(decodeFn(text));
+          }
+        }
+      }
+    }
+
+    return textParts.join(' ').trim();
   };
 
   // 辅助函数：解码HTML实体
@@ -511,9 +569,28 @@ export class AsyncCssSelectorParser {
       const match = element.match(attrRegex);
       return match ? this.decodeHtmlEntities(match[1]) : '';
     } else {
-      const textMatch = element.match(/>([^<]*)</);
-      return textMatch ? this.decodeHtmlEntities(textMatch[1].trim()) : '';
+      return this.extractAllTextContentSync(element);
     }
+  }
+
+  private extractAllTextContentSync(html: string): string {
+    if (!html) return '';
+
+    let cleaned = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+
+    const textParts: string[] = [];
+    const textMatches = cleaned.match(/>([^<]+)</g);
+    if (textMatches) {
+      for (const match of textMatches) {
+        const text = match.substring(1, match.length - 1).trim();
+        if (text) {
+          textParts.push(this.decodeHtmlEntities(text));
+        }
+      }
+    }
+
+    return textParts.join(' ').trim();
   }
 
   async selectElements(html: string, selector: string): Promise<string[]> {

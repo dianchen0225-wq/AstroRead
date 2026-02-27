@@ -4,7 +4,7 @@
  */
 
 import http from '@ohos.net.http';
-import { Logger } from './Logger';
+import { Logger } from './performance/Logger';
 
 export interface DiagnosticResult {
   url: string;

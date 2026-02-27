@@ -5,9 +5,9 @@
 
 import { BookSource } from '../models/BookSource';
 import { BookSourceDiagnosticTool, DiagnosticSummary } from '../utils/BookSourceDiagnosticTool';
-import { BookSourceManager } from '../utils/BookSourceManager';
+import { BookSourceManager } from '../utils/validation/BookSourceManager';
 import { EnhancedSourceHealthManager } from '../utils/EnhancedSourceHealthManager';
-import { Logger } from '../utils/Logger';
+import { Logger } from '../utils/performance/Logger';
 import { BookSourceViewModel } from '../viewmodel/BookSourceViewModel';
 
 @Entry
@@ -23,7 +23,7 @@ export struct BookSourceRepairPage {
   private diagnosticTool: BookSourceDiagnosticTool = BookSourceDiagnosticTool.getInstance();
   private sourceManager: BookSourceManager = BookSourceManager.getInstance();
   private healthManager: EnhancedSourceHealthManager = EnhancedSourceHealthManager.getInstance();
-  private viewModel: BookSourceViewModel = BookSourceViewModel.getInstance();
+  private viewModel: BookSourceViewModel = new BookSourceViewModel();
 
   aboutToAppear(): void {
     // 初始化上下文
@@ -202,7 +202,7 @@ export struct BookSourceRepairPage {
 
     try {
       const sources = await this.viewModel.loadAllBookSources();
-      const enabledSources = sources.filter(source => source.enabled);
+      const enabledSources = sources.filter(source => source.metadata.enabled);
       const repairedCount = await this.diagnosticTool.repairAll(enabledSources, true);
       
       this.repairMessage = `修复完成: ${repairedCount}/${enabledSources.length} 个书源已修复`;

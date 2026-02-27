@@ -5,8 +5,8 @@
 
 import { BookSource } from '../models/BookSource';
 import { EnhancedSourceHealthManager, EnhancedHealthRecord } from './EnhancedSourceHealthManager';
-import NetworkAdapter from './NetworkAdapter';
-import { Logger } from './Logger';
+import NetworkAdapter from './network/NetworkAdapter';
+import { Logger } from './performance/Logger';
 
 export interface DiagnosticResult {
   sourceId: string;
@@ -66,7 +66,7 @@ export class BookSourceDiagnosticTool {
       result.suggestions.push('请检查并设置有效的书源URL');
     }
 
-    if (!source.searchUrl || source.searchUrl.trim() === '') {
+    if (!source.legacy.searchUrl || source.legacy.searchUrl.trim() === '') {
       result.isHealthy = false;
       result.issues.push('搜索URL为空');
       result.suggestions.push('请检查并设置有效的搜索URL');
@@ -131,7 +131,7 @@ export class BookSourceDiagnosticTool {
     }
 
     // 尝试构建并访问搜索URL
-    if (source.searchUrl && source.searchUrl.includes('{{key}}')) {
+    if (source.legacy.searchUrl && source.legacy.searchUrl.includes('{{key}}')) {
       const testKeyword = 'test';
       const searchUrl = this.buildSearchUrl(source, testKeyword);
       
@@ -272,8 +272,8 @@ export class BookSourceDiagnosticTool {
       }
     }
 
-    if (source.header && source.header.length > 0) {
-      const headerStr = source.header;
+    if (source.networkConfig?.header && source.networkConfig.header.length > 0) {
+      const headerStr = source.networkConfig.header;
       if (headerStr.includes('User-Agent')) {
         const uaMatch = headerStr.match(/"User-Agent"\s*:\s*"([^"]+)"/);
         if (uaMatch && uaMatch.length > 1) {
@@ -295,11 +295,11 @@ export class BookSourceDiagnosticTool {
    * 构建搜索URL
    */
   private buildSearchUrl(source: BookSource, keyword: string): string {
-    if (!source.searchUrl) {
+    if (!source.legacy.searchUrl) {
       return source.url || '';
     }
 
-    return source.searchUrl
+    return source.legacy.searchUrl
       .replace(/\{\{key\}\}/g, encodeURIComponent(keyword))
       .replace(/\{\{page\}\}/g, '1')
       .replace(/\{key\}/g, encodeURIComponent(keyword))

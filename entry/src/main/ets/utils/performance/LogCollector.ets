@@ -3,8 +3,6 @@
  * 用于收集和导出应用日志，方便调试
  */
 
-import { Logger } from "./Logger";
-
 export interface LogEntry {
   timestamp: number;
   level: 'debug' | 'info' | 'warn' | 'error';
@@ -84,7 +82,7 @@ export class LogCollector {
    */
   clearLogs(): void {
     this.logs = [];
-    Logger.info(this.TAG, '日志已清空');
+    console.info(`[INFO][${this.TAG}] 日志已清空`);
   }
 
   /**

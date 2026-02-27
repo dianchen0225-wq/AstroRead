@@ -32,12 +32,14 @@ import { AsyncCssSelectorParser } from '../parser/AsyncCssSelectorParser';
 import { parseCache } from '../cache/ParseCache';
 import { EnhancedJSEngine } from '../scripting/EnhancedJSEngine';
 import { Logger } from '../performance/Logger';
-import { sourceHealthManager } from '../validation/SourceHealthManager';
+import { EnhancedSourceHealthManager } from '../EnhancedSourceHealthManager';
 import { parseDebugLogger, ParseErrorInfo, ParseResultInfo, FieldExtractionParams, BookListExtractionParams, SearchDebugParams } from '../performance/ParseDebugLogger';
 import { searchCache } from './SearchCache';
 import { SearchResultValidator } from './SearchResultValidator';
 import { SearchQueryParser } from './SearchQueryParser';
 import { UniversalParser } from '../parser/UniversalParser';
+import { networkDiagnostics, NetworkStatus } from '../NetworkDiagnostics';
+import { errorHandlingService, ErrorType, ErrorSeverity, DegradationStrategy, ErrorContext } from '../ErrorHandlingService';
 
 // 为了保持向后兼容，重新导出接口
 export { ISearchResult as SearchResult, ISearchOptions as SearchOptions, SearchProgressCallback, BookFoundCallback };
@@ -74,6 +76,7 @@ export class BookSourceSearchEngine implements ISearchEngine {
   private jsEngine: EnhancedJSEngine;
   private asyncCssSelectorParser: AsyncCssSelectorParser;
   private universalParser: UniversalParser;
+  private healthManager: EnhancedSourceHealthManager;
   private requestTimestamps: Map<string, number[]> = new Map();
   private pendingTimers: Set<number> = new Set();
   private isCancelled: boolean = false;
@@ -89,6 +92,7 @@ export class BookSourceSearchEngine implements ISearchEngine {
     this.jsEngine = EnhancedJSEngine.getInstance();
     this.asyncCssSelectorParser = AsyncCssSelectorParser.getInstance();
     this.universalParser = UniversalParser.getInstance();
+    this.healthManager = EnhancedSourceHealthManager.getInstance();
   }
 
   static getInstance(): BookSourceSearchEngine {
@@ -222,6 +226,20 @@ export class BookSourceSearchEngine implements ISearchEngine {
     const maxPerSource = options.maxResultsPerSource || this.paginationConfig.maxResultsPerSource;
     const stopCondition = DEFAULT_STOP_CONDITION;
 
+    const networkStatus = await networkDiagnostics.quickNetworkCheck();
+    if (!networkStatus) {
+      Logger.warn(this.TAG, '网络未连接，搜索终止');
+      const emptyConfig: SearchPaginationConfig = {
+        pageSize: pageSize,
+        maxResultsPerSource: maxPerSource,
+        maxTotalResults: 0,
+        enableDeduplication: true,
+        sortByRelevance: true
+      };
+      const emptyBuilder = new SearchResultBuilder(emptyConfig);
+      return emptyBuilder.build(displayPage);
+    }
+
     const config: SearchPaginationConfig = {
       pageSize: pageSize,
       maxResultsPerSource: maxPerSource,
@@ -235,7 +253,7 @@ export class BookSourceSearchEngine implements ISearchEngine {
       if (!s.metadata.enabled) {
         return false;
       }
-      if (!sourceHealthManager.isSourceEnabled(s.id)) {
+      if (!this.healthManager.isSourceEnabled(s.id)) {
         Logger.debug(this.TAG, `跳过已禁用的书源: ${s.name}`);
         return false;
       }
@@ -243,8 +261,8 @@ export class BookSourceSearchEngine implements ISearchEngine {
     });
 
     const sortedSources = enabledSources.sort((a: BookSource, b: BookSource) => {
-      const scoreA = sourceHealthManager.getSourceScore(a.id);
-      const scoreB = sourceHealthManager.getSourceScore(b.id);
+      const scoreA = this.healthManager.getSourceScore(a.id);
+      const scoreB = this.healthManager.getSourceScore(b.id);
       return scoreB - scoreA;
     });
 
@@ -308,7 +326,8 @@ export class BookSourceSearchEngine implements ISearchEngine {
 
         const promise = this.searchSingleSource(source, searchKey, 1)
           .then((result: ISearchResult) => {
-            if (shouldStop) return;
+            // 即使 shouldStop 为 true，也要处理已完成请求的结果
+            // 智能停止只应阻止发起新请求，不应丢弃已完成的结果
 
             const newBooks = resultBuilder.addSourceResult(
               source.id,
@@ -320,10 +339,10 @@ export class BookSourceSearchEngine implements ISearchEngine {
             );
             
             if (result.success) {
-              sourceHealthManager.recordSuccess(source.id, source.name, source.url, result.responseTime);
+              this.healthManager.recordSuccess(source.id, source.name, source.url, result.responseTime);
             } else {
               const networkError = this.parseNetworkError(result.error || '');
-              sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
+              this.healthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
             }
 
             progress.completedSources++;
@@ -348,12 +367,13 @@ export class BookSourceSearchEngine implements ISearchEngine {
             }
           })
           .catch((error: Error) => {
-            if (shouldStop) return;
-            
+            // 即使 shouldStop 为 true，也要记录失败结果
+            // 智能停止只应阻止发起新请求，不应丢弃已完成的结果
+
             Logger.error(this.TAG, `搜索失败: ${source.name}, ${error}`);
             
             const networkError = this.parseNetworkError(error.message);
-            sourceHealthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
+            this.healthManager.recordFailure(source.id, source.name, source.url, networkError.type, networkError.message);
             
             resultBuilder.addSourceResult(
               source.id,
@@ -527,6 +547,19 @@ export class BookSourceSearchEngine implements ISearchEngine {
       if (errorStack) {
         Logger.error(this.TAG, `错误堆栈: ${errorStack}`);
       }
+
+      const errorContext: ErrorContext = {
+        sourceId: source.id,
+        sourceName: source.name,
+        operation: 'search',
+        retryCount: 0,
+        maxRetries: 3
+      };
+      const degradationResult = await errorHandlingService.handleError(
+        error instanceof Error ? error : new Error(errorMsg),
+        errorContext
+      );
+      Logger.debug(this.TAG, `错误降级策略: ${degradationResult.strategy}, 消息: ${degradationResult.message}`);
 
       return {
         books: [],

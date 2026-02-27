@@ -3,7 +3,7 @@
  * 提供更智能的书源健康度评估和自动禁用功能
  */
 
-import { Logger } from './Logger';
+import { Logger } from './performance/Logger';
 
 export interface EnhancedHealthRecord {
   sourceId: string;

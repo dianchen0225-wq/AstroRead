@@ -564,7 +564,7 @@ export class HttpClient implements IHttpClient {
    * 获取缓存统计
    */
   getCacheStats(): CacheStats {
-    return RequestCache.getInstance().getHttpCacheStats();
+    return RequestCache.getInstance().getStats();
   }
 
   // ==================== 指标管理 ====================

@@ -43,6 +43,15 @@ export interface DeleteResult {
   count?: number;
 }
 
+/**
+ * 批量更新状态结果接口
+ */
+export interface BatchUpdateStatusResult {
+  success: boolean;
+  message: string;
+  count?: number;
+}
+
 interface TestKeyword {
   keyword: string;
   priority: number;
@@ -703,6 +712,41 @@ export class BookSourceViewModel {
       const err = error instanceof Error ? error : new Error(String(error));
       Logger.error('BookSourceViewModel', `手动设置书源状态失败: ${err.message}`);
       throw err;
+    }
+  }
+
+  /**
+   * 批量更新书源状态
+   */
+  async batchUpdateBookSourcesStatus(ids: string[], enabled: boolean): Promise<BatchUpdateStatusResult> {
+    try {
+      if (!ids || ids.length === 0) {
+        return { success: false, message: '未选择任何书源' };
+      }
+
+      let updatedCount = 0;
+      for (const id of ids) {
+        try {
+          await this.toggleBookSource(id, enabled);
+          updatedCount++;
+        } catch (error) {
+          Logger.warn('BookSourceViewModel', `更新书源 ${id} 状态失败: ${error}`);
+        }
+      }
+
+      await this.refreshBookSources();
+
+      return {
+        success: true,
+        message: `成功更新 ${updatedCount} 个书源`,
+        count: updatedCount
+      };
+    } catch (error) {
+      Logger.error('BookSourceViewModel', `批量更新书源状态失败: ${error}`);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : '批量更新失败'
+      };
     }
   }
 

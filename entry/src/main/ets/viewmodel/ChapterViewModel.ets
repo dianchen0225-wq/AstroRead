@@ -8,7 +8,8 @@ import { ParsedChapterItem } from '../utils/parser/ContentParser';
 import { Logger } from '../utils/performance/Logger';
 import { common } from '@kit.AbilityKit';
 import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
-import { PerformanceManager } from '../utils/performance/PerformanceManager';
+import { PerformanceManager, PerformanceReport } from '../utils/performance/PerformanceManager';
+import { ResourceLevel } from '../utils/performance/ResourceMonitor';
 import { ProgressiveContentLoader, LoadState, ProgressiveLoadResult } from '../utils/performance/ProgressiveContentLoader';
 import { ParseTaskPriority } from '../utils/performance/ParseTaskQueue';
 import { ReadingState } from '../utils/performance/ReadingBehaviorMonitor';
@@ -38,6 +39,12 @@ interface ContentCacheEntry {
   accessCount: number;
 }
 
+interface ResourceStatus {
+  level: ResourceLevel;
+  canHandleNewTask: boolean;
+  suggestedConcurrency: number;
+}
+
 export class ChapterViewModel {
   private readonly databaseManager = DatabaseManager.getInstance();
   private readonly networkManager = NetworkManager.getInstance();
@@ -49,6 +56,11 @@ export class ChapterViewModel {
   private contentCache: Map<string, ContentCacheEntry> = new Map();
   private readonly cacheTTL: number = 30 * 60 * 1000;
   private progressiveCallbacks: Map<string, (result: ProgressiveLoadResult) => void> = new Map();
+
+  // 当前书籍上下文
+  private currentBookId: string | null = null;
+  private currentBookSource: BookSource | null = null;
+  private currentChapters: Chapter[] = [];
 
   setContext(context: common.UIAbilityContext): void {
     this.context = context;
@@ -258,6 +270,11 @@ export class ChapterViewModel {
    */
   async fetchAndSaveChapters(bookId: string, bookSource: BookSource, bookUrl: string): Promise<Chapter[]> {
     const startTime = Date.now();
+    
+    if (!bookUrl || bookUrl.trim() === '') {
+      Logger.warn(ChapterViewModel.TAG, '书籍URL为空，无法获取章节');
+      return [];
+    }
     
     try {
       Logger.info(ChapterViewModel.TAG, `开始获取章节，书源: ${bookSource.name}, URL: ${bookUrl}`);
@@ -585,14 +602,14 @@ export class ChapterViewModel {
   /**
    * 获取性能统计
    */
-  getPerformanceStats(): object {
+  getPerformanceStats(): PerformanceReport {
     return this.performanceManager.getReport();
   }
 
   /**
    * 获取当前资源状态
    */
-  getResourceStatus(): object {
+  getResourceStatus(): ResourceStatus {
     return {
       level: this.performanceManager.getResourceLevel(),
       canHandleNewTask: this.performanceManager.canHandleNewTask(),

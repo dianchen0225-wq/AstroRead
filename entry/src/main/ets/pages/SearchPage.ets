@@ -10,6 +10,7 @@ import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/network/NetworkManager';
 import { purifyIntro } from '../utils/content/ContentPurifier';
 import { sourceValidatorService, BatchValidationProgress } from '../utils/validation/SourceValidatorService';
+import { searchFixer, FixReport } from '../utils/SearchFixer';
 import { BackButton } from '../components/BackButton';
 
 export interface RankColor {
@@ -42,6 +43,9 @@ export struct SearchPage {
   @Local validBooksCount: number = 0;
   @Local invalidBooksCount: number = 0;
   @Local pressedBookId: string = '';
+  @Local showFixDialog: boolean = false;
+  @Local fixReport: FixReport | null = null;
+  @Local isFixing: boolean = false;
   @Param safeAreaTop: number = 0;
 
   private bookSources: BookSource[] = [];
@@ -309,6 +313,24 @@ export struct SearchPage {
       this.isValidating = false;
       this.validationProgress = '';
     }
+  }
+
+  private async performSearchFix(): Promise<void> {
+    this.isFixing = true;
+    try {
+      Logger.info('SearchPage', '开始执行搜索修复...');
+      this.fixReport = await searchFixer.performFullFix();
+      this.showFixDialog = true;
+      Logger.info('SearchPage', `搜索修复完成: ${this.fixReport.recommendations.length} 条建议`);
+    } catch (error) {
+      Logger.error('SearchPage', `搜索修复失败: ${error}`);
+    } finally {
+      this.isFixing = false;
+    }
+  }
+
+  private async quickDiagnose(): Promise<string> {
+    return await searchFixer.quickDiagnosis();
   }
 
   private applyFilter(): void {
@@ -637,7 +659,7 @@ export struct SearchPage {
         
         if (this.hasEnabledSources) {
           Row() {
-            Text('验证书源')
+            Text('搜索修复')
               .fontSize(DesignSystem.Typography.size.xs)
               .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
           }
@@ -655,7 +677,7 @@ export struct SearchPage {
           })
           .margin({ top: DesignSystem.Spacing.lg })
           .onClick(() => {
-            this.navigateToSourcePage();
+            this.performSearchFix();
           })
         }
       }

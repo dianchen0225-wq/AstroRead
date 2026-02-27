@@ -65,7 +65,7 @@ class BookSourceParser {
   parseSources(content: string, format: string): Array<BookSource> {
     try {
       Logger.debug(this.TAG, `开始解析书源，格式：${format}`);
-      
+
       switch (format.toLowerCase()) {
         case 'json':
           return this.parseJsonSources(content);
@@ -73,6 +73,8 @@ class BookSourceParser {
           return this.parseXmlSources(content);
         case 'txt':
           return this.parseTxtSources(content);
+        case 'html':
+          return this.parseHtmlSources(content);
         default:
           Logger.error(this.TAG, `不支持的书源格式：${format}`);
           return [];
@@ -384,7 +386,144 @@ class BookSourceParser {
       return [];
     }
   }
-  
+
+  /**
+   * 解析HTML格式书源（从网页表格中提取）
+   * 支持源仓库等网站的书源列表页面
+   */
+  private parseHtmlSources(content: string): Array<BookSource> {
+    try {
+      const sources: Array<BookSource> = [];
+
+      // 提取表格行
+      const rowMatches = content.match(/<tr[^>]*>([\s\S]*?)<\/tr>/g);
+      if (!rowMatches || rowMatches.length === 0) {
+        Logger.warn(this.TAG, 'HTML中没有找到表格行');
+        return [];
+      }
+
+      Logger.debug(this.TAG, `找到${rowMatches.length}个表格行`);
+
+      for (const row of rowMatches) {
+        // 跳过表头行
+        if (row.includes('<th') || row.includes('名称') && row.includes('地址')) {
+          continue;
+        }
+
+        // 提取单元格
+        const cellMatches = row.match(/<td[^>]*>([\s\S]*?)<\/td>/g);
+        if (!cellMatches || cellMatches.length < 2) {
+          continue;
+        }
+
+        // 提取书源名称和URL
+        let name = '';
+        let url = '';
+
+        // 第一个单元格通常是名称
+        const nameCell = cellMatches[0];
+        const nameMatch = nameCell.match(/>([^<]*)</);
+        if (nameMatch) {
+          name = this.extractTextFromHtml(nameMatch[1]).trim();
+        }
+
+        // 第二个单元格通常是URL
+        const urlCell = cellMatches[1];
+        // 检查是否有链接
+        const linkMatch = urlCell.match(/href="([^"]*)"/);
+        if (linkMatch) {
+          url = linkMatch[1].trim();
+        } else {
+          // 直接提取文本
+          const urlTextMatch = urlCell.match(/>([^<]*)</);
+          if (urlTextMatch) {
+            url = this.extractTextFromHtml(urlTextMatch[1]).trim();
+          }
+        }
+
+        // 清理URL中的HTML实体
+        url = this.decodeHtmlEntities(url);
+
+        // 验证并创建书源
+        if (name && url && this.isValidUrl(url)) {
+          const source = this.buildBookSourceFromAstroRead({
+            bookSourceName: name,
+            bookSourceUrl: url,
+            enabled: true
+          });
+
+          if (source) {
+            sources.push(source);
+          }
+        }
+      }
+
+      Logger.info(this.TAG, `HTML表格解析完成，共解析${sources.length}个书源`);
+      return sources;
+    } catch (error) {
+      Logger.error(this.TAG, `HTML解析失败：${JSON.stringify(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * 从HTML中提取纯文本
+   */
+  private extractTextFromHtml(html: string): string {
+    if (!html) return '';
+
+    // 移除HTML标签
+    let text = html.replace(/<[^>]*>/g, '');
+
+    // 解码HTML实体
+    text = this.decodeHtmlEntities(text);
+
+    return text.trim();
+  }
+
+  /**
+   * 解码HTML实体
+   */
+  private decodeHtmlEntities(text: string): string {
+    if (!text) return '';
+
+    const entities: Record<string, string> = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#39;': "'",
+      '&nbsp;': ' ',
+      '&hellip;': '…',
+      '&mdash;': '—',
+      '&ndash;': '–',
+      '&ldquo;': '"',
+      '&rdquo;': '"',
+      '&lsquo;': '\u2018',
+      '&rsquo;': '\u2019',
+    };
+
+    let result = text;
+    const entries = Object.entries(entities);
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const entity = entry[0];
+      const char = entry[1];
+      result = result.split(entity).join(char);
+    }
+
+    // 处理数字实体
+    result = result.replace(/&#(\d+);/g, (_match: string, dec: string) => {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+
+    result = result.replace(/&#x([0-9a-fA-F]+);/g, (_match: string, hex: string) => {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+
+    return result;
+  }
+
   /**
    * 从XML中提取数据
    */
@@ -594,9 +733,9 @@ class BookSourceParser {
     if (!content || content.trim().length === 0) {
       return 'unknown';
     }
-    
+
     const trimmedContent = content.trim();
-    
+
     // JSON检测
     if (trimmedContent.startsWith('{') || trimmedContent.startsWith('[')) {
       try {
@@ -606,14 +745,40 @@ class BookSourceParser {
         // 不是有效的JSON
       }
     }
-    
+
     // XML检测
     if (trimmedContent.startsWith('<?xml') || trimmedContent.includes('<sources>')) {
       return 'xml';
     }
-    
+
+    // HTML检测 - 检查是否包含书源表格
+    if (this.isHtmlSourceTable(content)) {
+      return 'html';
+    }
+
     // TXT检测（默认格式）
     return 'txt';
+  }
+
+  /**
+   * 检查内容是否为HTML书源表格
+   */
+  private isHtmlSourceTable(content: string): boolean {
+    // 检查是否包含HTML标签和表格
+    if (!content.includes('<html') && !content.includes('<table')) {
+      return false;
+    }
+
+    // 检查是否包含书源相关的表格结构
+    // 源仓库网站的书源表格通常包含这些特征
+    const hasSourceTable = content.includes('<table') &&
+      (content.includes('bookSourceName') ||
+        content.includes('bookSourceUrl') ||
+        content.includes('名称') ||
+        content.includes('地址') ||
+        /❤️.+</.test(content)); // 书源名称通常以❤️开头
+
+    return hasSourceTable;
   }
   /**
    * 检测规则类型
