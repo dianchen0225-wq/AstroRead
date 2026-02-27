@@ -44,10 +44,74 @@ import { errorHandlingService, ErrorType, ErrorSeverity, DegradationStrategy, Er
 // 为了保持向后兼容，重新导出接口
 export { ISearchResult as SearchResult, ISearchOptions as SearchOptions, SearchProgressCallback, BookFoundCallback };
 
+// ==================== 验证相关接口定义 ====================
+
+/**
+ * 验证结果接口
+ */
+interface ValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * 验证错误类
+ */
+class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+/**
+ * 验证选项接口 - 输入验证
+ */
+interface InputValidationOptions {
+  validateSearchRule?: boolean;
+  minKeywordLength?: number;
+  maxKeywordLength?: number;
+}
+
+/**
+ * 验证选项接口 - HTML内容验证
+ */
+interface HtmlValidationOptions {
+  maxSize?: number; // 最大大小限制（字节），默认10MB
+  allowEmpty?: boolean; // 是否允许空内容
+  checkEncoding?: boolean; // 是否检查编码问题
+}
+
+/**
+ * 验证选项接口 - 规则验证
+ */
+interface RuleValidationOptions {
+  allowEmpty?: boolean;
+  checkSyntax?: boolean;
+}
+
+// ==================== 原有接口定义 ====================
+
 interface UrlConfig {
   method: 'GET' | 'POST';
   body?: string;
   headers: Record<string, string>;
+}
+
+/**
+ * 扩展的搜索规则接口，包含可选字段
+ */
+interface ExtendedSearchRule {
+  bookList: string;
+  name: string;
+  author: string;
+  cover: string | undefined;
+  intro: string | undefined;
+  bookUrl: string;
+  nextUrl: string | undefined;
+  checkKeyWord?: string;
+  latestChapter?: string;
+  wordCount?: string;
 }
 
 interface SearchUrlResult {
@@ -574,6 +638,7 @@ export class BookSourceSearchEngine implements ISearchEngine {
 
   /**
    * 构建搜索 URL
+   * 改进的编码处理：保留中文字符，只编码特殊字符，空格转为+号
    */
   private async buildSearchUrlWithConfig(source: BookSource, key: string, page: number): Promise<SearchUrlResult> {
     if (!source.legacy.searchUrl) {
@@ -602,7 +667,9 @@ export class BookSourceSearchEngine implements ISearchEngine {
         page,
         baseUrl: source.url
       });
-      return { url: result, config };
+      // 验证JS返回的URL格式
+      const validatedUrl = this.validateAndFixUrl(result);
+      return { url: validatedUrl, config };
     }
 
     const commaIndex = searchUrl.indexOf(',{');
@@ -621,26 +688,32 @@ export class BookSourceSearchEngine implements ISearchEngine {
       }
     }
 
+    // 使用改进的编码方式处理搜索关键词
+    const encodedKey = this.encodeSearchKeyword(key);
+    const pageStr = String(page);
+
     searchUrl = searchUrl
-      .replace(/\{\{key\}\}/g, encodeURIComponent(key))
-      .replace(/\{\{page\}\}/g, String(page))
-      .replace(/\{key\}/g, encodeURIComponent(key))
-      .replace(/\{page\}/g, String(page))
-      .replace(/<key>/g, encodeURIComponent(key))
-      .replace(/<page>/g, String(page))
-      .replace(/\$key\$/g, encodeURIComponent(key))
-      .replace(/\$page\$/g, String(page));
+      .replace(/\{\{key\}\}/g, encodedKey)
+      .replace(/\{\{page\}\}/g, pageStr)
+      .replace(/\{key\}/g, encodedKey)
+      .replace(/\{page\}/g, pageStr)
+      .replace(/<key>/g, encodedKey)
+      .replace(/<page>/g, pageStr)
+      .replace(/\$key\$/g, encodedKey)
+      .replace(/\$page\$/g, pageStr);
 
     if (config.body) {
+      // POST body使用application/x-www-form-urlencoded编码
+      const bodyEncodedKey = this.encodeFormData(key);
       config.body = config.body
-        .replace(/\{\{key\}\}/g, encodeURIComponent(key))
-        .replace(/\{\{page\}\}/g, String(page))
-        .replace(/\{key\}/g, encodeURIComponent(key))
-        .replace(/\{page\}/g, String(page))
-        .replace(/<key>/g, encodeURIComponent(key))
-        .replace(/<page>/g, String(page))
-        .replace(/\$key\$/g, encodeURIComponent(key))
-        .replace(/\$page\$/g, String(page));
+        .replace(/\{\{key\}\}/g, bodyEncodedKey)
+        .replace(/\{\{page\}\}/g, pageStr)
+        .replace(/\{key\}/g, bodyEncodedKey)
+        .replace(/\{page\}/g, pageStr)
+        .replace(/<key>/g, bodyEncodedKey)
+        .replace(/<page>/g, pageStr)
+        .replace(/\$key\$/g, bodyEncodedKey)
+        .replace(/\$page\$/g, pageStr);
       Logger.debug(this.TAG, `POST请求体: ${config.body}`);
     }
 
@@ -648,7 +721,130 @@ export class BookSourceSearchEngine implements ISearchEngine {
       searchUrl = this.resolveUrl(source.url, searchUrl);
     }
 
-    return { url: searchUrl, config };
+    // 最终URL格式验证
+    const validatedUrl = this.validateAndFixUrl(searchUrl);
+
+    return { url: validatedUrl, config };
+  }
+
+  /**
+   * 编码搜索关键词 - 用于URL路径或查询参数
+   * 保留中文字符，只编码特殊字符，空格转为+号
+   */
+  private encodeSearchKeyword(keyword: string): string {
+    if (!keyword) {
+      return '';
+    }
+
+    try {
+      // 先进行标准encodeURIComponent编码
+      let encoded = encodeURIComponent(keyword);
+
+      // 解码中文字符（Unicode范围：\u4e00-\u9fa5）
+      // 同时保留已编码的特殊字符
+      encoded = encoded.replace(/%([0-9A-Fa-f]{2})/g, (match: string, hex: string): string => {
+        const code = parseInt(hex, 16);
+        // 中文字符范围：0x4E00-0x9FA5 (CJK统一汉字)
+        // 中文标点：0x3000-0x303F
+        // 全角字符：0xFF00-0xFFEF
+        if ((code >= 0x4E00 && code <= 0x9FA5) ||
+            (code >= 0x3000 && code <= 0x303F) ||
+            (code >= 0xFF00 && code <= 0xFFEF) ||
+            (code >= 0x3400 && code <= 0x4DBF) || // CJK扩展A
+            (code >= 0x20000 && code <= 0x2A6DF)) { // CJK扩展B
+          return String.fromCharCode(code);
+        }
+        // 空格转为+号
+        if (code === 0x20) {
+          return '+';
+        }
+        return match; // 保持其他字符编码
+      });
+
+      return encoded;
+    } catch (error) {
+      Logger.warn(this.TAG, `编码搜索关键词失败: ${error}，使用原始值`);
+      // 失败时进行简单替换
+      return keyword.replace(/ /g, '+');
+    }
+  }
+
+  /**
+   * 编码表单数据 - 用于POST body (application/x-www-form-urlencoded)
+   * 保留中文字符，空格转为+号，特殊字符编码
+   */
+  private encodeFormData(value: string): string {
+    if (!value) {
+      return '';
+    }
+
+    try {
+      // 对于表单数据，使用类似的编码策略
+      let encoded = encodeURIComponent(value);
+
+      // 解码中文字符
+      encoded = encoded.replace(/%([0-9A-Fa-f]{2})/g, (match: string, hex: string): string => {
+        const code = parseInt(hex, 16);
+        // 中文字符和常见Unicode字符
+        if ((code >= 0x4E00 && code <= 0x9FA5) ||
+            (code >= 0x3000 && code <= 0x303F) ||
+            (code >= 0xFF00 && code <= 0xFFEF) ||
+            (code >= 0x3400 && code <= 0x4DBF) ||
+            (code >= 0x20000 && code <= 0x2A6DF)) {
+          return String.fromCharCode(code);
+        }
+        // 空格转为+号
+        if (code === 0x20) {
+          return '+';
+        }
+        return match;
+      });
+
+      return encoded;
+    } catch (error) {
+      Logger.warn(this.TAG, `编码表单数据失败: ${error}，使用原始值`);
+      return value.replace(/ /g, '+');
+    }
+  }
+
+  /**
+   * 验证并修复URL格式
+   */
+  private validateAndFixUrl(url: string): string {
+    if (!url) {
+      return url;
+    }
+
+    try {
+      // 检查URL基本格式
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        Logger.warn(this.TAG, `URL缺少协议头: ${url.substring(0, 50)}...`);
+        // 尝试修复：添加https://
+        url = 'https://' + url;
+      }
+
+      // 检查并修复URL中的常见问题
+      // 1. 多个连续的斜杠（保留协议后的//）
+      url = url.replace(/(https?:\/\/)(\/)+/g, '$1');
+
+      // 2. 检查URL长度
+      if (url.length > 8192) {
+        Logger.warn(this.TAG, `URL过长(${url.length}字符)，可能导致请求失败`);
+      }
+
+      // 3. 验证URL是否可以被解析
+      const urlPattern = /^https?:\/\/[^\s<>"{}|\\^`\[\]]+$/;
+      if (!urlPattern.test(url)) {
+        Logger.warn(this.TAG, `URL包含非法字符: ${url.substring(0, 100)}...`);
+        // 尝试清理URL中的非法字符
+        url = url.replace(/[\s<>"{}|\\^`\[\]]/g, '');
+      }
+
+      return url;
+    } catch (error) {
+      Logger.error(this.TAG, `URL验证失败: ${error}`);
+      return url;
+    }
   }
 
   private parseUrlConfig(configStr: string, baseHeaders: Record<string, string>): UrlConfig {
@@ -894,7 +1090,244 @@ export class BookSourceSearchEngine implements ISearchEngine {
   }
 
   /**
-   * 解析单本书籍
+   * 获取通用选择器 - 用于降级解析
+   */
+  private getGenericSelectors(fieldName: string): string[] {
+    const selectors: Map<string, string[]> = new Map([
+      ['name', [
+        'h1 a', 'h2 a', 'h3 a', 'h4 a',
+        '.title a', '.book-name a', '.name a',
+        'h1', 'h2', 'h3', 'h4',
+        '.title', '.book-name', '.name', '.book-title',
+        '[class*="title"] a', '[class*="name"] a',
+        'a[href*="book"]', 'a[href*="novel"]',
+        '.book-item a', '.search-item a', '.list-item a'
+      ]],
+      ['author', [
+        '.author', '.writer', '.pen-name',
+        '[class*="author"]', '[class*="writer"]',
+        '.book-author', '.book-writer',
+        'span[class*="author"]', 'em[class*="author"]',
+        '.info .author', '.meta .author'
+      ]],
+      ['cover', [
+        'img[src*="cover"]', 'img[class*="cover"]',
+        'img[class*="book"]', '.book-img img',
+        '.cover img', 'img:first-child',
+        'img[data-src]', 'img[src*="img"]'
+      ]],
+      ['intro', [
+        '.intro', '.summary', '.description', '.brief',
+        '[class*="intro"]', '[class*="summary"]', '[class*="desc"]',
+        '.book-intro', '.book-summary', '.content-intro',
+        'p[class*="intro"]', 'div[class*="intro"]'
+      ]],
+      ['bookUrl', [
+        'a[href*="book"]', 'a[href*="novel"]', 'a[href*="read"]',
+        'h1 a', 'h2 a', 'h3 a', '.title a',
+        'a:first-child', '.book-item a', '.search-item a'
+      ]],
+      ['latestChapter', [
+        '.latest', '.last-chapter', '.new-chapter',
+        '[class*="latest"]', '[class*="last"]',
+        '.update', '.recent', '.newest'
+      ]],
+      ['wordCount', [
+        '.word-count', '.words', '.length',
+        '[class*="word"]', '[class*="count"]',
+        '.size', '.total', '.words-num'
+      ]]
+    ]);
+    return selectors.get(fieldName) || [];
+  }
+
+  /**
+   * 使用正则表达式提取标题
+   */
+  private extractTitleByRegex(html: string): string {
+    // 常见的标题模式
+    const patterns: RegExp[] = [
+      /<h[1-6][^>]*>(?:<[^>]+>)*([^<]+)(?:<\/[^>]+>)*<\/h[1-6]>/i,
+      /<a[^>]*href=["'][^"']*(?:book|novel|read)[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)(?:<\/[^>]+>)*<\/a>/i,
+      /<[^>]*class=["'][^"']*(?:title|name)[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)(?:<\/[^>]+>)*<\/[^>]+>/i,
+      /title["']?\s*[:=]\s*["']([^"']+)["']/i,
+      /alt=["']([^"']+)["']/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        const title = this.cleanText(match[1]);
+        if (title.length > 0 && title.length < 100) {
+          return title;
+        }
+      }
+    }
+    return '';
+  }
+
+  /**
+   * 使用正则表达式提取作者
+   */
+  private extractAuthorByRegex(html: string): string {
+    const patterns: RegExp[] = [
+      /作者[：:]\s*<[^>]*>([^<]+)</i,
+      /writer[="']?\s*[:=]\s*["']([^"']+)["']/i,
+      /author[="']?\s*[:=]\s*["']([^"']+)["']/i,
+      /<[^>]*class=["'][^"']*author[^"']*["'][^>]*>([^<]+)</i,
+      /(?:作者|writer|author)[:\s]+([^<\n]{2,20})/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        const author = this.cleanText(match[1]);
+        if (author.length > 0 && author.length < 50) {
+          return author;
+        }
+      }
+    }
+    return '';
+  }
+
+  /**
+   * 使用正则表达式提取封面
+   */
+  private extractCoverByRegex(html: string, baseUrl: string): string {
+    const patterns: RegExp[] = [
+      /<img[^>]*src=["']([^"']*(?:cover|book)[^"']*)["'][^>]*>/i,
+      /<img[^>]*data-src=["']([^"']+)["'][^>]*>/i,
+      /<img[^>]*src=["']([^"']+\.(?:jpg|jpeg|png|webp))["'][^>]*>/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        let cover = match[1].trim();
+        if (cover && !cover.startsWith('http')) {
+          cover = this.resolveUrl(baseUrl, cover);
+        }
+        return cover;
+      }
+    }
+    return '';
+  }
+
+  /**
+   * 使用正则表达式提取URL
+   */
+  private extractUrlByRegex(html: string, baseUrl: string): string {
+    const patterns: RegExp[] = [
+      /<a[^>]*href=["']([^"']*(?:book|novel|read)[^"']*)["'][^>]*>/i,
+      /<a[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*(?:title|name|book)[^"']*["'][^>]*>/i,
+      /<h[1-6][^>]*>\s*<a[^>]*href=["']([^"']+)["'][^>]*>/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        let url = match[1].trim();
+        if (url && !url.startsWith('http')) {
+          url = this.resolveUrl(baseUrl, url);
+        }
+        return url;
+      }
+    }
+    return '';
+  }
+
+  /**
+   * 带降级的字段提取 - 三级降级策略
+   * 1. 书源规则 -> 2. 通用选择器 -> 3. 正则提取
+   */
+  private async extractFieldWithFallback(
+    html: string,
+    rule: string,
+    source: BookSource,
+    fieldName: string
+  ): Promise<FieldExtractionResult> {
+    const startTime = Date.now();
+
+    // 第一级：尝试书源规则
+    let result = await this.extractFieldWithDebug(html, rule, source, fieldName);
+    if (result.value && result.value.trim().length > 0) {
+      Logger.debug(this.TAG, `字段提取成功[规则]: ${fieldName}=${result.value.substring(0, 50)}`);
+      return result;
+    }
+
+    // 第二级：尝试通用选择器
+    Logger.debug(this.TAG, `规则提取失败，尝试通用选择器: ${fieldName}, 书源=${source.name}`);
+    const genericSelectors = this.getGenericSelectors(fieldName);
+
+    for (const selector of genericSelectors) {
+      try {
+        const elements = await this.asyncCssSelectorParser.selectElements(html, selector);
+        if (elements.length > 0) {
+          const value = this.extractTextFromElement(elements[0]);
+          if (value && value.trim().length > 0) {
+            Logger.debug(this.TAG, `字段提取成功[通用选择器]: ${fieldName}=${value.substring(0, 50)}, selector=${selector}`);
+            return { value: value.trim(), ruleType: 'css' };
+          }
+        }
+      } catch (e) {
+        // 继续尝试下一个选择器
+        continue;
+      }
+    }
+
+    // 第三级：尝试正则提取
+    Logger.debug(this.TAG, `通用选择器失败，尝试正则提取: ${fieldName}, 书源=${source.name}`);
+    let regexValue = '';
+    switch (fieldName) {
+      case 'name':
+        regexValue = this.extractTitleByRegex(html);
+        break;
+      case 'author':
+        regexValue = this.extractAuthorByRegex(html);
+        break;
+      case 'cover':
+        regexValue = this.extractCoverByRegex(html, source.url);
+        break;
+      case 'bookUrl':
+        regexValue = this.extractUrlByRegex(html, source.url);
+        break;
+    }
+
+    if (regexValue && regexValue.trim().length > 0) {
+      Logger.debug(this.TAG, `字段提取成功[正则]: ${fieldName}=${regexValue.substring(0, 50)}`);
+      return { value: regexValue.trim(), ruleType: 'regex' };
+    }
+
+    // 最后尝试 UniversalParser
+    if (!regexValue) {
+      try {
+        let smartValue = '';
+        switch (fieldName) {
+          case 'name':
+            smartValue = await this.universalParser.parseBookName(html, rule);
+            break;
+          case 'author':
+            smartValue = await this.universalParser.parseAuthor(html, rule);
+            break;
+          case 'cover':
+            smartValue = await this.universalParser.parseCover(html, rule);
+            break;
+        }
+        if (smartValue && smartValue.trim().length > 0) {
+          Logger.debug(this.TAG, `字段提取成功[智能解析]: ${fieldName}=${smartValue.substring(0, 50)}`);
+          return { value: smartValue.trim(), ruleType: 'css' };
+        }
+      } catch (e) {
+        // 智能解析失败，继续
+      }
+    }
+
+    Logger.debug(this.TAG, `字段提取失败[全部降级策略]: ${fieldName}, 耗时=${Date.now() - startTime}ms`);
+    return { value: '', ruleType: 'css' };
+  }
+
+  /**
+   * 解析单本书籍 - 带多级降级策略
    */
   private async parseSingleBook(
     source: BookSource,
@@ -904,64 +1337,92 @@ export class BookSourceSearchEngine implements ISearchEngine {
     const searchRule = source.rules.searchRule;
     const bookParseStartTime = Date.now();
 
-    // 提取书名 - 首先尝试规则，失败时使用智能解析
-    let nameResult = await this.extractFieldWithDebug(html, searchRule.name, source, 'name');
+    // 提取书名 - 使用降级策略
+    const nameResult = await this.extractFieldWithFallback(html, searchRule.name, source, 'name');
     if (!nameResult.value) {
-      const smartName = await this.universalParser.parseBookName(html, searchRule.name);
-      if (smartName) {
-        nameResult = { value: smartName, ruleType: 'css' };
-      }
-    }
-    if (!nameResult.value) {
-      Logger.debug(this.TAG, `书名提取失败: 书源=${source.name}, 规则=${searchRule.name}, HTML片段=${html.substring(0, 200)}`);
+      Logger.debug(this.TAG, `书名提取失败(所有降级策略): 书源=${source.name}, HTML片段=${html.substring(0, 200)}`);
       return null;
     }
 
-    // 提取作者 - 首先尝试规则，失败时使用智能解析
-    let authorResult = await this.extractFieldWithDebug(html, searchRule.author, source, 'author');
-    if (!authorResult.value) {
-      const smartAuthor = await this.universalParser.parseAuthor(html, searchRule.author);
-      if (smartAuthor) {
-        authorResult = { value: smartAuthor, ruleType: 'css' };
-      }
-    }
-    Logger.debug(this.TAG, `字段提取: 书源=${source.name}, 书名=${nameResult.value}, 作者=${authorResult.value || '空'}, 作者规则=${searchRule.author}`);
+    // 提取作者 - 使用降级策略
+    const authorResult = await this.extractFieldWithFallback(html, searchRule.author, source, 'author');
+    Logger.debug(this.TAG, `字段提取: 书源=${source.name}, 书名=${nameResult.value}, 作者=${authorResult.value || '空'}`);
 
-    // 提取封面 - 首先尝试规则，失败时使用智能解析
-    let coverResult = await this.extractFieldWithDebug(html, searchRule.cover || '', source, 'cover');
-    if (!coverResult.value) {
-      const smartCover = await this.universalParser.parseCover(html, searchRule.cover || '');
-      if (smartCover) {
-        coverResult = { value: smartCover, ruleType: 'css' };
-      }
-    }
+    // 提取封面 - 使用降级策略
+    const coverResult = await this.extractFieldWithFallback(html, searchRule.cover || '', source, 'cover');
     let cover = coverResult.value;
     if (cover && !cover.startsWith('http')) {
       cover = this.resolveUrl(source.url, cover);
     }
 
-    // 提取简介
-    const introResult = await this.extractFieldWithDebug(html, searchRule.intro || '', source, 'intro');
+    // 提取简介 - 使用降级策略
+    const introResult = await this.extractFieldWithFallback(html, searchRule.intro || '', source, 'intro');
 
-    // 提取书籍 URL
-    const bookUrlResult = await this.extractFieldWithDebug(html, searchRule.bookUrl, source, 'bookUrl');
+    // 提取书籍 URL - 使用降级策略
+    const bookUrlResult = await this.extractFieldWithFallback(html, searchRule.bookUrl, source, 'bookUrl');
     let bookUrl = bookUrlResult.value;
     if (bookUrl && !bookUrl.startsWith('http')) {
       bookUrl = this.resolveUrl(source.url, bookUrl);
     }
-    Logger.debug(this.TAG, `字段提取: 书源=${source.name}, 书籍URL=${bookUrl || '空'}, URL规则=${searchRule.bookUrl}`);
+    Logger.debug(this.TAG, `字段提取: 书源=${source.name}, 书籍URL=${bookUrl || '空'}`);
+
+    // 提取最新章节 - 使用降级策略
+    // 从 searchRule 中获取 latestChapter 规则，如果不存在则使用空字符串
+    const extendedRule = searchRule as ExtendedSearchRule;
+    const latestChapterRule = extendedRule.latestChapter || '';
+    const latestChapterResult = await this.extractFieldWithFallback(
+      html,
+      latestChapterRule,
+      source,
+      'latestChapter'
+    );
+
+    // 提取字数 - 使用降级策略
+    // 从 searchRule 中获取 wordCount 规则，如果不存在则使用空字符串
+    const wordCountRule = extendedRule.wordCount || '';
+    const wordCountResult = await this.extractFieldWithFallback(
+      html,
+      wordCountRule,
+      source,
+      'wordCount'
+    );
 
     const parseTime = Date.now() - bookParseStartTime;
-    
+    Logger.debug(this.TAG, `书籍解析完成: ${nameResult.value}, 耗时=${parseTime}ms, 降级策略使用情况: name=${nameResult.ruleType}, author=${authorResult.ruleType}, cover=${coverResult.ruleType}`);
+
+    // 解析字数字符串为数字
+    let wordCountNum: number | undefined = undefined;
+    if (wordCountResult.value) {
+      // 提取数字部分
+      const numMatch = wordCountResult.value.match(/[\d,.]+/);
+      if (numMatch) {
+        const numStr = numMatch[0].replace(/,/g, '');
+        wordCountNum = parseInt(numStr, 10);
+        if (isNaN(wordCountNum)) {
+          wordCountNum = undefined;
+        }
+      }
+    }
+
+    // 清理书名和作者，移除可能的模板代码
+    const cleanName = this.cleanText(nameResult.value);
+    const cleanAuthor = this.cleanText(authorResult.value) || '未知作者';
+
+    // 过滤掉包含模板代码的无效结果
+    if (this.containsTemplateCode(cleanName) || this.containsTemplateCode(cleanAuthor)) {
+      Logger.warn(this.TAG, `过滤掉包含模板代码的搜索结果: 书源=${source.name}, 书名=${cleanName}, 作者=${cleanAuthor}`);
+      return null;
+    }
+
     const book: Book = {
       id: '',
-      name: this.cleanText(nameResult.value),
-      author: this.cleanText(authorResult.value) || '未知作者',
+      name: cleanName,
+      author: cleanAuthor,
       cover: cover || undefined,
       intro: introResult.value || undefined,
       kind: undefined,
-      wordCount: undefined,
-      latestChapter: undefined,
+      wordCount: wordCountNum,
+      latestChapter: latestChapterResult.value || undefined,
       bookSourceId: source.id,
       bookSourceName: source.name,
       bookUrl: bookUrl || '',
@@ -981,17 +1442,45 @@ export class BookSourceSearchEngine implements ISearchEngine {
   }
 
   /**
+   * 生成轻量级缓存键 - 使用哈希避免内存问题
+   * 对大文档只取前1000字符进行哈希
+   */
+  private generateCacheKey(html: string, rule: string): string {
+    // 对大文档只取前1000字符，避免内存问题
+    const maxLength = 1000;
+    const content = html.length > maxLength ? html.substring(0, maxLength) : html;
+    const hash = this.simpleHash(content);
+    return `${hash}_${rule}`;
+  }
+
+  /**
+   * 简单的字符串哈希函数 - 生成轻量级哈希值
+   */
+  private simpleHash(str: string): number {
+    let hash = 0;
+    if (str.length === 0) {
+      return hash;
+    }
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // 转换为32位整数
+    }
+    return Math.abs(hash);
+  }
+
+  /**
    * 带调试日志的字段提取
    */
   private async extractFieldWithDebug(
-    html: string, 
-    rule: string, 
-    source: BookSource, 
+    html: string,
+    rule: string,
+    source: BookSource,
     fieldName: string
   ): Promise<FieldExtractionResult> {
     const startTime = Date.now();
     const ruleType = this.detectRuleType(rule);
-    
+
     if (!rule) {
       const logParams: FieldExtractionParams = {
         sourceName: source.name,
@@ -1018,22 +1507,24 @@ export class BookSourceSearchEngine implements ISearchEngine {
       if (rule.startsWith('@js:') || rule.includes('<js>')) {
         value = await this.jsEngine.executeRule(html, rule, source.url);
       } else {
+        // 生成轻量级缓存键
+        const cacheKey = this.generateCacheKey(html, rule);
         // 先检查缓存
-        const cached = parseCache.get(html, rule);
+        const cached = parseCache.getByKey(cacheKey);
         if (cached && cached.length > 0) {
           value = this.extractTextFromElement(cached[0]);
         } else {
           // 解析规则中的 @ 后缀（如 "a@href" 表示提取 href 属性）
           const parsedRule = this.parseRuleWithAttribute(rule);
-          
+
           // 使用异步 CSS 选择器解析器提取文本内容
           value = await this.asyncCssSelectorParser.extractValue(html, parsedRule.selector, parsedRule.attribute);
 
-          // 缓存解析结果
+          // 缓存解析结果 - 使用轻量级缓存键
           if (value) {
             const elements = await this.asyncCssSelectorParser.selectElements(html, parsedRule.selector);
             if (elements.length > 0) {
-              parseCache.set(html, rule, elements);
+              parseCache.setByKey(cacheKey, elements);
             }
           }
         }
@@ -1090,38 +1581,70 @@ export class BookSourceSearchEngine implements ISearchEngine {
   /**
    * 解析规则中的 @ 后缀（如 "a@href" 表示提取 href 属性）
    * 返回分离后的选择器和属性名
+   * 
+   * 支持的标准格式：
+   * - class.name@text / class.name@href / class.name@src
+   * - tag.div@text / tag.a@href
+   * - id.xxx@text
+   * - .class@text / #id@href / tag@text
+   * - @css:.class@text
    */
   private parseRuleWithAttribute(rule: string): RuleParseResult {
     if (!rule) {
-      const emptyResult: RuleParseResult = { selector: '' };
-      return emptyResult;
+      return { selector: '' };
     }
 
-    // 处理 @text 伪属性（表示提取文本内容，实际上不需要属性）
-    if (rule.endsWith('@text')) {
-      const textResult: RuleParseResult = { selector: rule.substring(0, rule.length - 5) };
-      return textResult;
+    let processedRule = rule.trim();
+
+    // 移除 @css: 前缀
+    if (processedRule.startsWith('@css:')) {
+      processedRule = processedRule.substring(5).trim();
+    }
+
+    // 转换标准格式前缀为标准CSS选择器
+    if (processedRule.startsWith('class.')) {
+      processedRule = '.' + processedRule.substring(6);
+    } else if (processedRule.startsWith('tag.')) {
+      processedRule = processedRule.substring(4);
+    } else if (processedRule.startsWith('id.')) {
+      processedRule = '#' + processedRule.substring(3);
+    }
+
+    // 处理 @text 伪属性（表示提取文本内容）
+    if (processedRule.endsWith('@text') || processedRule.endsWith('@text()')) {
+      const selector = processedRule.replace(/@text\(\)?$/, '');
+      return { selector: selector.trim(), attribute: 'text' };
+    }
+
+    // 处理 @html 伪属性
+    if (processedRule.endsWith('@html') || processedRule.endsWith('@html()')) {
+      const selector = processedRule.replace(/@html\(\)?$/, '');
+      return { selector: selector.trim(), attribute: 'html' };
     }
 
     // 查找最后一个 @ 符号（用于属性提取）
-    // 需要排除 @css:、@js:、@xpath: 等前缀和 class.、tag.、id. 中的 @
-    const lastAtIndex = rule.lastIndexOf('@');
+    const lastAtIndex = processedRule.lastIndexOf('@');
     if (lastAtIndex > 0) {
-      const afterAt = rule.substring(lastAtIndex + 1);
-      // 检查 @ 后面是否是合法的属性名（字母、数字、下划线、连字符）
+      const beforeAt = processedRule.substring(0, lastAtIndex).trim();
+      const afterAt = processedRule.substring(lastAtIndex + 1).trim();
+      
+      // 检查 @ 后面是否是合法的属性名
       if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(afterAt)) {
-        // 排除一些特殊情况
-        const beforeAt = rule.substring(0, lastAtIndex);
-        // 确保不是 @css:、@js: 等前缀
-        if (!beforeAt.endsWith('@css') && !beforeAt.endsWith('@js') && !beforeAt.endsWith('@xpath')) {
-          const attrResult: RuleParseResult = { selector: beforeAt, attribute: afterAt };
-          return attrResult;
+        // 排除规则前缀（不区分大小写）
+        const lowerBeforeAt = beforeAt.toLowerCase();
+        const invalidPrefixes = ['@css', '@js', '@xpath', '@json', '@regex'];
+        const isInvalidPrefix = invalidPrefixes.some(prefix => 
+          lowerBeforeAt.endsWith(prefix)
+        );
+        
+        if (!isInvalidPrefix) {
+          return { selector: beforeAt, attribute: afterAt };
         }
       }
     }
 
-    const defaultResult: RuleParseResult = { selector: rule };
-    return defaultResult;
+    // 无属性提取，返回处理后的选择器
+    return { selector: processedRule };
   }
 
   /**
@@ -1424,6 +1947,493 @@ export class BookSourceSearchEngine implements ISearchEngine {
    */
   clearCache(): void {
     this.requestTimestamps.clear();
+  }
+
+  // ==================== 输入验证方法 ====================
+
+  /**
+   * 统一的输入验证方法
+   * 验证书源对象、关键词等输入参数的有效性
+   * 
+   * @param source - 书源对象
+   * @param keyword - 搜索关键词
+   * @param options - 可选的验证选项
+   * @returns ValidationResult - 验证结果
+   */
+  validateInput(
+    source: BookSource | null | undefined,
+    keyword: string | null | undefined,
+    options?: InputValidationOptions
+  ): ValidationResult {
+    // 验证书源对象
+    if (!source) {
+      return { valid: false, error: '书源对象不能为空' };
+    }
+
+    // 验证书源ID
+    if (!source.id || source.id.trim().length === 0) {
+      return { valid: false, error: '书源ID不能为空' };
+    }
+
+    // 验证书源名称
+    if (!source.name || source.name.trim().length === 0) {
+      return { valid: false, error: '书源名称不能为空' };
+    }
+
+    // 验证书源URL
+    if (!source.url || source.url.trim().length === 0) {
+      return { valid: false, error: '书源URL不能为空' };
+    }
+
+    // 验证URL格式
+    try {
+      const urlPattern = /^https?:\/\/.+/i;
+      if (!urlPattern.test(source.url)) {
+        return { valid: false, error: `书源URL格式无效: ${source.url}` };
+      }
+    } catch {
+      return { valid: false, error: `书源URL格式验证失败: ${source.url}` };
+    }
+
+    // 验证书源是否启用
+    if (!source.metadata || !source.metadata.enabled) {
+      return { valid: false, error: `书源已禁用: ${source.name}` };
+    }
+
+    // 验证搜索关键词
+    if (keyword === null || keyword === undefined) {
+      return { valid: false, error: '搜索关键词不能为空' };
+    }
+
+    const trimmedKeyword = keyword.trim();
+    if (trimmedKeyword.length === 0) {
+      return { valid: false, error: '搜索关键词不能为空或仅包含空白字符' };
+    }
+
+    // 验证关键词长度
+    const minLength = options?.minKeywordLength ?? 1;
+    const maxLength = options?.maxKeywordLength ?? 100;
+
+    if (trimmedKeyword.length < minLength) {
+      return { valid: false, error: `搜索关键词长度不能少于${minLength}个字符` };
+    }
+
+    if (trimmedKeyword.length > maxLength) {
+      return { valid: false, error: `搜索关键词长度不能超过${maxLength}个字符` };
+    }
+
+    // 验证搜索规则（可选）
+    if (options?.validateSearchRule !== false) {
+      const searchRule = source.rules?.searchRule;
+      if (!searchRule) {
+        return { valid: false, error: `书源未配置搜索规则: ${source.name}` };
+      }
+
+      // 验证必要的搜索规则字段
+      if (!searchRule.bookList || searchRule.bookList.trim().length === 0) {
+        return { valid: false, error: `书源搜索规则缺少书籍列表规则: ${source.name}` };
+      }
+
+      if (!searchRule.name || searchRule.name.trim().length === 0) {
+        return { valid: false, error: `书源搜索规则缺少书名规则: ${source.name}` };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * HTML内容验证方法
+   * 验证HTML内容的有效性和安全性
+   * 
+   * @param html - HTML内容字符串
+   * @param options - 可选的验证选项
+   * @returns ValidationResult - 验证结果
+   */
+  validateHtmlContent(
+    html: string | null | undefined,
+    options?: HtmlValidationOptions
+  ): ValidationResult {
+    // 验证HTML内容是否存在
+    if (html === null || html === undefined) {
+      return { valid: false, error: 'HTML内容不能为空' };
+    }
+
+    // 验证HTML内容不为空
+    if (html.length === 0) {
+      if (options?.allowEmpty) {
+        return { valid: true };
+      }
+      return { valid: false, error: 'HTML内容为空' };
+    }
+
+    // 限制HTML内容大小（默认10MB）
+    const maxSize = options?.maxSize ?? 10 * 1024 * 1024; // 10MB
+    // 使用字符串长度作为大小估算（UTF-16编码，每个字符2字节）
+    const htmlSize = html.length * 2; // 估算字节数
+
+    if (htmlSize > maxSize) {
+      return {
+        valid: false,
+        error: `HTML内容大小(${this.formatBytes(htmlSize)})超过限制(${this.formatBytes(maxSize)})`
+      };
+    }
+
+    // 检查HTML内容是否包含有效的HTML标签
+    const hasValidHtmlTags = /<[a-zA-Z][^>]*>/.test(html);
+    if (!hasValidHtmlTags) {
+      // 如果内容过短，可能是错误响应
+      if (html.length < 100) {
+        return {
+          valid: false,
+          error: `HTML内容可能无效（长度:${html.length}），未检测到有效的HTML标签`
+        };
+      }
+    }
+
+    // 检查常见的错误页面标识
+    const errorIndicators = [
+      '404 not found',
+      '403 forbidden',
+      '500 internal server error',
+      '502 bad gateway',
+      '503 service unavailable',
+      'access denied',
+      'captcha',
+      '验证码',
+      'access forbidden'
+    ];
+
+    const lowerHtml = html.toLowerCase();
+    for (const indicator of errorIndicators) {
+      if (lowerHtml.includes(indicator)) {
+        return {
+          valid: false,
+          error: `HTML内容可能包含错误页面标识: "${indicator}"`
+        };
+      }
+    }
+
+    // 检查编码问题（可选）
+    if (options?.checkEncoding !== false) {
+      // 检查是否存在乱码特征
+      const garbledPattern = /[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/;
+      if (garbledPattern.test(html)) {
+        return {
+          valid: false,
+          error: 'HTML内容可能存在编码问题（检测到乱码字符）'
+        };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * 规则验证方法
+   * 验证解析规则的有效性和语法正确性
+   * 
+   * @param rule - 解析规则字符串
+   * @param ruleType - 规则类型（可选，自动检测）
+   * @param options - 可选的验证选项
+   * @returns ValidationResult - 验证结果
+   */
+  validateRule(
+    rule: string | null | undefined,
+    ruleType?: 'css' | 'xpath' | 'jsonpath' | 'regex' | 'js',
+    options?: RuleValidationOptions
+  ): ValidationResult {
+    // 验证规则不为空
+    if (rule === null || rule === undefined) {
+      return { valid: false, error: '规则不能为空' };
+    }
+
+    const trimmedRule = rule.trim();
+
+    if (trimmedRule.length === 0) {
+      if (options?.allowEmpty) {
+        return { valid: true };
+      }
+      return { valid: false, error: '规则不能为空或仅包含空白字符' };
+    }
+
+    // 自动检测规则类型
+    const detectedType = ruleType || this.detectRuleType(trimmedRule);
+
+    // 根据规则类型进行特定验证
+    if (options?.checkSyntax !== false) {
+      const syntaxResult = this.validateRuleSyntax(trimmedRule, detectedType);
+      if (!syntaxResult.valid) {
+        return syntaxResult;
+      }
+    }
+
+    // 验证规则长度（防止过长的规则影响性能）
+    const maxRuleLength = 5000;
+    if (trimmedRule.length > maxRuleLength) {
+      return {
+        valid: false,
+        error: `规则长度(${trimmedRule.length})超过最大限制(${maxRuleLength})`
+      };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * 验证规则语法
+   * 
+   * @param rule - 规则字符串
+   * @param ruleType - 规则类型
+   * @returns ValidationResult - 验证结果
+   */
+  private validateRuleSyntax(
+    rule: string,
+    ruleType: 'css' | 'xpath' | 'jsonpath' | 'regex' | 'js'
+  ): ValidationResult {
+    switch (ruleType) {
+      case 'css':
+        return this.validateCssRule(rule);
+      case 'xpath':
+        return this.validateXPathRule(rule);
+      case 'jsonpath':
+        return this.validateJsonPathRule(rule);
+      case 'regex':
+        return this.validateRegexRule(rule);
+      case 'js':
+        return this.validateJsRule(rule);
+      default:
+        return { valid: true };
+    }
+  }
+
+  /**
+   * 验证CSS选择器规则
+   */
+  private validateCssRule(rule: string): ValidationResult {
+    // 移除 @css: 前缀
+    let processedRule = rule;
+    if (processedRule.startsWith('@css:')) {
+      processedRule = processedRule.substring(5).trim();
+    }
+
+    // 转换标准格式前缀
+    if (processedRule.startsWith('class.')) {
+      processedRule = '.' + processedRule.substring(6);
+    } else if (processedRule.startsWith('tag.')) {
+      processedRule = processedRule.substring(4);
+    } else if (processedRule.startsWith('id.')) {
+      processedRule = '#' + processedRule.substring(3);
+    }
+
+    // 处理属性提取后缀
+    const atIndex = processedRule.lastIndexOf('@');
+    if (atIndex > 0) {
+      const beforeAt = processedRule.substring(0, atIndex).trim();
+      const afterAt = processedRule.substring(atIndex + 1).trim();
+
+      // 检查是否是合法的属性名
+      if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(afterAt)) {
+        // 排除规则前缀
+        const invalidPrefixes = ['@css', '@js', '@xpath', '@json', '@regex'];
+        const isInvalidPrefix = invalidPrefixes.some(prefix =>
+          beforeAt.toLowerCase().endsWith(prefix)
+        );
+
+        if (!isInvalidPrefix) {
+          processedRule = beforeAt;
+        }
+      }
+    }
+
+    // 基本CSS选择器验证
+    if (processedRule.length === 0) {
+      return { valid: false, error: 'CSS选择器不能为空' };
+    }
+
+    // 检查不完整的CSS选择器
+    if (/[.#\[\(]$/.test(processedRule)) {
+      return { valid: false, error: `CSS选择器不完整: "${processedRule}"` };
+    }
+
+    // 检查括号匹配
+    const openBrackets = (processedRule.match(/\[/g) || []).length;
+    const closeBrackets = (processedRule.match(/\]/g) || []).length;
+    if (openBrackets !== closeBrackets) {
+      return { valid: false, error: `CSS选择器括号不匹配: "${processedRule}"` };
+    }
+
+    // 检查圆括号匹配
+    const openParens = (processedRule.match(/\(/g) || []).length;
+    const closeParens = (processedRule.match(/\)/g) || []).length;
+    if (openParens !== closeParens) {
+      return { valid: false, error: `CSS选择器圆括号不匹配: "${processedRule}"` };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * 验证XPath规则
+   */
+  private validateXPathRule(rule: string): ValidationResult {
+    // 检查XPath基本语法
+    if (!rule.startsWith('//') && !rule.startsWith('./')) {
+      return { valid: false, error: `XPath规则必须以"//"或"./"开头: "${rule}"` };
+    }
+
+    // 检查括号匹配
+    const openParens = (rule.match(/\(/g) || []).length;
+    const closeParens = (rule.match(/\)/g) || []).length;
+    if (openParens !== closeParens) {
+      return { valid: false, error: `XPath规则圆括号不匹配: "${rule}"` };
+    }
+
+    // 检查方括号匹配
+    const openBrackets = (rule.match(/\[/g) || []).length;
+    const closeBrackets = (rule.match(/\]/g) || []).length;
+    if (openBrackets !== closeBrackets) {
+      return { valid: false, error: `XPath规则方括号不匹配: "${rule}"` };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * 验证JSONPath规则
+   */
+  private validateJsonPathRule(rule: string): ValidationResult {
+    // 检查JSONPath基本语法
+    if (!rule.startsWith('$')) {
+      return { valid: false, error: `JSONPath规则必须以"$"开头: "${rule}"` };
+    }
+
+    // 检查括号匹配
+    const openBrackets = (rule.match(/\[/g) || []).length;
+    const closeBrackets = (rule.match(/\]/g) || []).length;
+    if (openBrackets !== closeBrackets) {
+      return { valid: false, error: `JSONPath规则方括号不匹配: "${rule}"` };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * 验证正则表达式规则
+   */
+  private validateRegexRule(rule: string): ValidationResult {
+    try {
+      // 尝试编译正则表达式
+      new RegExp(rule);
+      return { valid: true };
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : '未知错误';
+      return { valid: false, error: `正则表达式语法错误: ${errorMsg}` };
+    }
+  }
+
+  /**
+   * 验证JavaScript规则
+   */
+  private validateJsRule(rule: string): ValidationResult {
+    // 检查JS规则标记
+    const hasJsMarker = rule.startsWith('@js:') || rule.includes('<js>');
+
+    if (!hasJsMarker) {
+      return { valid: false, error: 'JS规则必须以"@js:"开头或包含"<js>"标签' };
+    }
+
+    // 提取JS代码
+    let jsCode = rule;
+    if (jsCode.startsWith('@js:')) {
+      jsCode = jsCode.substring(4).trim();
+    }
+    jsCode = jsCode.replace(/<js>|<\/js>/g, '').trim();
+
+    if (jsCode.length === 0) {
+      return { valid: false, error: 'JS规则代码不能为空' };
+    }
+
+    // 基本语法检查（检查括号匹配）
+    const openBraces = (jsCode.match(/\{/g) || []).length;
+    const closeBraces = (jsCode.match(/\}/g) || []).length;
+    if (openBraces !== closeBraces) {
+      return { valid: false, error: 'JS规则代码花括号不匹配' };
+    }
+
+    const openParens = (jsCode.match(/\(/g) || []).length;
+    const closeParens = (jsCode.match(/\)/g) || []).length;
+    if (openParens !== closeParens) {
+      return { valid: false, error: 'JS规则代码圆括号不匹配' };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * 格式化字节大小为人类可读格式
+   */
+  private formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  /**
+   * 验证并抛出异常（便捷方法）
+   * 
+   * @param source - 书源对象
+   * @param keyword - 搜索关键词
+   * @param options - 可选的验证选项
+   * @throws ValidationError - 验证失败时抛出
+   */
+  validateInputOrThrow(
+    source: BookSource | null | undefined,
+    keyword: string | null | undefined,
+    options?: InputValidationOptions
+  ): void {
+    const result = this.validateInput(source, keyword, options);
+    if (!result.valid) {
+      throw new ValidationError(result.error || '输入验证失败');
+    }
+  }
+
+  /**
+   * 验证HTML内容并抛出异常（便捷方法）
+   * 
+   * @param html - HTML内容字符串
+   * @param options - 可选的验证选项
+   * @throws ValidationError - 验证失败时抛出
+   */
+  validateHtmlContentOrThrow(
+    html: string | null | undefined,
+    options?: HtmlValidationOptions
+  ): void {
+    const result = this.validateHtmlContent(html, options);
+    if (!result.valid) {
+      throw new ValidationError(result.error || 'HTML内容验证失败');
+    }
+  }
+
+  /**
+   * 验证规则并抛出异常（便捷方法）
+   * 
+   * @param rule - 解析规则字符串
+   * @param ruleType - 规则类型（可选）
+   * @param options - 可选的验证选项
+   * @throws ValidationError - 验证失败时抛出
+   */
+  validateRuleOrThrow(
+    rule: string | null | undefined,
+    ruleType?: 'css' | 'xpath' | 'jsonpath' | 'regex' | 'js',
+    options?: RuleValidationOptions
+  ): void {
+    const result = this.validateRule(rule, ruleType, options);
+    if (!result.valid) {
+      throw new ValidationError(result.error || '规则验证失败');
+    }
   }
 }
 

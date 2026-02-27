@@ -9,6 +9,7 @@ import { HTMLParser } from '../parser/HTMLParser';
 import { NetworkAdapter } from '../network/NetworkAdapter';
 import { ScriptEngine, ScriptContext } from './ScriptEngine';
 import { JSSecurityConfig, SecurityValidationResult } from '../security/JSSecurityConfig';
+import { JavaBridge } from './JavaBridge';
 
 export interface JSExecutionResult {
   success: boolean;
@@ -37,6 +38,7 @@ export class EnhancedJSEngine {
   private networkAdapter: NetworkAdapter;
   private scriptEngine: ScriptEngine;
   private securityConfig: JSSecurityConfig;
+  private javaBridge: JavaBridge;
   private cache: Map<string, CacheValue> = new Map();
   private readonly TAG = 'EnhancedJSEngine';
 
@@ -50,6 +52,7 @@ export class EnhancedJSEngine {
     this.networkAdapter = NetworkAdapter.getInstance();
     this.scriptEngine = ScriptEngine.getInstance();
     this.securityConfig = JSSecurityConfig.getInstance();
+    this.javaBridge = JavaBridge.getInstance();
   }
 
   static getInstance(): EnhancedJSEngine {
@@ -63,20 +66,25 @@ export class EnhancedJSEngine {
     try {
       const jsCode = script.replace(/^@js:\s*/i, '').trim();
 
-      // 安全验证脚本
       const validation = this.securityConfig.validateScript(jsCode);
       if (!validation.valid) {
         Logger.error(this.TAG, `搜索URL脚本安全验证失败: ${validation.error}`);
         return '';
       }
 
-      // 净化上下文输入
       const sanitizedContext: JSContext = {
         key: context.key ? this.securityConfig.sanitizeInput(context.key) : undefined,
         page: context.page,
         baseUrl: context.baseUrl ? this.securityConfig.sanitizeInput(context.baseUrl) : undefined,
         result: context.result ? this.securityConfig.sanitizeInput(context.result) : undefined
       };
+
+      this.javaBridge.setContext({
+        key: sanitizedContext.key,
+        page: sanitizedContext.page,
+        baseUrl: sanitizedContext.baseUrl,
+        result: sanitizedContext.result
+      });
 
       const contextData: ScriptContext = {
         key: sanitizedContext.key,
@@ -86,10 +94,14 @@ export class EnhancedJSEngine {
       };
 
       if (this.isSimpleUrlTemplate(jsCode)) {
-        return this.processUrlTemplate(jsCode, sanitizedContext);
+        const result = this.processUrlTemplate(jsCode, sanitizedContext);
+        this.javaBridge.resetContext();
+        return result;
       }
 
-      return this.scriptEngine.executeAsString(jsCode, contextData);
+      const result = this.scriptEngine.executeAsString(jsCode, contextData);
+      this.javaBridge.resetContext();
+      return result;
     } catch (error) {
       Logger.error(this.TAG, `执行搜索 URL 脚本失败: ${error}`);
       return '';
@@ -181,12 +193,21 @@ export class EnhancedJSEngine {
   }
 
   private evaluateRuleScript(jsCode: string, html: string, baseUrl: string): string {
+    this.javaBridge.setContext({
+      result: html,
+      baseUrl: baseUrl
+    });
+
     const contextData: ScriptContext = {
       result: html,
       baseUrl: baseUrl
     };
 
-    return this.scriptEngine.executeAsString(jsCode, contextData);
+    const result = this.scriptEngine.executeAsString(jsCode, contextData);
+    
+    this.javaBridge.resetContext();
+    
+    return result;
   }
 
   async executeRuleList(html: string, rule: string, baseUrl: string = ''): Promise<string[]> {

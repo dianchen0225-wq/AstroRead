@@ -339,9 +339,10 @@ export class PooledStringBuilder implements Poolable {
  */
 export class PooledArrayBuilder<T> implements Poolable {
   private items: T[] = [];
-
-  push(...items: T[]): PooledArrayBuilder<T> {
-    this.items.push(...items);
+  push(items: T[]): PooledArrayBuilder<T> {
+    for (const item of items) {
+      this.items.push(item);
+    }
     return this;
   }
 

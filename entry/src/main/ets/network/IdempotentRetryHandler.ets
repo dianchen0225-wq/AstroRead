@@ -412,7 +412,8 @@ export class IdempotentRetryHandler {
         .sort((a, b) => a[1] - b[1]);
 
       const toDelete = entries.slice(0, Math.floor(entries.length / 2));
-      for (const [key] of toDelete) {
+      for (const entry of toDelete) {
+        const key = entry[0];
         this.executedRequests.delete(key);
       }
     }

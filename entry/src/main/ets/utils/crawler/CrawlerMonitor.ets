@@ -406,7 +406,9 @@ export class CrawlerMonitor {
       const sortedErrors = Array.from(stats.errorDistribution.entries())
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5);
-      for (const [error, count] of sortedErrors) {
+      for (const entry of sortedErrors) {
+        const error = entry[0];
+        const count = entry[1];
         report += `  ${error}: ${count} 次\n`;
       }
     }

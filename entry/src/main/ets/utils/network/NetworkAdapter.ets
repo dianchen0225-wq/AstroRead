@@ -100,62 +100,119 @@ export class NetworkAdapter {
   }
 
   async request(url: string, options?: NetworkRequestOptions): Promise<string> {
-    const opts: NetworkRequestOptions = options ?? {};
-    const maxRetries = opts.timeout ? 1 : DEFAULT_MAX_RETRIES;
-    
+    const maxRetries = options?.timeout ? 1 : DEFAULT_MAX_RETRIES;
+
     let lastError: Error | null = null;
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      // 每次重试都深拷贝请求选项，避免状态累积
+      const opts = this.cloneRequestOptions(options);
+
       if (attempt > 0) {
         const delay = Math.min(RETRY_DELAY_BASE * Math.pow(2, attempt - 1), RETRY_DELAY_MAX);
         Logger.info(this.TAG, `重试请求: ${url}, 第${attempt}次, 等待${delay}ms`);
         await this.sleep(delay);
-        
+
         // 轮换 User-Agent
-        if (opts.headers) {
-          opts.headers['User-Agent'] = this.getRandomUserAgent();
-        } else {
-          opts.headers = { 'User-Agent': this.getRandomUserAgent() };
-        }
+        opts.headers = opts.headers ?? {};
+        opts.headers['User-Agent'] = this.getRandomUserAgent();
       }
-      
+
       try {
         const result = await this.nativeRequest(url, opts);
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         const networkError = this.parseNetworkError(lastError.message);
-        
-        // 不可重试的错误类型
-        if (networkError.type === 'http' && networkError.statusCode === 404) {
-          Logger.warn(this.TAG, `404错误，不重试: ${url}`);
+
+        // 判断是否应该重试
+        if (!this.shouldRetryError(networkError)) {
+          Logger.warn(this.TAG, `${networkError.type}错误(状态码:${networkError.statusCode})，不重试: ${url}`);
           throw lastError;
         }
-        
-        // 403 可能是反爬，尝试轮换 UA
-        if (networkError.type === 'http' && networkError.statusCode === 403) {
-          Logger.warn(this.TAG, `403错误，尝试轮换UA: ${url}`);
-          continue;
-        }
-        
-        // 超时和网络错误可以重试
-        if (networkError.type === 'timeout' || networkError.type === 'network' || networkError.type === 'dns') {
-          Logger.warn(this.TAG, `${networkError.type}错误，准备重试: ${url}`);
-          continue;
-        }
-        
-        // SSL错误不重试
-        if (networkError.type === 'ssl') {
-          Logger.error(this.TAG, `SSL错误，不重试: ${url}`);
+
+        // 如果是最后一次尝试，则抛出错误
+        if (attempt === maxRetries - 1) {
+          Logger.error(this.TAG, `达到最大重试次数，放弃请求: ${url}`);
           throw lastError;
         }
-        
-        // 其他错误也重试
-        Logger.warn(this.TAG, `请求失败，准备重试: ${url}, 错误: ${networkError.message}`);
+
+        Logger.warn(this.TAG, `${networkError.type}错误，准备重试: ${url}, 消息: ${networkError.message}`);
       }
     }
-    
+
     throw lastError || new Error('Max retries exceeded');
+  }
+
+  /**
+   * 深拷贝请求选项
+   */
+  private cloneRequestOptions(options?: NetworkRequestOptions): NetworkRequestOptions {
+    const cloned: NetworkRequestOptions = {
+      method: options?.method ?? 'GET',
+      body: options?.body,
+      timeout: options?.timeout,
+      charset: options?.charset,
+      type: options?.type
+    };
+
+    // 深拷贝 headers，避免状态累积
+    if (options?.headers) {
+      const headersCopy: Record<string, string> = {};
+      const keys = Object.keys(options.headers);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        headersCopy[key] = options.headers[key];
+      }
+      cloned.headers = headersCopy;
+    }
+
+    return cloned;
+  }
+
+  /**
+   * 判断是否应该重试错误
+   * @param error 网络错误对象
+   * @returns true 表示应该重试，false 表示不应该重试
+   */
+  private shouldRetryError(error: NetworkError): boolean {
+    switch (error.type) {
+      case 'timeout':
+      case 'dns':
+      case 'network':
+        // 超时、DNS解析失败、网络连接错误可以重试
+        return true;
+
+      case 'ssl':
+        // SSL证书错误不重试
+        return false;
+
+      case 'http':
+        // HTTP状态码判断
+        const statusCode = error.statusCode ?? 0;
+
+        // 429 Too Many Requests 可以重试（限流）
+        if (statusCode === 429) {
+          return true;
+        }
+
+        // 4xx 客户端错误不重试（除了429）
+        if (statusCode >= 400 && statusCode < 500) {
+          return false;
+        }
+
+        // 5xx 服务器错误可以重试
+        if (statusCode >= 500) {
+          return true;
+        }
+
+        return false;
+
+      case 'unknown':
+      default:
+        // 未知错误默认不重试
+        return false;
+    }
   }
 
   private sleep(ms: number): Promise<void> {

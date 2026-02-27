@@ -136,7 +136,9 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
       const parentElements = selectElementsSync(html, parentSelector);
       for (const parentHtml of parentElements) {
         const childElements = selectElementsSync(parentHtml, childSelector);
-        elements.push(...childElements);
+        for (const childElement of childElements) {
+          elements.push(childElement);
+        }
       }
 
       if (skipFirst > 0 && elements.length > skipFirst) {
@@ -214,6 +216,39 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
     return elements;
   };
 
+  // 辅助函数：提取文本节点内容（保留换行）
+  const extractTextNodesLocal = (html: string): string => {
+    if (!html) return '';
+
+    let text = html;
+
+    // 将常见块级元素替换为换行
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    text = text.replace(/<\/p>/gi, '\n');
+    text = text.replace(/<\/div>/gi, '\n');
+    text = text.replace(/<\/li>/gi, '\n');
+    text = text.replace(/<\/h[1-6]>/gi, '\n');
+
+    // 移除 script 和 style 标签及其内容
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+
+    // 移除注释
+    text = text.replace(/<!--[\s\S]*?-->/g, '');
+
+    // 移除所有HTML标签
+    text = text.replace(/<[^>]+>/g, '');
+
+    // 解码HTML实体
+    text = decodeHtmlEntitiesLocal(text);
+
+    // 清理多余空白
+    text = text.replace(/\n\s*\n/g, '\n');
+    text = text.replace(/[ \t]+/g, ' ');
+
+    return text.trim();
+  };
+
   // 辅助函数：提取值
   const extractValueSync = (html: string, selector: string, attribute?: string): string => {
     const elements = selectElementsSync(html, selector);
@@ -225,12 +260,27 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
     const element = elements[0];
 
     if (attribute) {
-      // 提取属性值
-      const attrRegex = new RegExp(`${escapeRegexLocal(attribute)}=["']([^"']*)["']`, 'i');
-      const match = element.match(attrRegex);
-      return match ? decodeHtmlEntitiesLocal(match[1]) : '';
+      // 标准化属性名
+      const normalizedAttr = attribute.toLowerCase().trim();
+
+      // 处理特殊伪属性
+      if (normalizedAttr === 'text' || normalizedAttr === 'text()') {
+        // 提取文本内容
+        return extractAllTextContent(element, decodeHtmlEntitiesLocal);
+      } else if (normalizedAttr === 'html' || normalizedAttr === 'html()') {
+        // 返回完整HTML
+        return element;
+      } else if (normalizedAttr === 'textnodes' || normalizedAttr === 'textnodes()') {
+        // 提取所有文本节点（保留换行）
+        return extractTextNodesLocal(element);
+      } else {
+        // 提取其他属性
+        const attrRegex = new RegExp(`${escapeRegexLocal(attribute)}=["']([^"']*)["']`, 'i');
+        const match = element.match(attrRegex);
+        return match ? decodeHtmlEntitiesLocal(match[1]) : '';
+      }
     } else {
-      // 提取文本内容 - 支持嵌套标签
+      // 无属性时默认返回文本
       return extractAllTextContent(element, decodeHtmlEntitiesLocal);
     }
   };
@@ -484,7 +534,9 @@ export class AsyncCssSelectorParser {
       const parentElements = this.selectElementsSync(html, parentSelector);
       for (const parentHtml of parentElements) {
         const childElements = this.selectElementsSync(parentHtml, childSelector);
-        elements.push(...childElements);
+        for (const childElement of childElements) {
+          elements.push(childElement);
+        }
       }
 
       if (skipFirst > 0 && elements.length > skipFirst) {
@@ -565,12 +617,64 @@ export class AsyncCssSelectorParser {
     const element = elements[0];
 
     if (attribute) {
-      const attrRegex = new RegExp(`${escapeRegex(attribute)}=["']([^"']*)["']`, 'i');
-      const match = element.match(attrRegex);
-      return match ? this.decodeHtmlEntities(match[1]) : '';
+      // 标准化属性名
+      const normalizedAttr = attribute.toLowerCase().trim();
+      
+      // 处理特殊伪属性
+      if (normalizedAttr === 'text' || normalizedAttr === 'text()') {
+        // 提取文本内容
+        return this.extractAllTextContentSync(element);
+      } else if (normalizedAttr === 'html' || normalizedAttr === 'html()') {
+        // 返回完整HTML
+        return element;
+      } else if (normalizedAttr === 'textnodes' || normalizedAttr === 'textnodes()') {
+        // 提取所有文本节点（保留换行）
+        return this.extractTextNodesSync(element);
+      } else {
+        // 提取其他属性（使用原始属性名以保持大小写敏感）
+        const attrRegex = new RegExp(`${escapeRegex(attribute)}=["']([^"']*)["']`, 'i');
+        const match = element.match(attrRegex);
+        return match ? this.decodeHtmlEntities(match[1]) : '';
+      }
     } else {
+      // 无属性时默认返回文本
       return this.extractAllTextContentSync(element);
     }
+  }
+
+  /**
+   * 提取所有文本节点内容（保留换行）
+   */
+  private extractTextNodesSync(html: string): string {
+    if (!html) return '';
+
+    let text = html;
+    
+    // 将常见块级元素替换为换行
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    text = text.replace(/<\/p>/gi, '\n');
+    text = text.replace(/<\/div>/gi, '\n');
+    text = text.replace(/<\/li>/gi, '\n');
+    text = text.replace(/<\/h[1-6]>/gi, '\n');
+    
+    // 移除 script 和 style 标签及其内容
+    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    
+    // 移除注释
+    text = text.replace(/<!--[\s\S]*?-->/g, '');
+    
+    // 移除所有HTML标签
+    text = text.replace(/<[^>]+>/g, '');
+    
+    // 解码HTML实体
+    text = this.decodeHtmlEntities(text);
+    
+    // 清理多余空白
+    text = text.replace(/\n\s*\n/g, '\n');
+    text = text.replace(/[ \t]+/g, ' ');
+    
+    return text.trim();
   }
 
   private extractAllTextContentSync(html: string): string {

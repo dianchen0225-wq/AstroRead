@@ -762,23 +762,105 @@ class BookSourceParser {
 
   /**
    * 检查内容是否为HTML书源表格
+   * 通过多层次的检测逻辑来准确识别HTML书源表格格式
    */
   private isHtmlSourceTable(content: string): boolean {
-    // 检查是否包含HTML标签和表格
-    if (!content.includes('<html') && !content.includes('<table')) {
+    const trimmedContent = content.trim();
+
+    // 1. 首先排除明显的JSON格式（避免误判）
+    // 如果内容以JSON特征开头，直接返回false
+    if (trimmedContent.startsWith('{') || trimmedContent.startsWith('[')) {
       return false;
     }
 
-    // 检查是否包含书源相关的表格结构
-    // 源仓库网站的书源表格通常包含这些特征
-    const hasSourceTable = content.includes('<table') &&
-      (content.includes('bookSourceName') ||
-        content.includes('bookSourceUrl') ||
-        content.includes('名称') ||
-        content.includes('地址') ||
-        /❤️.+</.test(content)); // 书源名称通常以❤️开头
+    // 2. 检查基本HTML结构
+    // 必须包含基本的HTML标签
+    const hasHtmlTag = /<html[\s>]/i.test(trimmedContent) ||
+                       /<![Dd][Oo][Cc][Tt][Yy][Pp][Ee]\s+[Hh][Tt][Mm][Ll]/.test(trimmedContent);
+    const hasBodyTag = /<body[\s>]/i.test(trimmedContent);
+    const hasTableTag = /<table[\s>]/i.test(trimmedContent);
 
-    return hasSourceTable;
+    // 至少要有HTML或DOCTYPE声明，且必须包含表格
+    if (!hasTableTag) {
+      return false;
+    }
+
+    // 3. 检查书源相关特征
+    // 定义书源相关的关键词（中英文）
+    const sourceKeywords = [
+      'bookSourceName',
+      'bookSourceUrl',
+      'bookSourceGroup',
+      'bookSourceType',
+      'bookSourceComment',
+      'bookSourceVersion',
+      'ruleSearch',
+      'ruleBookInfo',
+      'ruleContent',
+      'ruleChapter',
+      '名称',
+      '地址',
+      '书源',
+      '源名称',
+      '源地址',
+      '源分组',
+      '❤️'  // 书源名称常用前缀
+    ];
+
+    // 检查是否包含至少2个书源相关关键词
+    let keywordMatchCount = 0;
+    for (const keyword of sourceKeywords) {
+      if (trimmedContent.includes(keyword)) {
+        keywordMatchCount++;
+      }
+    }
+    const hasSourceKeywords = keywordMatchCount >= 2;
+
+    // 4. 检查表格结构特征
+    // 有效的书源表格应该包含thead/tbody或tr+th结构
+    const hasTableStructure = /<thead[\s>]/i.test(trimmedContent) ||
+                               /<tbody[\s>]/i.test(trimmedContent) ||
+                               /<th[\s>]/i.test(trimmedContent);
+
+    // 5. 检查表格行数据
+    // 书源表格通常有多行数据
+    const trMatches = trimmedContent.match(/<tr[\s>]/gi);
+    const hasMultipleRows = trMatches && trMatches.length >= 2;
+
+    // 6. 检查数据单元格
+    const tdMatches = trimmedContent.match(/<td[\s>]/gi);
+    const hasDataCells = tdMatches && tdMatches.length >= 4; // 至少4个单元格（2行x2列）
+
+    // 7. 检查是否包含书源数据特征（JSON格式的单元格内容）
+    const hasJsonInCells = /<td[^>]*>\s*\{[^}]+\}\s*<\/td>/i.test(trimmedContent) ||
+                           /<td[^>]*>\s*\[.+\]\s*<\/td>/is.test(trimmedContent);
+
+    // 8. 综合评分机制
+    let score = 0;
+
+    // HTML结构得分
+    if (hasHtmlTag) score += 2;
+    if (hasBodyTag) score += 1;
+    if (hasTableTag) score += 2;
+
+    // 表格结构得分
+    if (hasTableStructure) score += 2;
+    if (hasMultipleRows) score += 2;
+    if (hasDataCells) score += 2;
+
+    // 书源特征得分
+    if (hasSourceKeywords) score += 3;
+    if (hasJsonInCells) score += 3;
+
+    // 9. 最终判断
+    // 需要达到一定的分数阈值才认为是HTML书源表格
+    // 最低要求：必须有表格标签 + 书源关键词 + 基本表格结构
+    const isHtmlSourceTable = hasTableTag &&
+                              hasSourceKeywords &&
+                              hasTableStructure &&
+                              score >= 8;
+
+    return isHtmlSourceTable;
   }
   /**
    * 检测规则类型

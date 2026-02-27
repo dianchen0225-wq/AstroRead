@@ -5,6 +5,13 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { RuleAnalyzer } from '../RuleAnalyzer';
 
+/**
+ * RuleAnalyzer 私有方法接口（用于测试）
+ */
+interface RuleAnalyzerPrivate {
+  isInQuotes(pos: number): boolean;
+}
+
 export default function ruleAnalyzerTest() {
   describe('RuleAnalyzer', () => {
     
@@ -185,22 +192,22 @@ export default function ruleAnalyzerTest() {
     describe('isInQuotes', () => {
       it('should detect single quotes', () => {
         const analyzer = new RuleAnalyzer("'test'");
-        const result = (analyzer as any).isInQuotes(3);
-        
+        const result = ((analyzer as object) as RuleAnalyzerPrivate).isInQuotes(3);
+
         expect(result).assertTrue();
       });
-      
+
       it('should detect double quotes', () => {
         const analyzer = new RuleAnalyzer('"test"');
-        const result = (analyzer as any).isInQuotes(3);
-        
+        const result = ((analyzer as object) as RuleAnalyzerPrivate).isInQuotes(3);
+
         expect(result).assertTrue();
       });
-      
+
       it('should handle escaped quotes', () => {
         const analyzer = new RuleAnalyzer('"test\\"escaped"');
-        const result = (analyzer as any).isInQuotes(10);
-        
+        const result = ((analyzer as object) as RuleAnalyzerPrivate).isInQuotes(10);
+
         expect(result).assertTrue();
       });
     });

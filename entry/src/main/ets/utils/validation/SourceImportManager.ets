@@ -55,15 +55,15 @@ class SourceImportManager {
   
   private TAG: string = 'SourceImportManager';
   
-  private readonly MAX_CONTENT_SIZE = 50 * 1024 * 1024;
-  private readonly MAX_SOURCES_PER_IMPORT = 5000;
-  private readonly MAX_SOURCES_PER_BATCH = 100;
-  private readonly MAX_ERROR_MESSAGE_LENGTH = 100;
-  private readonly MAX_SOURCE_NAME_LENGTH = 100;
-  private readonly MAX_URL_LENGTH = 2048;
-  private readonly MAX_HEADER_LENGTH = 5000;
-  private readonly MAX_NESTING_DEPTH = 50;
-  private readonly MAX_LINE_COUNT = 100000;
+  private readonly MAX_CONTENT_SIZE = 100 * 1024 * 1024; // 放宽到100MB
+  private readonly MAX_SOURCES_PER_IMPORT = 10000; // 放宽到10000个
+  private readonly MAX_SOURCES_PER_BATCH = 200; // 放宽到200个
+  private readonly MAX_ERROR_MESSAGE_LENGTH = 200; // 放宽到200字符
+  private readonly MAX_SOURCE_NAME_LENGTH = 200; // 放宽到200字符
+  private readonly MAX_URL_LENGTH = 4096; // 放宽到4096字符
+  private readonly MAX_HEADER_LENGTH = 10000; // 放宽到10000字符
+  private readonly MAX_NESTING_DEPTH = 100; // 放宽到100层
+  private readonly MAX_LINE_COUNT = 200000; // 放宽到20万行
   private sourceCache: Map<string, BookSource> | null = null;
   private importProgressCallback: ((current: number, total: number, message: string) => void) | null = null;
   private isImportCancelled: boolean = false;
@@ -588,28 +588,22 @@ class SourceImportManager {
   }
   
   /**
-   * 检查内容安全性 - 增强安全防护
+   * 检查内容安全性 - 放宽检测，仅检测真正危险的HTML/JS注入
    */
   private containsSuspiciousContent(content: string): boolean {
-    // 使用安全的正则表达式模式，避免ReDoS攻击
-    // 注意：移除了对模板语法 ${} 和 {{}} 的检测，因为书源中经常使用这些语法
-    const suspiciousPatterns = [
-      /<(script|iframe|object|embed)[^>]*>/gi,
-      /javascript:/gi,
-      /vbscript:/gi,
-      /on(load|error|click|submit)\s*=/gi,
-      /eval\s*\(/gi,
-      /alert\s*\(/gi,
-      /document\.(cookie|write)/gi,
-      /window\.(location|open)/gi,
-      /XMLHttpRequest/gi,
-      /fetch\s*\(/gi
-      // 移除了 /\$\{.*\}/gi 和 /\{\{.*\}\}/gi
-      // 因为书源中经常使用 {{key}} 等模板语法，这是正常的
+    // 仅检测真正危险的HTML标签和脚本注入，书源正常使用的功能不再拦截
+    const dangerousPatterns = [
+      // 仅检测真正危险的HTML标签
+      /<script[^>]*>.*<\/script>/gi,
+      /<iframe[^>]*>.*<\/iframe>/gi,
+      /<object[^>]*>.*<\/object>/gi,
+      /<embed[^>]*>.*<\/embed>/gi,
+      // 仅检测危险的事件处理器
+      /onload\s*=\s*["']javascript:/gi,
+      /onerror\s*=\s*["']javascript:/gi,
     ];
 
-    for (const pattern of suspiciousPatterns) {
-      // 限制正则表达式执行时间
+    for (const pattern of dangerousPatterns) {
       const startTime = Date.now();
       const result = pattern.test(content);
       const elapsed = Date.now() - startTime;
@@ -620,10 +614,12 @@ class SourceImportManager {
       }
 
       if (result) {
+        Logger.warn(this.TAG, `检测到危险内容模式: ${pattern.source}`);
         return true;
       }
     }
 
+    // 书源中正常的JS规则、fetch、XMLHttpRequest等不再被视为危险
     return false;
   }
 
@@ -705,76 +701,71 @@ class SourceImportManager {
   }
   
   /**
-   * 新增：检查 JavaScript 代码注入
+   * 新增：检查 JavaScript 代码注入 - 放宽检测，仅检测真正危险的代码
    */
   private containsJavaScriptInjection(content: string): boolean {
-    const jsInjectionPatterns = [
-      // 函数定义
-      /function\s*\w*\s*\([^)]*\)\s*\{/gi,
-      // 箭头函数
-      /\(\s*\)\s*=>\s*\{/g,
-      /\w+\s*=>\s*\{/g,
-      // 立即执行函数
-      /\(\s*function\s*\(\s*\)\s*\{/gi,
-      /\(\s*\)\s*=>/g,
-      // 危险的全局对象访问
-      /window\s*\.\s*\w+/gi,
-      /document\s*\.\s*\w+/gi,
-      /globalThis\s*\.\s*\w+/gi,
-      // 动态代码执行
-      /eval\s*\(/gi,
-      /Function\s*\(/gi,
-      /setTimeout\s*\(\s*["']/gi,
-      /setInterval\s*\(\s*["']/gi,
-      // 原型链污染
-      /__proto__/g,
-      /prototype\s*\.\s*\w+\s*=/g,
-      // 构造函数
-      /constructor\s*\.\s*\w+/gi,
+    // 仅检测真正危险的JavaScript代码模式，书源中正常的JS规则使用不再拦截
+    const dangerousPatterns = [
+      // 仅检测动态代码执行（真正危险）
+      /eval\s*\(\s*["'].*["']\s*\)/gi,
+      /Function\s*\(\s*["'].*["']\s*\)/gi,
+      // 仅检测危险的全局对象访问配合函数调用
+      /window\s*\.\s*(location|open|eval)\s*\(/gi,
+      /document\s*\.\s*(write|cookie)\s*=/gi,
     ];
-    
-    for (const pattern of jsInjectionPatterns) {
+
+    for (const pattern of dangerousPatterns) {
       if (pattern.test(content)) {
-        Logger.warn(this.TAG, `检测到 JavaScript 代码注入模式: ${pattern.source}`);
+        Logger.warn(this.TAG, `检测到危险JavaScript代码模式: ${pattern.source}`);
         return true;
       }
     }
-    
+
+    // 书源中正常的JS规则（如@js:、<js>标签）不再被视为危险
     return false;
   }
   
   /**
-   * 检查书源安全性 - 增强安全防护
+   * 检查书源安全性 - 放宽检查，仅检查基本有效性
    */
   private isSafeSource(source: BookSource): boolean {
-    if (source.name && source.name.length > this.MAX_SOURCE_NAME_LENGTH * 2) {
+    // 放宽名称长度限制到4倍
+    if (source.name && source.name.length > this.MAX_SOURCE_NAME_LENGTH * 4) {
+      Logger.warn(this.TAG, `书源名称过长: ${source.name.substring(0, 50)}...`);
       return false;
     }
-    
+
     if (!source.url) {
       return false;
     }
-    
-    if (source.url.length > this.MAX_URL_LENGTH * 2) {
-      return false;
-    }
-    
-    if (source.legacy.searchUrl && source.legacy.searchUrl.length > this.MAX_URL_LENGTH * 2) {
+
+    // 放宽URL长度限制到4倍
+    if (source.url.length > this.MAX_URL_LENGTH * 4) {
+      Logger.warn(this.TAG, `书源URL过长: ${source.url.substring(0, 50)}...`);
       return false;
     }
 
-    if (source.networkConfig?.header && source.networkConfig.header.length > this.MAX_HEADER_LENGTH * 2) {
+    // 放宽搜索URL长度限制到4倍
+    if (source.legacy?.searchUrl && source.legacy.searchUrl.length > this.MAX_URL_LENGTH * 4) {
+      Logger.warn(this.TAG, `搜索URL过长`);
       return false;
     }
 
+    // 放宽请求头长度限制到4倍
+    if (source.networkConfig?.header && source.networkConfig.header.length > this.MAX_HEADER_LENGTH * 4) {
+      Logger.warn(this.TAG, `请求头过长`);
+      return false;
+    }
+
+    // 仅检查URL协议是否为http/https
     if (!this.isValidUrlProtocol(source.url)) {
       return false;
     }
 
-    if (source.legacy.searchUrl && !this.isValidUrlProtocol(source.legacy.searchUrl)) {
+    if (source.legacy?.searchUrl && !this.isValidUrlProtocol(source.legacy.searchUrl)) {
       return false;
     }
-    
+
     return true;
   }
 

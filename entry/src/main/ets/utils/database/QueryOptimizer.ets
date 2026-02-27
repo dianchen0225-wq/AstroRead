@@ -7,12 +7,30 @@ import { relationalStore } from '@kit.ArkData';
 import { Logger } from '../performance/Logger';
 
 /**
+ * 查询操作符类型
+ */
+type QueryOperator = '=' | '!=' | '<' | '>' | '<=' | '>=' | 'LIKE' | 'IN';
+
+/**
+ * 查询条件值类型
+ */
+type QueryConditionValue = string | number | boolean | null;
+
+/**
+ * 查询结果类型
+ */
+interface QueryResult {
+  sql: string;
+  params: QueryConditionValue[];
+}
+
+/**
  * 查询条件
  */
 interface QueryCondition {
   column: string;
-  operator: '=' | '!=' | '<' | '>' | '<=' | '>=' | 'LIKE' | 'IN';
-  value: string | number | boolean | null | (string | number | boolean | null)[];
+  operator: QueryOperator;
+  value: QueryConditionValue | QueryConditionValue[];
 }
 
 /**
@@ -32,10 +50,15 @@ interface PaginationConfig {
 }
 
 /**
+ * JOIN类型
+ */
+type JoinType = 'INNER' | 'LEFT' | 'RIGHT';
+
+/**
  * JOIN配置
  */
 interface JoinConfig {
-  type: 'INNER' | 'LEFT' | 'RIGHT';
+  type: JoinType;
   table: string;
   onCondition: string;
   columns: string[];
@@ -73,7 +96,7 @@ export class QueryBuilder {
   /**
    * 添加WHERE条件
    */
-  where(column: string, operator: QueryCondition['operator'], value: string | number | boolean | null): QueryBuilder {
+  where(column: string, operator: QueryOperator, value: QueryConditionValue): QueryBuilder {
     this.conditions.push({ column, operator, value });
     return this;
   }
@@ -81,7 +104,7 @@ export class QueryBuilder {
   /**
    * 添加IN条件
    */
-  whereIn(column: string, values: (string | number | boolean | null)[]): QueryBuilder {
+  whereIn(column: string, values: QueryConditionValue[]): QueryBuilder {
     this.conditions.push({ column, operator: 'IN', value: values });
     return this;
   }
@@ -105,7 +128,7 @@ export class QueryBuilder {
   /**
    * 添加JOIN
    */
-  join(type: JoinConfig['type'], table: string, onCondition: string, columns: string[]): QueryBuilder {
+  join(type: JoinType, table: string, onCondition: string, columns: string[]): QueryBuilder {
     this.joins.push({ type, table, onCondition, columns });
     return this;
   }
@@ -129,10 +152,9 @@ export class QueryBuilder {
   /**
    * 构建SQL查询
    */
-  build(): { sql: string; params: (string | number | boolean | null)[] } {
-    const params: (string | number | boolean | null)[] = [];
+  build(): QueryResult {
+    const params: QueryConditionValue[] = [];
     let sql = `SELECT ${this.columns.join(', ')} FROM ${this.table}`;
-
     // 添加JOIN
     for (const join of this.joins) {
       sql += ` ${join.type} JOIN ${join.table} ON ${join.onCondition}`;
@@ -145,10 +167,12 @@ export class QueryBuilder {
         if (condition.operator === 'IN' && Array.isArray(condition.value)) {
           const placeholders = condition.value.map(() => '?').join(', ');
           whereClauses.push(`${condition.column} IN (${placeholders})`);
-          params.push(...condition.value);
+          for (const value of condition.value) {
+            params.push(value as QueryConditionValue);
+          }
         } else {
           whereClauses.push(`${condition.column} ${condition.operator} ?`);
-          params.push(condition.value);
+          params.push(condition.value as QueryConditionValue);
         }
       }
       sql += ` WHERE ${whereClauses.join(' AND ')}`;
@@ -182,10 +206,9 @@ export class QueryBuilder {
   /**
    * 构建计数查询
    */
-  buildCount(): { sql: string; params: (string | number | boolean | null)[] } {
-    const params: (string | number | boolean | null)[] = [];
+  buildCount(): QueryResult {
+    const params: QueryConditionValue[] = [];
     let sql = `SELECT COUNT(*) as count FROM ${this.table}`;
-
     // 添加JOIN
     for (const join of this.joins) {
       sql += ` ${join.type} JOIN ${join.table} ON ${join.onCondition}`;
@@ -198,10 +221,12 @@ export class QueryBuilder {
         if (condition.operator === 'IN' && Array.isArray(condition.value)) {
           const placeholders = condition.value.map(() => '?').join(', ');
           whereClauses.push(`${condition.column} IN (${placeholders})`);
-          params.push(...condition.value);
+          for (const value of condition.value) {
+            params.push(value as QueryConditionValue);
+          }
         } else {
           whereClauses.push(`${condition.column} ${condition.operator} ?`);
-          params.push(condition.value);
+          params.push(condition.value as QueryConditionValue);
         }
       }
       sql += ` WHERE ${whereClauses.join(' AND ')}`;
@@ -230,7 +255,7 @@ export class BatchQueryExecutor {
   async batchQuery<T>(
     table: string,
     column: string,
-    values: (string | number | boolean | null)[],
+    values: QueryConditionValue[],
     mapper: (rs: relationalStore.ResultSet) => T
   ): Promise<Map<string, T>> {
     const result = new Map<string, T>();
@@ -248,7 +273,9 @@ export class BatchQueryExecutor {
           .from(table)
           .whereIn(column, batch);
 
-        const { sql, params } = builder.build();
+        const buildResult = builder.build();
+        const sql = buildResult.sql;
+        const params = buildResult.params;
         const resultSet = await this.rdbStore.querySql(sql, params);
 
         while (resultSet.goToNextRow()) {
@@ -296,7 +323,7 @@ export class BatchQueryExecutor {
         Logger.error(this.TAG, `回滚失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
       Logger.error(this.TAG, `批量插入失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -318,8 +345,8 @@ export class BatchQueryExecutor {
       this.rdbStore.beginTransaction();
 
       for (const entry of updates) {
-        const id: string = entry[0];
-        const bucket: valuesBucket.ValuesBucket = entry[1];
+        const id = entry[0] as string;
+        const bucket = entry[1] as relationalStore.ValuesBucket;
         const predicates = new relationalStore.RdbPredicates(table);
         predicates.equalTo(column, id);
         const rows = await this.rdbStore.update(bucket, predicates);
@@ -335,7 +362,7 @@ export class BatchQueryExecutor {
         Logger.error(this.TAG, `回滚失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
       Logger.error(this.TAG, `批量更新失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -345,7 +372,7 @@ export class BatchQueryExecutor {
   async batchDelete(
     table: string,
     column: string,
-    values: (string | number | boolean | null)[]
+    values: QueryConditionValue[]
   ): Promise<number> {
     if (values.length === 0) {
       return 0;
@@ -362,7 +389,9 @@ export class BatchQueryExecutor {
           .from(table)
           .whereIn(column, batch);
 
-        const { sql, params } = builder.build();
+        const buildResult = builder.build();
+        const sql = buildResult.sql;
+        const params = buildResult.params;
         // 构建DELETE语句
         const deleteSql = sql.replace('SELECT *', 'DELETE');
         await this.rdbStore.executeSql(deleteSql, params);
@@ -377,10 +406,23 @@ export class BatchQueryExecutor {
 }
 
 /**
+ * 缓存统计类型
+ */
+interface CacheStats {
+  size: number;
+}
+
+/**
  * 查询缓存
  */
+interface CacheEntry {
+  data: object;
+  timestamp: number;
+  ttl: number;
+}
+
 export class QueryCache {
-  private cache: Map<string, { data: Object; timestamp: number; ttl: number }> = new Map();
+  private cache: Map<string, CacheEntry> = new Map();
   private readonly defaultTTL: number;
 
   constructor(defaultTTL: number = 60000) {
@@ -390,14 +432,14 @@ export class QueryCache {
   /**
    * 生成缓存键
    */
-  private generateKey(sql: string, params: (string | number | boolean | null)[]): string {
+  private generateKey(sql: string, params: QueryConditionValue[]): string {
     return `${sql}:${JSON.stringify(params)}`;
   }
 
   /**
    * 获取缓存
    */
-  get<T>(sql: string, params: (string | number | boolean | null)[]): T | undefined {
+  get<T>(sql: string, params: QueryConditionValue[]): T | undefined {
     const key = this.generateKey(sql, params);
     const cached = this.cache.get(key);
 
@@ -417,7 +459,7 @@ export class QueryCache {
   /**
    * 设置缓存
    */
-  set(sql: string, params: (string | number | boolean | null)[], data: Object, ttl?: number): void {
+  set(sql: string, params: QueryConditionValue[], data: object, ttl?: number): void {
     const key = this.generateKey(sql, params);
     this.cache.set(key, {
       data,
@@ -437,11 +479,14 @@ export class QueryCache {
    * 清除特定表的缓存
    */
   clearByTable(table: string): void {
-    for (const entry of this.cache) {
-      const key: string = entry[0];
+    const keysToDelete: string[] = [];
+    this.cache.forEach((value, key) => {
       if (key.includes(table)) {
-        this.cache.delete(key);
+        keysToDelete.push(key);
       }
+    });
+    for (const key of keysToDelete) {
+      this.cache.delete(key);
     }
   }
 
@@ -474,7 +519,7 @@ export abstract class OptimizedRepository<T> {
    */
   protected async executeQuery<R>(
     sql: string,
-    params: (string | number | boolean | null)[],
+    params: QueryConditionValue[],
     mapper: (rs: relationalStore.ResultSet) => R,
     useCache: boolean = false,
     cacheTTL?: number
@@ -505,7 +550,7 @@ export abstract class OptimizedRepository<T> {
       return result;
     } catch (error) {
       Logger.error(this.TAG, `查询失败: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
+      throw error instanceof Error ? error : new Error(String(error));
     } finally {
       if (resultSet) {
         try {
@@ -522,7 +567,7 @@ export abstract class OptimizedRepository<T> {
    */
   protected async executeSingleQuery<R>(
     sql: string,
-    params: (string | number | boolean | null)[],
+    params: QueryConditionValue[],
     mapper: (rs: relationalStore.ResultSet) => R
   ): Promise<R | null> {
     const results = await this.executeQuery(sql, params, mapper);
@@ -539,7 +584,7 @@ export abstract class OptimizedRepository<T> {
   /**
    * 获取缓存统计
    */
-  getCacheStats(): { size: number } {
+  getCacheStats(): CacheStats {
     return { size: this.queryCache.size() };
   }
 

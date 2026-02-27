@@ -127,6 +127,54 @@ export class ParseCache {
   }
 
   /**
+   * 使用预生成的缓存键获取缓存
+   */
+  getByKey(cacheKey: string): string[] | null {
+    const item = this.cache.get(cacheKey);
+
+    if (!item) {
+      this.missCount++;
+      return null;
+    }
+
+    // 检查是否过期
+    const now = Date.now();
+    if (now - item.timestamp > this.config.ttl) {
+      this.cache.delete(cacheKey);
+      this.missCount++;
+      return null;
+    }
+
+    // 更新访问计数
+    item.accessCount++;
+    this.hitCount++;
+
+    Logger.debug(TAG, `缓存命中(按key): ${cacheKey}, 访问次数: ${item.accessCount}`);
+    return item.value;
+  }
+
+  /**
+   * 使用预生成的缓存键设置缓存
+   */
+  setByKey(cacheKey: string, value: string[]): void {
+    // 清理过期项
+    this.cleanup();
+
+    // 如果缓存已满，移除最少访问的项
+    if (this.cache.size >= this.config.maxSize) {
+      this.evictLRU();
+    }
+
+    this.cache.set(cacheKey, {
+      value,
+      timestamp: Date.now(),
+      accessCount: 1
+    });
+
+    Logger.debug(TAG, `缓存设置(按key): ${cacheKey}, 当前大小: ${this.cache.size}`);
+  }
+
+  /**
    * 清理过期缓存项
    */
   private cleanup(): void {

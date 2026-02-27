@@ -2,16 +2,15 @@ import { Logger } from "../performance/Logger";
 import { util } from '@kit.ArkTS';
 import { SafeRegex } from "../security/SafeRegex";
 import { JSSecurityConfig } from "../security/JSSecurityConfig";
+import { JavaBridge, ScriptValue } from "./JavaBridge";
 
 export interface ScriptContext {
   key?: string;
   page?: number;
   baseUrl?: string;
   result?: string;
-  extra?: Map<string, string | number | boolean | object | null | undefined>;
+  extra?: Map<string, ScriptValue>;
 }
-
-type ScriptValue = string | number | boolean | object | null | undefined;
 
 interface Token {
   type: 'keyword' | 'identifier' | 'number' | 'string' | 'operator' | 'punctuation' | 'boolean' | 'null';
@@ -94,9 +93,11 @@ export class ScriptEngine {
   private executionStartTime: number = 0;
   private maxLoopIterations: number = 1000;
   private securityConfig: JSSecurityConfig;
+  private javaBridge: JavaBridge;
 
   private constructor() {
     this.securityConfig = JSSecurityConfig.getInstance();
+    this.javaBridge = JavaBridge.getInstance();
     this.initializeBuiltInFunctions();
   }
 
@@ -1453,10 +1454,13 @@ export class ScriptEngine {
   private evaluateIdentifier(node: ASTNode): ScriptValue {
     const name = node.name as string;
     
-    // 使用统一的安全配置检查禁止的标识符
     if (this.securityConfig.isIdentifierForbidden(name)) {
       Logger.warn(this.TAG, `禁止访问的标识符: ${name}`);
       return undefined;
+    }
+    
+    if (name === 'java') {
+      return this.createJavaObject();
     }
     
     if (this.variables.has(name)) {
@@ -1469,6 +1473,22 @@ export class ScriptEngine {
       return this.builtInFunctions.get(name) as ScriptValue;
     }
     return undefined;
+  }
+
+  private createJavaObject(): Map<string, ScriptValue> {
+    const bridgeMethods = this.javaBridge.getMethodMap();
+    const javaObj: Map<string, ScriptValue> = new Map<string, ScriptValue>();
+    
+    const methodNames = Array.from(bridgeMethods.keys());
+    for (let i = 0; i < methodNames.length; i++) {
+      const name = methodNames[i];
+      const method = bridgeMethods.get(name);
+      if (method !== undefined) {
+        javaObj.set(name, method as ScriptValue);
+      }
+    }
+    
+    return javaObj;
   }
 
   private evaluateBinaryExpression(node: ASTNode): ScriptValue {
@@ -1652,6 +1672,14 @@ export class ScriptEngine {
       return callee(args);
     }
 
+    if (callee && typeof callee === 'object') {
+      const obj = callee as Record<string, ScriptValue>;
+      const method = obj['apply'] || obj['call'];
+      if (typeof method === 'function') {
+        return (method as (args: ScriptValue[]) => ScriptValue)(args);
+      }
+    }
+
     return undefined;
   }
 
@@ -1663,6 +1691,10 @@ export class ScriptEngine {
 
     if (obj === null || obj === undefined) {
       return undefined;
+    }
+
+    if (obj instanceof Map) {
+      return obj.get(String(prop));
     }
 
     if (Array.isArray(obj)) {

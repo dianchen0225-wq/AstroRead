@@ -125,15 +125,15 @@ class SourceValidator {
   
   private TAG: string = 'SourceValidator';
   
-  // 安全配置 - 增强安全限制
-  private readonly MAX_URL_LENGTH = 2048;
-  private readonly MAX_RESPONSE_SIZE = 5 * 1024 * 1024;
-  private readonly REQUEST_TIMEOUT = 10000;
-  private readonly MAX_SOURCES_PER_BATCH = 50;
-  private readonly MAX_SEARCH_KEYWORD_LENGTH = 50;
-  private readonly MAX_HEADER_KEY_LENGTH = 50;
-  private readonly MAX_HEADER_VALUE_LENGTH = 500;
-  private readonly MAX_ERROR_MESSAGE_LENGTH = 100;
+  // 安全配置 - 放宽限制以支持更多书源
+  private readonly MAX_URL_LENGTH = 4096; // 放宽到4096
+  private readonly MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 放宽到10MB
+  private readonly REQUEST_TIMEOUT = 15000; // 放宽到15秒
+  private readonly MAX_SOURCES_PER_BATCH = 100; // 放宽到100
+  private readonly MAX_SEARCH_KEYWORD_LENGTH = 100; // 放宽到100
+  private readonly MAX_HEADER_KEY_LENGTH = 100; // 放宽到100
+  private readonly MAX_HEADER_VALUE_LENGTH = 1000; // 放宽到1000
+  private readonly MAX_ERROR_MESSAGE_LENGTH = 200; // 放宽到200
 
   /**
    * 验证书源基本格式 - 增强安全验证
@@ -141,14 +141,13 @@ class SourceValidator {
   validateSourceFormat(source: BookSource): ValidationResult {
     const errors: string[] = [];
     
-    // 名称验证 - 增强安全检查
+    // 名称验证 - 放宽限制
     if (!source.name || source.name.trim().length === 0) {
       errors.push('书源名称不能为空');
-    } else if (source.name.length > 100) {
-      errors.push('书源名称不能超过100个字符');
-    } else if (this.containsSuspiciousCharacters(source.name)) {
-      errors.push('书源名称包含可疑字符');
+    } else if (source.name.length > 200) {
+      errors.push('书源名称不能超过200个字符');
     }
+    // 移除对书源名称的可疑字符检查，允许更多特殊字符
     
     // URL验证 - 增强安全检查
     if (!source.url || !this.isValidUrl(source.url)) {
@@ -178,27 +177,29 @@ class SourceValidator {
       errors.push('无效的规则类型');
     }
     
-    // 验证请求头格式 - 增强安全检查
+    // 验证请求头格式 - 放宽检查
     if (source.networkConfig?.header) {
       try {
         const headers: Record<string, string> = JSON.parse(source.networkConfig.header);
         if (typeof headers !== 'object' || headers === null) {
           errors.push('请求头格式无效');
         } else {
-          // 验证headers key和value长度
+          // 仅验证headers基本格式，放宽长度限制
           const headerEntries = Object.entries<string>(headers);
           for (let i = 0; i < headerEntries.length; i++) {
             const key = headerEntries[i][0];
             const value = headerEntries[i][1];
-            if (typeof key !== 'string' || key.length > this.MAX_HEADER_KEY_LENGTH) {
+            // 放宽键名长度到200字符
+            if (typeof key !== 'string' || key.length > 200) {
               errors.push('请求头键名过长');
             }
-            if (typeof value !== 'string' || value.length > this.MAX_HEADER_VALUE_LENGTH) {
+            // 放宽值长度到2000字符
+            if (typeof value !== 'string' || value.length > 2000) {
               errors.push('请求头值过长');
             }
-            // 检查可疑的请求头
-            if (this.isSuspiciousHeader(key, String(value))) {
-              errors.push(`可疑的请求头: ${key}`);
+            // 仅检查真正危险的请求头内容
+            if (this.isDangerousHeader(key, String(value))) {
+              errors.push(`危险的请求头: ${key}`);
             }
           }
         }
@@ -909,26 +910,23 @@ class SourceValidator {
   }
   
   /**
-   * 检查可疑请求头 - 新增安全防护
+   * 检查可疑请求头 - 放宽检查
    */
   private isSuspiciousHeader(key: string, value: string): boolean {
-    // 只检查真正危险的请求头，放宽对正常请求头的限制
-    const suspiciousKeys = [
-      'cookie', 'authorization', 'proxy-authorization'
-    ];
+    // 放宽检查，仅检测真正危险的内容
+    return this.isDangerousHeader(key, value);
+  }
 
-    const lowerKey = key.toLowerCase();
-
-    if (suspiciousKeys.includes(lowerKey)) {
-      return true;
-    }
-
-    // 检查可疑内容 - 只检查真正危险的脚本注入
+  /**
+   * 检查危险请求头 - 仅检测真正危险的内容
+   */
+  private isDangerousHeader(key: string, value: string): boolean {
+    // 仅检查真正危险的脚本注入
     if (value.includes('javascript:') || value.includes('vbscript:') ||
         value.includes('eval(') || value.includes('alert(')) {
       return true;
     }
-    
+
     return false;
   }
   

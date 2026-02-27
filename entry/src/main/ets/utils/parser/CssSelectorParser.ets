@@ -86,10 +86,11 @@ export class CssSelectorParser {
 
         const parentElements = CssSelectorParser.selectElements(html, parentSelector);
         Logger.debug(CssSelectorParser.TAG, `父选择器找到 ${parentElements.length} 个元素`);
-        
         for (const parentHtml of parentElements) {
           const childElements = CssSelectorParser.selectElements(parentHtml, childSelector);
-          elements.push(...childElements);
+          for (const childElement of childElements) {
+            elements.push(childElement);
+          }
         }
         
         Logger.debug(CssSelectorParser.TAG, `子选择器共找到 ${elements.length} 个元素`);
@@ -117,7 +118,9 @@ export class CssSelectorParser {
           const nextElements: string[] = [];
           for (const currentHtml of currentElements) {
             const found = CssSelectorParser.selectElements(currentHtml, part);
-            nextElements.push(...found);
+            for (const element of found) {
+              nextElements.push(element);
+            }
           }
           currentElements = nextElements;
         }
@@ -211,7 +214,7 @@ export class CssSelectorParser {
         return elements;
       }
 
-      // 处理类选择器 .className 或 .class1.class2
+      // 处理类选择器 .className 或 .class1.class2（支持多class）
       if (processedSelector.startsWith('.')) {
         // 提取所有class名（支持多class如 .class1.class2）
         const classNames: string[] = [];
@@ -225,10 +228,11 @@ export class CssSelectorParser {
         Logger.debug(CssSelectorParser.TAG, `类选择器解析 - classes: [${classNames.join(', ')}]`);
 
         if (classNames.length > 0) {
-          // 构建多class匹配正则 - 使用正向前瞻确保所有class都存在
+          // 方法1：使用改进的多class匹配正则
+          // 使用非贪婪匹配确保每个类名都存在，更宽松的格式支持
           let pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["'][^"']*`;
           for (const cn of classNames) {
-            pattern += `(?=.*\\b${CssSelectorParser.escapeRegex(cn)}\\b)`;
+            pattern += `(?:[^"']*\\b${CssSelectorParser.escapeRegex(cn)}\\b)`;
           }
           pattern += `[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
 
@@ -238,7 +242,56 @@ export class CssSelectorParser {
             elements.push(match[0]);
           }
 
-          Logger.debug(CssSelectorParser.TAG, `类选择器找到 ${elements.length} 个元素`);
+          Logger.debug(CssSelectorParser.TAG, `类选择器方法1找到 ${elements.length} 个元素`);
+
+          // 方法2：如果方法1失败，使用交集策略
+          if (elements.length === 0) {
+            Logger.debug(CssSelectorParser.TAG, `类选择器方法1失败，尝试方法2`);
+            
+            const individualResults: string[][] = [];
+            for (const cn of classNames) {
+              // 支持 class="xxx"、class='xxx'、class=xxx 三种格式
+              const singlePattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["']?[^"'>]*\\b${CssSelectorParser.escapeRegex(cn)}\\b[^"'>]*["']?[^>]*>([\\s\\S]*?)<\\/\\1>`;
+              const singleRegex = new RegExp(singlePattern, 'gi');
+              const singleMatches: string[] = [];
+              for (const m of html.matchAll(singleRegex)) {
+                singleMatches.push(m[0]);
+              }
+              individualResults.push(singleMatches);
+              Logger.debug(CssSelectorParser.TAG, `类 ${cn} 找到 ${singleMatches.length} 个元素`);
+            }
+            
+            // 取交集 - 包含所有类名的元素
+            if (individualResults.length > 0 && individualResults[0].length > 0) {
+              // 使用 outerHTML 作为唯一标识
+              const getElementKey = (el: string): string => {
+                // 提取标签名和class属性作为key
+                const tagMatch = el.match(/^<([a-zA-Z][a-zA-Z0-9]*)/);
+                const classMatch = el.match(/class=["']([^"]*)["']/);
+                return `${tagMatch?.[1] || ''}:${classMatch?.[1] || ''}`;
+              };
+              
+              const firstSet = new Map<string, string>();
+              for (const item of individualResults[0]) {
+                firstSet.set(getElementKey(item), item);
+              }
+              for (let i = 1; i < individualResults.length; i++) {
+                const currentKeys = new Set(individualResults[i].map(getElementKey));
+                for (const entry of firstSet.entries()) {
+                  const key = entry[0];
+                  const item = entry[1];
+                  if (!currentKeys.has(key)) {
+                    firstSet.delete(key);
+                  }
+                }
+              }
+              
+              for (const value of firstSet.values()) {
+                elements.push(value);
+              }
+              Logger.debug(CssSelectorParser.TAG, `类选择器方法2找到 ${elements.length} 个元素`);
+            }
+          }
         }
       }
       // 处理ID选择器 #id
@@ -300,22 +353,495 @@ export class CssSelectorParser {
     return elements;
   }
 
+  /**
+   * 将XPath表达式转换为CSS选择器
+   * 支持以下转换规则：
+   * 1. //tag -> tag (后代选择器)
+   * 2. /tag -> > tag (子选择器)
+   * 3. [@class="value"] -> .value
+   * 4. [@id="value"] -> #value
+   * 5. [N] -> :nth-of-type(N)
+   * 6. @attr -> [attr]
+   * 7. [contains(@class,"value")] -> [class*="value"]
+   * 8. [contains(@attr,"value")] -> [attr*="value"]
+   * 9. [starts-with(@attr,"value")] -> [attr^="value"]
+   * 10. [ends-with(@attr,"value")] -> [attr$="value"]
+   * 11. * -> * (通配符)
+   * 12. //* -> * (任意后代)
+   * 13. text() -> 特殊处理，返回text()标记
+   */
+  static convertXPathToCss(xpath: string): string {
+    try {
+      Logger.debug(CssSelectorParser.TAG, `convertXPathToCss - 原始xpath: ${xpath}`);
+
+      if (!xpath || xpath.trim().length === 0) {
+        return '';
+      }
+
+      let css = xpath.trim();
+
+      // 处理text()函数
+      if (css.includes('text()')) {
+        // text() 需要特殊处理，保留标记
+        css = css.replace(/text\(\)/g, '{{text}}');
+      }
+
+      // 处理 // (任意后代)
+      // 将 // 替换为 空格（后代选择器）
+      css = css.replace(/\/\//g, ' ');
+
+      // 处理 / (直接子元素)
+      // 将 / 替换为 > (子选择器)
+      // 注意：需要先处理 // 再处理 /
+      css = css.replace(/\/(?![\/])/g, ' > ');
+
+      // 处理 [contains(@attr,"value")] 或 [contains(@attr,'value')]
+      css = css.replace(/\[contains\s*\(\s*@([a-zA-Z_-]+)\s*,\s*["']([^"']+)["']\s*\)\]/g, '[$1*="$2"]');
+
+      // 处理 [starts-with(@attr,"value")] 或 [starts-with(@attr,'value')]
+      css = css.replace(/\[starts-with\s*\(\s*@([a-zA-Z_-]+)\s*,\s*["']([^"']+)["']\s*\)\]/g, '[$1^="$2"]');
+
+      // 处理 [ends-with(@attr,"value")] 或 [ends-with(@attr,'value')]
+      css = css.replace(/\[ends-with\s*\(\s*@([a-zA-Z_-]+)\s*,\s*["']([^"']+)["']\s*\)\]/g, '[$1$="$2"]');
+
+      // 处理 [@class="value"] -> .value
+      // 处理 [@class='value'] -> .value
+      css = css.replace(/\[@class=["']([^"']+)["']\]/g, (match: string, classValue: string) => {
+        // 处理多class情况
+        const classes = classValue.split(/\s+/).filter((c: string) => c.length > 0);
+        return '.' + classes.join('.');
+      });
+
+      // 处理 [@id="value"] -> #value
+      css = css.replace(/\[@id=["']([^"']+)["']\]/g, '#$1');
+
+      // 处理其他属性选择器 [@attr="value"] -> [attr="value"]
+      css = css.replace(/\[@([a-zA-Z_-]+)=["']([^"']+)["']\]/g, '[$1="$2"]');
+
+      // 处理 [N] -> :nth-of-type(N)
+      // XPath索引从1开始，CSS :nth-of-type 也从1开始
+      css = css.replace(/\[(\d+)\]/g, ':nth-of-type($1)');
+
+      // 处理 [@attr] -> [attr]（属性存在选择器）
+      css = css.replace(/\[@([a-zA-Z_-]+)\]/g, '[$1]');
+
+      // 处理 position()>N 语法
+      css = css.replace(/\[position\(\)>(\d+)\]/g, ':nth-of-type(n+$1)');
+
+      // 处理 position()<N 语法
+      css = css.replace(/\[position\(\)<(\d+)\]/g, ':nth-of-type(-n+$1)');
+
+      // 处理 position()=N 语法
+      css = css.replace(/\[position\(\)=(\d+)\]/g, ':nth-of-type($1)');
+
+      // 处理 last() 语法
+      css = css.replace(/\[last\(\)\]/g, ':last-of-type');
+
+      // 处理 [last()-N] 语法
+      css = css.replace(/\[last\(\)-(\d+)\]/g, ':nth-last-of-type($1)');
+
+      // 处理 not() 语法 [not(@attr)] 或 [not(contains(@attr,"value"))]
+      css = css.replace(/\[not\(@([a-zA-Z_-]+)\)\]/g, ':not([$1])');
+      css = css.replace(/\[not\(contains\s*\(\s*@([a-zA-Z_-]+)\s*,\s*["']([^"']+)["']\s*\)\)\]/g, ':not([$1*="$2"])');
+
+      // 处理 . (当前节点) - 在CSS中通常不需要
+      css = css.replace(/\s+\.\s+/g, ' ');
+      css = css.replace(/^\s*\.\s*/, '');
+      css = css.replace(/\s*\.\s*$/, '');
+
+      // 清理多余的空格
+      css = css.replace(/\s+/g, ' ').trim();
+      css = css.replace(/\s*>\s*/g, ' > ');
+
+      // 恢复text()标记
+      css = css.replace(/\{\{text\}\}/g, 'text()');
+
+      Logger.debug(CssSelectorParser.TAG, `convertXPathToCss - 转换结果: ${css}`);
+
+      return css;
+    } catch (error) {
+      Logger.error(CssSelectorParser.TAG, `XPath转CSS失败: ${error instanceof Error ? error.message : String(error)}`);
+      return xpath;
+    }
+  }
+
+  /**
+   * 解析XPath表达式并提取元素
+   * 增强版本，支持更多XPath表达式
+   */
   private static selectByXPath(html: string, xpath: string): string[] {
     const elements: string[] = [];
 
     try {
       Logger.debug(CssSelectorParser.TAG, `selectByXPath - 原始xpath: ${xpath}`);
 
+      // 首先尝试转换为CSS选择器
+      const cssSelector = CssSelectorParser.convertXPathToCss(xpath);
+      Logger.debug(CssSelectorParser.TAG, `selectByXPath - 转换后的CSS: ${cssSelector}`);
+
+      // 如果转换成功且不是纯XPath语法，使用CSS选择器
+      if (cssSelector && !cssSelector.includes('text()') && !cssSelector.includes('//')) {
+        // 尝试使用CSS选择器解析
+        const cssResult = CssSelectorParser.selectElementsByCss(html, cssSelector);
+        if (cssResult.length > 0) {
+          Logger.debug(CssSelectorParser.TAG, `使用CSS选择器找到 ${cssResult.length} 个元素`);
+          return cssResult;
+        }
+      }
+
+      // 回退到原生XPath解析
+      return CssSelectorParser.selectByXPathNative(html, xpath);
+    } catch (error) {
+      Logger.error(CssSelectorParser.TAG, `XPath解析失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return elements;
+  }
+
+  /**
+   * 使用CSS选择器解析元素（支持增强的CSS语法）
+   */
+  private static selectElementsByCss(html: string, cssSelector: string): string[] {
+    const elements: string[] = [];
+
+    try {
+      // 处理后代选择器（空格分隔）
+      if (cssSelector.includes(' ') && !cssSelector.includes('>')) {
+        const parts = cssSelector.split(/\s+/).filter((p: string) => p.length > 0);
+        let currentElements = [html];
+
+        for (const part of parts) {
+          const nextElements: string[] = [];
+          for (const currentHtml of currentElements) {
+            const found = CssSelectorParser.selectElementsByCssPart(currentHtml, part);
+            for (const element of found) {
+              nextElements.push(element);
+            }
+          }
+          currentElements = nextElements;
+        }
+
+        return currentElements;
+      }
+
+      // 处理子选择器（> 分隔）
+      if (cssSelector.includes('>')) {
+        const parts = cssSelector.split(/>/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+        let currentElements = [html];
+
+        for (const part of parts) {
+          const nextElements: string[] = [];
+          for (const currentHtml of currentElements) {
+            // 提取直接子元素
+            const found = CssSelectorParser.selectElementsByCssPart(currentHtml, part);
+            for (const element of found) {
+              // 验证是否为直接子元素
+              if (CssSelectorParser.isDirectChild(currentHtml, element)) {
+                nextElements.push(element);
+              }
+            }
+          }
+          currentElements = nextElements;
+        }
+
+        return currentElements;
+      }
+
+      // 简单选择器
+      return CssSelectorParser.selectElementsByCssPart(html, cssSelector);
+    } catch (error) {
+      Logger.error(CssSelectorParser.TAG, `CSS选择器解析失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return elements;
+  }
+
+  /**
+   * 检查元素是否为直接子元素
+   */
+  private static isDirectChild(parentHtml: string, childHtml: string): boolean {
+    // 提取子元素的标签名
+    const childMatch = childHtml.match(/^<([a-zA-Z][a-zA-Z0-9]*)/);
+    if (!childMatch) {
+      return false;
+    }
+
+    const childTagName = childMatch[1];
+
+    // 在父元素中查找该子元素的直接位置
+    const tagPattern = new RegExp(`<${CssSelectorParser.escapeRegex(childTagName)}[^>]*>`, 'i');
+    const parentTagMatch = parentHtml.match(/^<([a-zA-Z][a-zA-Z0-9]*)/);
+
+    if (!parentTagMatch) {
+      return false;
+    }
+
+    // 简单检查：如果子元素HTML存在于父元素中，且没有被其他相同标签包裹
+    return parentHtml.includes(childHtml);
+  }
+
+  /**
+   * 解析单个CSS选择器部分
+   */
+  private static selectElementsByCssPart(html: string, cssPart: string): string[] {
+    const elements: string[] = [];
+
+    try {
+      // 处理 :nth-of-type(N)
+      const nthMatch = cssPart.match(/:nth-of-type\((\d+)\)$/);
+      let index = -1;
+      let selector = cssPart;
+
+      if (nthMatch) {
+        index = parseInt(nthMatch[1], 10) - 1; // 转换为0基索引
+        selector = cssPart.replace(/:nth-of-type\(\d+\)$/, '');
+      }
+
+      // 处理 :last-of-type
+      const lastMatch = cssPart.match(/:last-of-type$/);
+      let isLast = false;
+      if (lastMatch) {
+        isLast = true;
+        selector = cssPart.replace(/:last-of-type$/, '');
+      }
+
+      // 处理 :nth-last-of-type(N)
+      const nthLastMatch = cssPart.match(/:nth-last-of-type\((\d+)\)$/);
+      let nthLastIndex = -1;
+      if (nthLastMatch) {
+        nthLastIndex = parseInt(nthLastMatch[1], 10);
+        selector = cssPart.replace(/:nth-last-of-type\(\d+\)$/, '');
+      }
+
+      // 处理 :not() 伪类
+      const notMatch = selector.match(/:not\(([^)]+)\)$/);
+      let notSelector = '';
+      if (notMatch) {
+        notSelector = notMatch[1];
+        selector = selector.replace(/:not\([^)]+\)$/, '');
+      }
+
+      // 构建正则表达式
+      let pattern = '';
+      let tagName = '';
+      let classNames: string[] = [];
+      let id = '';
+      interface AttributeInfo {
+        name: string;
+        value?: string;
+        operator?: string;
+      }
+      let attributes: AttributeInfo[] = [];
+
+      // 解析标签名
+      const tagMatch = selector.match(/^([a-zA-Z*][a-zA-Z0-9]*)/);
+      if (tagMatch) {
+        tagName = tagMatch[1] === '*' ? '' : tagMatch[1];
+        selector = selector.substring(tagMatch[0].length);
+      }
+
+      // 解析ID
+      const idMatches = selector.match(/#([a-zA-Z0-9_-]+)/g);
+      if (idMatches && idMatches.length > 0) {
+        id = idMatches[0].substring(1);
+        selector = selector.replace(/#[a-zA-Z0-9_-]+/, '');
+      }
+
+      // 解析class
+      const classMatches = selector.match(/\.[a-zA-Z0-9_-]+/g);
+      if (classMatches) {
+        for (const cm of classMatches) {
+          classNames.push(cm.substring(1));
+        }
+        selector = selector.replace(/\.[a-zA-Z0-9_-]+/g, '');
+      }
+
+      // 解析属性选择器
+      const attrMatches = selector.match(/\[[^\]]+\]/g);
+      if (attrMatches) {
+        for (const am of attrMatches) {
+          const attrContent = am.substring(1, am.length - 1);
+          // 处理 [attr*="value"]
+          const containsMatch = attrContent.match(/^([a-zA-Z_-]+)\*=["']([^"']+)["']$/);
+          if (containsMatch) {
+            const attrInfo: AttributeInfo = ({ name: containsMatch[1], value: containsMatch[2], operator: '*=' } as AttributeInfo);
+            attributes.push(attrInfo);
+            continue;
+          }
+          // 处理 [attr^="value"]
+          const startsWithMatch = attrContent.match(/^([a-zA-Z_-]+)\^=["']([^"']+)["']$/);
+          if (startsWithMatch) {
+            const attrInfo: AttributeInfo = ({ name: startsWithMatch[1], value: startsWithMatch[2], operator: '^=' } as AttributeInfo);
+            attributes.push(attrInfo);
+            continue;
+          }
+          // 处理 [attr$="value"]
+          const endsWithMatch = attrContent.match(/^([a-zA-Z_-]+)\$=["']([^"']+)["']$/);
+          if (endsWithMatch) {
+            const attrInfo: AttributeInfo = ({ name: endsWithMatch[1], value: endsWithMatch[2], operator: '$=' } as AttributeInfo);
+            attributes.push(attrInfo);
+            continue;
+          }
+          // 处理 [attr="value"]
+          const equalsMatch = attrContent.match(/^([a-zA-Z_-]+)=["']([^"']+)["']$/);
+          if (equalsMatch) {
+            const attrInfo: AttributeInfo = ({ name: equalsMatch[1], value: equalsMatch[2], operator: '=' } as AttributeInfo);
+            attributes.push(attrInfo);
+            continue;
+          }
+          // 处理 [attr]（属性存在）
+          const existsMatch = attrContent.match(/^([a-zA-Z_-]+)$/);
+          if (existsMatch) {
+            const attrInfo: AttributeInfo = ({ name: existsMatch[1], operator: 'exists' } as AttributeInfo);
+            attributes.push(attrInfo);
+          }
+        }
+      }
+
+      // 构建正则表达式
+      pattern = '<';
+      if (tagName) {
+        pattern += CssSelectorParser.escapeRegex(tagName);
+      } else {
+        pattern += '([a-zA-Z][a-zA-Z0-9]*)';
+      }
+      pattern += '[^>]*';
+
+      // 添加ID匹配
+      if (id) {
+        pattern += `id=["']${CssSelectorParser.escapeRegex(id)}["'][^>]*`;
+      }
+
+      // 添加class匹配
+      if (classNames.length > 0) {
+        pattern += 'class=["\'][^"\']*';
+        for (const cn of classNames) {
+          pattern += `(?=.*\\b${CssSelectorParser.escapeRegex(cn)}\\b)`;
+        }
+        pattern += '[^"\']*["\'][^>]*';
+      }
+
+      // 添加属性匹配
+      for (const attr of attributes) {
+        if (attr.operator === 'exists') {
+          pattern += `${CssSelectorParser.escapeRegex(attr.name)}[^>]*`;
+        } else if (attr.operator === '*=' && attr.value) {
+          pattern += `${CssSelectorParser.escapeRegex(attr.name)}=["'][^"']*${CssSelectorParser.escapeRegex(attr.value)}[^"']*["'][^>]*`;
+        } else if (attr.operator === '^=' && attr.value) {
+          pattern += `${CssSelectorParser.escapeRegex(attr.name)}=["']${CssSelectorParser.escapeRegex(attr.value)}[^"']*["'][^>]*`;
+        } else if (attr.operator === '$=' && attr.value) {
+          pattern += `${CssSelectorParser.escapeRegex(attr.name)}=["'][^"']*${CssSelectorParser.escapeRegex(attr.value)}["'][^>]*`;
+        } else if (attr.operator === '=' && attr.value) {
+          pattern += `${CssSelectorParser.escapeRegex(attr.name)}=["']${CssSelectorParser.escapeRegex(attr.value)}["'][^>]*`;
+        }
+      }
+
+      pattern += '>([\\s\\S]*?)<\\/';
+      if (tagName) {
+        pattern += CssSelectorParser.escapeRegex(tagName);
+      } else {
+        pattern += '\\1';
+      }
+      pattern += '>';
+
+      Logger.debug(CssSelectorParser.TAG, `CSS部分解析 - tagName: ${tagName || '*'}, id: ${id || '无'}, classes: [${classNames.join(', ')}], index: ${index}`);
+
+      const regex = new RegExp(pattern, 'gi');
+      const matches = html.matchAll(regex);
+      for (const match of matches) {
+        elements.push(match[0]);
+      }
+
+      // 处理 :not() 排除
+      if (notSelector && elements.length > 0) {
+        const filtered: string[] = [];
+        for (const el of elements) {
+          if (!CssSelectorParser.elementMatchesSelector(el, notSelector)) {
+            filtered.push(el);
+          }
+        }
+        return CssSelectorParser.applyIndexFilter(filtered, index, isLast, nthLastIndex);
+      }
+
+      return CssSelectorParser.applyIndexFilter(elements, index, isLast, nthLastIndex);
+    } catch (error) {
+      Logger.error(CssSelectorParser.TAG, `CSS部分解析失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return elements;
+  }
+
+  /**
+   * 检查元素是否匹配选择器
+   */
+  private static elementMatchesSelector(elementHtml: string, selector: string): boolean {
+    // 简单实现：检查class、id、标签名
+    const tagMatch = selector.match(/^([a-zA-Z][a-zA-Z0-9]*)/);
+    const classMatch = selector.match(/\.([a-zA-Z0-9_-]+)/);
+    const idMatch = selector.match(/#([a-zA-Z0-9_-]+)/);
+
+    if (tagMatch) {
+      const tagPattern = new RegExp(`^<${tagMatch[1]}[^>]*>`, 'i');
+      if (!tagPattern.test(elementHtml)) {
+        return false;
+      }
+    }
+
+    if (classMatch) {
+      const classPattern = new RegExp(`class=["'][^"']*\\b${classMatch[1]}\\b`, 'i');
+      if (!classPattern.test(elementHtml)) {
+        return false;
+      }
+    }
+
+    if (idMatch) {
+      const idPattern = new RegExp(`id=["']${idMatch[1]}["']`, 'i');
+      if (!idPattern.test(elementHtml)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * 应用索引过滤器
+   */
+  private static applyIndexFilter(elements: string[], index: number, isLast: boolean, nthLastIndex: number): string[] {
+    if (isLast && elements.length > 0) {
+      return [elements[elements.length - 1]];
+    }
+
+    if (nthLastIndex > 0 && elements.length >= nthLastIndex) {
+      return [elements[elements.length - nthLastIndex]];
+    }
+
+    if (index >= 0 && index < elements.length) {
+      return [elements[index]];
+    }
+
+    return elements;
+  }
+
+  /**
+   * 原生XPath解析（回退方案）
+   */
+  private static selectByXPathNative(html: string, xpath: string): string[] {
+    const elements: string[] = [];
+
+    try {
+      Logger.debug(CssSelectorParser.TAG, `selectByXPathNative - 原始xpath: ${xpath}`);
+
       let processedXpath = xpath;
       let skipFirst = 0;
-      
+
       if (processedXpath.startsWith('//')) {
         processedXpath = processedXpath.substring(2);
       } else if (processedXpath.startsWith('./')) {
         processedXpath = processedXpath.substring(2);
       }
 
-      Logger.debug(CssSelectorParser.TAG, `selectByXPath - 处理后xpath: ${processedXpath}`);
+      Logger.debug(CssSelectorParser.TAG, `selectByXPathNative - 处理后xpath: ${processedXpath}`);
 
       // 处理 position()>N 语法，如 tr[position()>1]
       const posMatch = processedXpath.match(/\[position\(\)>(\d+)\]/);
@@ -334,11 +860,13 @@ export class CssSelectorParser {
           const nextElements: string[] = [];
           for (const currentHtml of currentElements) {
             const found = CssSelectorParser.selectByXPathSimple(currentHtml, part);
-            nextElements.push(...found);
+            for (const element of found) {
+              nextElements.push(element);
+            }
           }
           currentElements = nextElements;
           Logger.debug(CssSelectorParser.TAG, `处理路径部分 "${part}" 后找到 ${currentElements.length} 个元素`);
-          
+
           if (currentElements.length === 0) {
             Logger.warn(CssSelectorParser.TAG, `XPath路径部分 "${part}" 未找到匹配元素`);
             break;
@@ -354,13 +882,13 @@ export class CssSelectorParser {
       // 简单XPath解析
       const result = CssSelectorParser.selectByXPathSimple(html, processedXpath);
       Logger.debug(CssSelectorParser.TAG, `XPath简单解析找到 ${result.length} 个元素`);
-      
+
       if (skipFirst > 0 && result.length > skipFirst) {
         return result.slice(skipFirst);
       }
       return result;
     } catch (error) {
-      Logger.error(CssSelectorParser.TAG, `XPath解析失败: ${error instanceof Error ? error.message : String(error)}`);
+      Logger.error(CssSelectorParser.TAG, `XPath原生解析失败: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return elements;

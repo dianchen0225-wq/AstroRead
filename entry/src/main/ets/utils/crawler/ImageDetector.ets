@@ -13,11 +13,7 @@ export interface ImageCandidate {
 
 export type ImageSource = 'img_tag' | 'srcset' | 'background' | 'meta_og' | 'meta_twitter' | 'json_ld' | 'data_attribute';
 
-interface JsonLdObject {
-  [key: string]: JsonLdValue;
-}
-
-type JsonLdValue = string | number | boolean | null | JsonLdObject | JsonLdValue[];
+type JsonLdValue = string | number | boolean | null | Record<string, JsonLdValue> | JsonLdValue[];
 
 export interface DimensionRange {
   width: number;
@@ -116,13 +112,30 @@ export class ImageDetector {
 
   detectBookCoverImages(html: string, baseUrl: string): ImageCandidate[] {
     const candidates: ImageCandidate[] = [];
-
-    candidates.push(...this.detectFromImgTags(html, baseUrl));
-    candidates.push(...this.detectFromMetaTags(html, baseUrl));
-    candidates.push(...this.detectFromSrcset(html, baseUrl));
-    candidates.push(...this.detectFromBackgroundImages(html, baseUrl));
-    candidates.push(...this.detectFromJsonLd(html, baseUrl));
-    candidates.push(...this.detectFromDataAttributes(html, baseUrl));
+    const imgTags = this.detectFromImgTags(html, baseUrl);
+    for (const candidate of imgTags) {
+      candidates.push(candidate);
+    }
+    const metaTags = this.detectFromMetaTags(html, baseUrl);
+    for (const candidate of metaTags) {
+      candidates.push(candidate);
+    }
+    const srcset = this.detectFromSrcset(html, baseUrl);
+    for (const candidate of srcset) {
+      candidates.push(candidate);
+    }
+    const backgroundImages = this.detectFromBackgroundImages(html, baseUrl);
+    for (const candidate of backgroundImages) {
+      candidates.push(candidate);
+    }
+    const jsonLd = this.detectFromJsonLd(html, baseUrl);
+    for (const candidate of jsonLd) {
+      candidates.push(candidate);
+    }
+    const dataAttributes = this.detectFromDataAttributes(html, baseUrl);
+    for (const candidate of dataAttributes) {
+      candidates.push(candidate);
+    }
 
     const scoredCandidates = candidates.map(c => {
       const scored: ImageCandidate = {
@@ -297,16 +310,16 @@ export class ImageDetector {
     return candidates;
   }
 
-  private extractImagesFromJsonLd(json: JsonLdObject): string[] {
+  private extractImagesFromJsonLd(json: Record<string, JsonLdValue>): string[] {
     const images: string[] = [];
 
-    const traverse = (obj: JsonLdObject | null) => {
+    const traverse = (obj: Record<string, JsonLdValue> | null) => {
       if (!obj || typeof obj !== 'object') return;
 
       if (Array.isArray(obj)) {
         obj.forEach((item: JsonLdValue) => {
           if (typeof item === 'object' && item !== null) {
-            traverse(item as JsonLdObject);
+            traverse(item as Record<string, JsonLdValue>);
           }
         });
         return;
@@ -319,11 +332,11 @@ export class ImageDetector {
           if (typeof record.image === 'string') {
             images.push(record.image);
           } else if (Array.isArray(record.image)) {
-            record.image.forEach((img: JsonLdValue) => {
+            (record.image as JsonLdValue[]).forEach((img: JsonLdValue) => {
               if (typeof img === 'string') images.push(img);
             });
           } else if (typeof record.image === 'object' && record.image !== null) {
-            const imgObj = record.image as JsonLdObject;
+            const imgObj = record.image as Record<string, JsonLdValue>;
             if (typeof imgObj.url === 'string') images.push(imgObj.url);
           }
         }
@@ -332,7 +345,7 @@ export class ImageDetector {
           if (typeof record.thumbnailUrl === 'string') {
             images.push(record.thumbnailUrl);
           } else if (Array.isArray(record.thumbnailUrl)) {
-            record.thumbnailUrl.forEach((url: JsonLdValue) => {
+            (record.thumbnailUrl as JsonLdValue[]).forEach((url: JsonLdValue) => {
               if (typeof url === 'string') images.push(url);
             });
           }
@@ -341,7 +354,7 @@ export class ImageDetector {
 
       Object.values(record).forEach((value: JsonLdValue) => {
         if (typeof value === 'object' && value !== null) {
-          traverse(value as JsonLdObject);
+          traverse(value as Record<string, JsonLdValue>);
         }
       });
     };
