@@ -24,6 +24,7 @@ export interface ToolbarCallbacks {
   onFontSizeChange: (size: number) => void;
   onPageTurnModeChange: (mode: string) => void;
   onNightModeChange: (isNight: boolean) => void;
+  onMenuShowComplete?: () => void;
 }
 
 @Component
@@ -420,7 +421,8 @@ export struct ReadToolbarOverlay {
   showOverlay(): void {
     animateTo({
       duration: 200,
-      curve: Curve.EaseOut
+      curve: Curve.EaseOut,
+      playMode: PlayMode.Normal
     }, () => {
       this.overlayOpacity = 1;
     });
@@ -428,9 +430,13 @@ export struct ReadToolbarOverlay {
     setTimeout(() => {
       animateTo({
         duration: 150,
-        curve: Curve.EaseOut
+        curve: Curve.EaseOut,
+        playMode: PlayMode.Normal
       }, () => {
         this.contentOpacity = 1;
+        if (this.callbacks.onMenuShowComplete) {
+          this.callbacks.onMenuShowComplete();
+        }
       });
     }, 50);
   }
@@ -438,7 +444,8 @@ export struct ReadToolbarOverlay {
   hideOverlay(): void {
     animateTo({
       duration: 150,
-      curve: Curve.EaseIn
+      curve: Curve.EaseIn,
+      playMode: PlayMode.Normal
     }, () => {
       this.contentOpacity = 0;
     });
@@ -446,7 +453,8 @@ export struct ReadToolbarOverlay {
     setTimeout(() => {
       animateTo({
         duration: 100,
-        curve: Curve.EaseIn
+        curve: Curve.EaseIn,
+        playMode: PlayMode.Normal
       }, () => {
         this.overlayOpacity = 0;
       });

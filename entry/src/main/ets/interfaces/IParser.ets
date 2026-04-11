@@ -30,7 +30,7 @@ export interface ParseOptions {
 }
 
 export interface ParseResult<T = object> {
-  data: T;
+  data: T | null;
   status: ParseStatus;
   errors: ParseErrorInfo[];
   warnings: ParseWarningInfo[];

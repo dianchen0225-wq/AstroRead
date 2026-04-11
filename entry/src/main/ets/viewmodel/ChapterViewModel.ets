@@ -6,6 +6,7 @@ import { NetworkManager } from '../utils/network/NetworkManager';
 import { IdGenerator } from '../utils/content/IdGenerator';
 import { ParsedChapterItem } from '../utils/parser/ContentParser';
 import { Logger } from '../utils/performance/Logger';
+import { DatabaseQueryOptimizer } from '../utils/performance/DatabaseQueryOptimizer';
 import { common } from '@kit.AbilityKit';
 import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
 import { PerformanceManager, PerformanceReport } from '../utils/performance/PerformanceManager';
@@ -50,9 +51,10 @@ export class ChapterViewModel {
   private readonly networkManager = NetworkManager.getInstance();
   private readonly performanceManager = PerformanceManager.getInstance();
   private readonly progressiveLoader = ProgressiveContentLoader.getInstance();
+  private readonly dbOptimizer = DatabaseQueryOptimizer.getInstance();
   private context: common.UIAbilityContext | null = null;
   private static readonly TAG = 'ChapterViewModel';
-  
+
   private contentCache: Map<string, ContentCacheEntry> = new Map();
   private readonly cacheTTL: number = 30 * 60 * 1000;
   private progressiveCallbacks: Map<string, (result: ProgressiveLoadResult) => void> = new Map();
@@ -73,15 +75,15 @@ export class ChapterViewModel {
    */
   destroy(): void {
     Logger.info(ChapterViewModel.TAG, '销毁 ChapterViewModel，清理资源');
-    
+
     this.clearContentCache();
     this.progressiveCallbacks.clear();
     this.currentBookId = null;
     this.currentBookSource = null;
     this.currentChapters = [];
-    
+
     this.context = null;
-    
+
     const nullContext: common.UIAbilityContext | null = null;
     this.networkManager.setContext(nullContext);
   }
@@ -150,7 +152,7 @@ export class ChapterViewModel {
    */
   async getChapters(bookId: string): Promise<Chapter[]> {
     const startTime = Date.now();
-    
+
     try {
       const cacheKey = CacheKeys.CHAPTERS_PREFIX + bookId;
       const cached = dataCacheManager.get<Chapter[]>(cacheKey);
@@ -158,10 +160,10 @@ export class ChapterViewModel {
         Logger.debug(ChapterViewModel.TAG, `使用缓存章节列表: ${cached.length}章, 耗时: ${Date.now() - startTime}ms`);
         return cached;
       }
-      
+
       const chapters = await this.getChaptersByBookId(bookId);
       dataCacheManager.set(cacheKey, chapters);
-      
+
       Logger.info(ChapterViewModel.TAG, `加载章节列表: ${chapters.length}章, 耗时: ${Date.now() - startTime}ms`);
       return chapters;
     } catch (error) {

@@ -19,6 +19,11 @@ export interface SyncConfig {
   userId?: string;
 }
 
+export interface BookmarkCache {
+  bookmarks: Bookmark[];
+  timestamp: number;
+}
+
 export interface BookmarkSyncData {
   id: string;
   bookId: string;
@@ -39,6 +44,8 @@ export class BookmarkViewModel {
     syncInterval: 3600000
   };
   private deviceId: string = '';
+  private bookmarkCache: Map<string, BookmarkCache> = new Map();
+  private readonly cacheTTL = 5 * 60 * 1000;
 
   setDeviceId(deviceId: string): void {
     this.deviceId = deviceId;
@@ -46,7 +53,16 @@ export class BookmarkViewModel {
 
   async getBookmarksByBookId(bookId: string): Promise<Bookmark[]> {
     try {
-      return await this.databaseManager.getBookmarksByBookId(bookId);
+      const cached = this.bookmarkCache.get(bookId);
+      if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
+        return cached.bookmarks;
+      }
+
+      const bookmarks = await this.databaseManager.getBookmarksByBookId(bookId);
+
+      this.bookmarkCache.set(bookId, { bookmarks, timestamp: Date.now() });
+
+      return bookmarks;
     } catch (error) {
       Logger.error(BookmarkViewModel.TAG, `获取书签失败: ${error instanceof Error ? error.message : String(error)}`);
       return [];
@@ -68,15 +84,20 @@ export class BookmarkViewModel {
         content: content,
         createTime: Date.now()
       };
-      
+
       await this.databaseManager.addBookmark(bookmark);
-      
+
+      const cached = this.bookmarkCache.get(bookId);
+      if (cached) {
+        cached.bookmarks.push(bookmark);
+      }
+
       if (this.syncConfig.enabled) {
         this.syncBookmarkToCloud(bookmark).catch((err: Error) => {
           Logger.warn(BookmarkViewModel.TAG, `书签云同步失败: ${err.message}`);
         });
       }
-      
+
       return bookmark;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -88,7 +109,15 @@ export class BookmarkViewModel {
   async deleteBookmark(bookmarkId: string): Promise<void> {
     try {
       await this.databaseManager.deleteBookmark(bookmarkId);
-      
+
+      this.bookmarkCache.forEach((cached, bookId) => {
+        const index = cached.bookmarks.findIndex(b => b.id === bookmarkId);
+        if (index !== -1) {
+          cached.bookmarks.splice(index, 1);
+          return;
+        }
+      });
+
       if (this.syncConfig.enabled) {
         this.deleteBookmarkFromCloud(bookmarkId).catch((err: Error) => {
           Logger.warn(BookmarkViewModel.TAG, `删除书签云同步失败: ${err.message}`);

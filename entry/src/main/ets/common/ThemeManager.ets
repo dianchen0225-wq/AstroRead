@@ -5,6 +5,7 @@
 
 import { preferences } from '@kit.ArkData';
 import { Logger } from '../utils/performance/Logger';
+import { ThemeSwitchOptimizer } from '../utils/performance/ThemeSwitchOptimizer';
 import { common } from '@kit.AbilityKit';
 
 const THEME_PREFERENCES_NAME = 'theme_preferences';
@@ -30,6 +31,7 @@ export class ThemeManager {
   private transitionDuration: number = 300;
   private batchUpdateScheduled: boolean = false;
   private pendingNotify: boolean = false;
+  private themeOptimizer: ThemeSwitchOptimizer = ThemeSwitchOptimizer.getInstance();
 
   private constructor() {
   }
@@ -148,7 +150,7 @@ export class ThemeManager {
     }
     this.batchUpdateScheduled = true;
     this.pendingNotify = false;
-    
+
     setTimeout(() => {
       this.batchUpdateScheduled = false;
       if (this.pendingNotify) {
@@ -156,11 +158,11 @@ export class ThemeManager {
         this.notifyListeners();
         return;
       }
-      
+
       const listenersCopy = [...this.listeners];
       const batchSize = 5;
       let currentIndex = 0;
-      
+
       const processBatch = (): void => {
         const endIndex = Math.min(currentIndex + batchSize, listenersCopy.length);
         for (let i = currentIndex; i < endIndex; i++) {
@@ -171,14 +173,14 @@ export class ThemeManager {
           }
         }
         currentIndex = endIndex;
-        
+
         if (currentIndex < listenersCopy.length) {
           setTimeout(processBatch, 0);
         } else {
           this.isTransitioning = false;
         }
       };
-      
+
       this.isTransitioning = true;
       processBatch();
     }, 16);

@@ -83,8 +83,8 @@ export class ParserFacade implements ParserRegistry {
 
   private options: Required<ParserFacadeOptions> = {
     enableCache: true,
-    cacheTTL: 5 * 60 * 1000,
-    maxCacheSize: 100,
+    cacheTTL: 10 * 60 * 1000,
+    maxCacheSize: 200,
     autoDetect: true,
     defaultTimeout: 30000
   };
@@ -260,14 +260,14 @@ export class ParserFacade implements ParserRegistry {
         version: '1.0.0'
       };
       return {
-        data: null as T,
+        data: null,
         status: ParseStatus.FAILED,
         errors: [errorInfo],
         warnings: [],
         metadata
       };
     }
-    
+
     const trimmed = content.trim();
     if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
       const errorInfo: ParseErrorInfo = {
@@ -284,14 +284,14 @@ export class ParserFacade implements ParserRegistry {
         version: '1.0.0'
       };
       return {
-        data: null as T,
+        data: null,
         status: ParseStatus.FAILED,
         errors: [errorInfo],
         warnings: [],
         metadata
       };
     }
-    
+
     return this.parse<T>(content, ParserType.JSON, options);
   }
 
@@ -457,6 +457,27 @@ export class ParserFacade implements ParserRegistry {
     this.cache.set(key, cacheEntry);
   }
 
+  /**
+   * 清理过期缓存
+   */
+  cleanExpiredCache(): number {
+    let cleaned = 0;
+    const now = Date.now();
+
+    this.cache.forEach((value, key) => {
+      if (now - value.timestamp > this.options.cacheTTL) {
+        this.cache.delete(key);
+        cleaned++;
+      }
+    });
+
+    if (cleaned > 0) {
+      Logger.debug(this.TAG, `清理过期缓存: ${cleaned}条`);
+    }
+
+    return cleaned;
+  }
+
   private evictLRU(): void {
     let lruKey: string | null = null;
     let oldestAccess = Infinity;
@@ -612,9 +633,9 @@ export class ParserFacade implements ParserRegistry {
     };
 
     Logger.warn(this.TAG, `All fallback parsers failed for content, tried ${types.length} parsers`);
-    
+
     const failedResult: ParseResult<T> = {
-      data: null as T,
+      data: null,
       status: ParseStatus.FAILED,
       errors: errorInfos,
       warnings: [],

@@ -3,10 +3,22 @@ import { databaseManager } from '../utils/file/DatabaseManager';
 import { Logger } from '../utils/performance/Logger';
 import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
 
+class DebounceTimer {
+  private timer: number = -1;
+
+  debounce(func: Function, delay: number): void {
+    if (this.timer !== -1) {
+      clearTimeout(this.timer);
+    }
+    this.timer = setTimeout(func, delay);
+  }
+}
+
 export class ReadConfigViewModel {
   private readConfig: ReadConfig = DEFAULT_READ_CONFIG;
   private readonly databaseManager = databaseManager;
   private static readonly TAG = 'ReadConfigViewModel';
+  private debounceTimer = new DebounceTimer();
 
   static DEFAULT_READ_CONFIG: ReadConfig = DEFAULT_READ_CONFIG;
 
@@ -54,9 +66,11 @@ export class ReadConfigViewModel {
         clickPageTurn: config.clickPageTurn !== undefined ? config.clickPageTurn : this.readConfig.clickPageTurn
       };
       this.readConfig = updatedConfig;
-      await this.databaseManager.updateReadConfig(this.readConfig);
-      
-      dataCacheManager.set(CacheKeys.READ_CONFIG, this.readConfig);
+
+      this.debounceTimer.debounce(async () => {
+        await this.databaseManager.updateReadConfig(this.readConfig);
+        dataCacheManager.set(CacheKeys.READ_CONFIG, this.readConfig);
+      }, 300);
     } catch (error) {
       Logger.error(ReadConfigViewModel.TAG, `更新阅读配置失败: ${error instanceof Error ? error.message : String(error)}`);
       throw (error instanceof Error ? error : new Error(String(error)));

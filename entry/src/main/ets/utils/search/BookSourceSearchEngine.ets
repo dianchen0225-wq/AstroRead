@@ -1442,6 +1442,35 @@ export class BookSourceSearchEngine implements ISearchEngine {
   }
 
   /**
+   * 检查文本是否包含模板代码（如 {{journal.title}}）
+   * @param text 要检查的文本
+   * @returns true 如果包含模板代码
+   */
+  private containsTemplateCode(text: string): boolean {
+    if (!text) return false;
+    // 检查常见的模板代码模式
+    const templatePatterns = [
+      /\{\{[^}]+\}\}/,           // {{xxx}}
+      /\$\{[^}]+\}/,              // ${xxx}
+      /\[\[.*?\]\]/,              // [[xxx]]
+      /\{%.*?%\}/,               // {% xxx %}
+      /<\?php[\s\S]*?\?>/,       // <?php ?>
+      /<\?=[\s\S]*?\?>/,         // <?= ?>
+      /<jsp:[^>]+>/,             // <jsp:xxx>
+      /<c:[^>]+>/,               // <c:xxx>
+      /\$\w+\./,                 // $xxx.
+      /#\{[^}]+\}/               // #{xxx}
+    ];
+
+    for (const pattern of templatePatterns) {
+      if (pattern.test(text)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * 生成轻量级缓存键 - 使用哈希避免内存问题
    * 对大文档只取前1000字符进行哈希
    */

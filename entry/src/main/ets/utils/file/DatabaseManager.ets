@@ -13,6 +13,8 @@ import { ReadConfig } from '../../models/ReadConfig';
 import { BookCategory } from '../../models/BookCategory';
 import { Bookmark } from '../../models/Bookmark';
 import { Chapter } from '../../models/Book';
+import { DatabaseQueryOptimizer } from '../performance/DatabaseQueryOptimizer';
+import { Logger } from '../performance/Logger';
 
 export class DatabaseManager {
   private rdbStore: relationalStore.RdbStore | null = null;
@@ -69,6 +71,31 @@ export class DatabaseManager {
   private async initDefaultData(): Promise<void> {
     if (this.readConfigRepository) {
       await this.readConfigRepository.getOrCreateReadConfig();
+    }
+    await this.createIndexes();
+  }
+
+  /**
+   * 创建数据库索引
+   */
+  private async createIndexes(): Promise<void> {
+    if (!this.rdbStore) {
+      return;
+    }
+
+    const dbOptimizer = DatabaseQueryOptimizer.getInstance();
+
+    try {
+      // 为 chapter 表创建索引
+      await dbOptimizer.createIndex(this.rdbStore, 'chapter', 'idx_chapter_book_id', ['book_id']);
+      await dbOptimizer.createIndex(this.rdbStore, 'chapter', 'idx_chapter_chapter_index', ['chapter_index']);
+
+      // 为 book 表创建索引
+      await dbOptimizer.createIndex(this.rdbStore, 'book', 'idx_book_category_id', ['category_id']);
+
+      Logger.info(this.TAG, '数据库索引创建完成');
+    } catch (error) {
+      Logger.error(this.TAG, `创建数据库索引失败: ${error}`);
     }
   }
 

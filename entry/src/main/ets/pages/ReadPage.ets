@@ -7,14 +7,24 @@ import { BookSource } from '../models/BookSource';
 import { ReadConfig } from '../models/ReadConfig';
 import { ReadConfigViewModel } from '../viewmodel/ReadConfigViewModel';
 import { Logger } from '../utils/performance/Logger';
+import { ChapterLoadOptimizer } from '../utils/performance/ChapterLoadOptimizer';
+import { PageTurnAnimationOptimizer } from '../utils/performance/PageTurnAnimationOptimizer';
+import { MemoryManager } from '../utils/performance/MemoryManager';
 import { NavigationManager } from '../common/NavigationManager';
 import { showToast } from '../utils/content/ToastUtils';
 import { common } from '@kit.AbilityKit';
 import { display } from '@kit.ArkUI';
-import { ReadToolbarOverlay, ToolbarConfig, ToolbarCallbacks } from '../components/ReadToolbar';
+import { ReadToolbarOverlay } from '../components/ReadToolbar';
 import { BackButton } from '../components/BackButton';
 
 type PageTurnDirection = 'prev' | 'next' | 'none';
+type BackgroundTheme = 'light' | 'dark' | 'eye-care' | 'paper';
+
+interface ThemeConfig {
+  name: string;
+  backgroundColor: string;
+  textColor: string;
+}
 
 @Entry
 @ComponentV2
@@ -40,8 +50,19 @@ struct ReadPage {
   @Local maxScrollOffset: number = 0;
   @Local pageTurnDirection: PageTurnDirection = 'none';
   @Local pageTurnProgress: number = 0;
+  @Local menuShowStartTime: number = 0;
+  @Local searchKeyword: string = '';
+  @Local isBookmarked: boolean = false;
+  @Local isCaching: boolean = false;
+  @Local cachedChapterCount: number = 0;
 
   private bookSource: BookSource | null = null;
+  private readonly themeConfigs: Record<BackgroundTheme, ThemeConfig> = {
+    'light': { name: '白天', backgroundColor: '#FAF7F2', textColor: '#1A1A1A' },
+    'dark': { name: '夜间', backgroundColor: '#121212', textColor: '#FAF8F5' },
+    'eye-care': { name: '护眼', backgroundColor: '#C7EDCC', textColor: '#2F4F4F' },
+    'paper': { name: '纸质', backgroundColor: '#F5F5DC', textColor: '#2F4F4F' }
+  };
   private isComponentActive: boolean = false;
   private readonly MAX_RETRY_COUNT: number = 3;
   private screenWidth: number = 0;
@@ -49,6 +70,9 @@ struct ReadPage {
   private lastVolumeUpTime: number = 0;
   private lastVolumeDownTime: number = 0;
   private readonly VOLUME_KEY_DEBOUNCE: number = 300;
+  private chapterLoadOptimizer: ChapterLoadOptimizer = ChapterLoadOptimizer.getInstance();
+  private animationOptimizer: PageTurnAnimationOptimizer = PageTurnAnimationOptimizer.getInstance();
+  private memoryManager: MemoryManager = MemoryManager.getInstance();
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -57,7 +81,7 @@ struct ReadPage {
     this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
-    
+
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
 
@@ -68,10 +92,12 @@ struct ReadPage {
       Logger.error('ReadPage', `获取屏幕尺寸失败: ${error instanceof Error ? error.message : String(error)}`);
       this.screenWidth = 360;
     }
-    
+
     this.chapterIndex = this.initialChapterIndex;
     this.chapterUrl = this.initialChapterUrl;
-    
+
+    this.memoryManager.startMonitoring();
+
     this.loadReadConfig();
     this.loadBookDetail();
   }
@@ -79,11 +105,15 @@ struct ReadPage {
   aboutToDisappear(): void {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
-    
+
     this.chapterContent = null;
     this.chapters = [];
     this.book = null;
     this.bookSource = null;
+
+    this.chapterLoadOptimizer.clearCache();
+    this.animationOptimizer.clearPreRenderCache();
+    this.memoryManager.stopMonitoring();
   }
 
   async loadReadConfig(): Promise<void> {
@@ -137,7 +167,7 @@ struct ReadPage {
 
   async loadChapterContent(): Promise<void> {
     if (!this.book || !this.bookSource || !this.isComponentActive) return;
-    
+
     this.isLoading = true;
     this.loadError = '';
     try {
@@ -145,13 +175,14 @@ struct ReadPage {
         const chapterId = this.chapters[this.chapterIndex].id;
         const chapterViewModel = viewModelManager.getChapterViewModel();
         this.chapterContent = await chapterViewModel.getChapterContent(
-          chapterId, 
-          this.chapterUrl, 
+          chapterId,
+          this.chapterUrl,
           this.bookSource
         );
         this.showRetryCount = 0;
         this.scroller.scrollToIndex(0);
         this.scrollOffset = 0;
+        await this.loadBookmarkStatus();
       }
     } catch (error) {
       Logger.error('ReadPage', `加载章节内容失败: ${error}`);
@@ -167,6 +198,90 @@ struct ReadPage {
       if (this.isComponentActive) {
         this.isLoading = false;
       }
+    }
+  }
+
+  async loadBookmarkStatus(): Promise<void> {
+    if (!this.book) return;
+    try {
+      const bookmarkViewModel = viewModelManager.getBookmarkViewModel();
+      const bookmarks = await bookmarkViewModel.getBookmarksByBookId(this.book.id);
+      if (this.chapterContent) {
+        this.isBookmarked = bookmarks.some(bookmark => bookmark.chapterId === this.chapterContent!.chapterId);
+      }
+    } catch (error) {
+      Logger.error('ReadPage', `加载书签状态失败: ${error}`);
+    }
+  }
+
+  async toggleBookmark(): Promise<void> {
+    if (!this.book || !this.chapterContent) return;
+
+    try {
+      const bookmarkViewModel = viewModelManager.getBookmarkViewModel();
+
+      if (this.isBookmarked) {
+        const bookmarks = await bookmarkViewModel.getBookmarksByBookId(this.book.id);
+        const bookmark = bookmarks.find(b => b.chapterId === this.chapterContent!.chapterId);
+        if (bookmark) {
+          await bookmarkViewModel.deleteBookmark(bookmark.id);
+          this.isBookmarked = false;
+          showToast({ message: '已取消书签' });
+        }
+      } else {
+        const chapterTitle = this.chapters.length > this.chapterIndex ? this.chapters[this.chapterIndex].title : '';
+        const content = this.chapterContent.content.substring(0, 100);
+        await bookmarkViewModel.addBookmark(this.book.id, this.chapterContent.chapterId, chapterTitle, content);
+        this.isBookmarked = true;
+        showToast({ message: '已添加书签' });
+      }
+    } catch (error) {
+      Logger.error('ReadPage', `书签操作失败: ${error}`);
+      showToast({ message: '书签操作失败' });
+    }
+  }
+
+  async cacheChapters(): Promise<void> {
+    if (!this.book || !this.bookSource || this.isCaching) return;
+
+    this.isCaching = true;
+    this.cachedChapterCount = 0;
+
+    try {
+      const chapterViewModel = viewModelManager.getChapterViewModel();
+      const cacheCount = Math.min(10, this.chapters.length - this.chapterIndex - 1);
+      const concurrency = 3;
+
+      const chaptersToCache = this.chapters.slice(this.chapterIndex + 1, this.chapterIndex + 1 + cacheCount);
+
+      for (let i = 0; i < chaptersToCache.length; i += concurrency) {
+        const batch = chaptersToCache.slice(i, i + concurrency);
+        await Promise.all(batch.map(async (chapter) => {
+          try {
+            if (this.bookSource) {
+              await chapterViewModel.getChapterContent(chapter.id, chapter.url, this.bookSource);
+              this.cachedChapterCount++;
+            }
+          } catch (error) {
+            Logger.error('ReadPage', `缓存章节失败: ${chapter.title}, ${error}`);
+          }
+        }));
+
+        if (this.cachedChapterCount > 0) {
+          showToast({ message: `已缓存${this.cachedChapterCount}/${cacheCount}章` });
+        }
+      }
+
+      if (this.cachedChapterCount > 0) {
+        showToast({ message: `缓存完成，共${this.cachedChapterCount}章` });
+      } else {
+        showToast({ message: '缓存失败' });
+      }
+    } catch (error) {
+      Logger.error('ReadPage', `缓存章节失败: ${error}`);
+      showToast({ message: '缓存失败' });
+    } finally {
+      this.isCaching = false;
     }
   }
 
@@ -215,19 +330,14 @@ struct ReadPage {
     if (this.readConfig.pageTurnMode === 'scroll') {
       return;
     }
-    
-    this.pageTurnDirection = direction;
-    this.pageTurnProgress = 0;
-    
-    animateTo({
-      duration: 200,
-      curve: Curve.EaseOut,
-      onFinish: () => {
-        this.pageTurnDirection = 'none';
-        this.pageTurnProgress = 0;
-      }
+
+    const turnDirection = direction === 'next' ? 'next' : 'prev';
+    this.animationOptimizer.animatePageTurn(turnDirection, () => {
+      this.pageTurnDirection = direction;
+      this.pageTurnProgress = 0;
     }, () => {
-      this.pageTurnProgress = 1;
+      this.pageTurnDirection = 'none';
+      this.pageTurnProgress = 0;
     });
   }
 
@@ -238,19 +348,21 @@ struct ReadPage {
       this.showSettings = false;
       return;
     }
-    
+
     if (!this.readConfig.clickPageTurn) {
+      this.menuShowStartTime = Date.now();
       this.showMenu = true;
       return;
     }
-    
+
     const thirdWidth = this.screenWidth / 3;
-    
+
     if (x < thirdWidth) {
       this.prevChapter();
     } else if (x > thirdWidth * 2) {
       this.nextChapter();
     } else {
+      this.menuShowStartTime = Date.now();
       this.showMenu = true;
     }
   }
@@ -295,14 +407,40 @@ struct ReadPage {
     return ((this.chapterIndex + 1) / this.chapters.length) * 100;
   }
 
+  get filteredChapters(): Chapter[] {
+    if (!this.searchKeyword) {
+      return this.chapters;
+    }
+    return this.chapters.filter(chapter => chapter.title.includes(this.searchKeyword));
+  }
+
   jumpToChapter(index: number): void {
     if (index >= 0 && index < this.chapters.length && index !== this.chapterIndex) {
+      this.updateReadProgress();
       this.chapterIndex = index;
       this.chapterUrl = this.chapters[index].url;
       this.showChapterList = false;
       this.showMenu = false;
       this.loadChapterContent();
     }
+  }
+
+  getCurrentTheme(): BackgroundTheme {
+    const backgroundColor = this.readConfig.backgroundColor;
+    const textColor = this.readConfig.textColor;
+    if (backgroundColor === '#FAF7F2' && textColor === '#1A1A1A') return 'light';
+    if (backgroundColor === '#121212' && textColor === '#FAF8F5') return 'dark';
+    if (backgroundColor === '#C7EDCC' && textColor === '#2F4F4F') return 'eye-care';
+    if (backgroundColor === '#F5F5DC' && textColor === '#2F4F4F') return 'paper';
+    return 'light';
+  }
+
+  changeTheme(theme: BackgroundTheme): void {
+    const themeConfig = this.themeConfigs[theme];
+    this.readConfig.backgroundColor = themeConfig.backgroundColor;
+    this.readConfig.textColor = themeConfig.textColor;
+    this.readConfig.isNightMode = theme === 'dark';
+    viewModelManager.getReadConfigViewModel().updateReadConfig(this.readConfig);
   }
 
   @Builder
@@ -407,6 +545,28 @@ struct ReadPage {
             this.showMenu = false;
           })
 
+        Text(this.isBookmarked ? '书签' : '书签')
+          .fontSize(14)
+          .fontColor(this.isBookmarked ? DesignSystem.getPrimaryColor(this.isLightMode) : DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .backgroundColor(this.isBookmarked ? DesignSystem.getTertiaryBackgroundColor(this.isLightMode) : DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .borderRadius(8)
+          .margin({ right: 8 })
+          .onClick(() => {
+            this.toggleBookmark();
+          })
+
+        Text(this.isCaching ? `缓存中${this.cachedChapterCount}` : '缓存')
+          .fontSize(14)
+          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+          .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .borderRadius(8)
+          .margin({ right: 8 })
+          .onClick(() => {
+            this.cacheChapters();
+          })
+
         Text('设置')
           .fontSize(14)
           .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
@@ -435,19 +595,31 @@ struct ReadPage {
           })
 
         Column() {
-          Text(`${this.chapterIndex + 1}/${this.chapters.length}`)
+          Text(`${this.getChapterProgress().toFixed(0)}%`)
             .fontSize(12)
             .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-          
-          Progress({ 
-            value: this.chapterIndex + 1, 
-            total: this.chapters.length > 0 ? this.chapters.length : 1,
-            type: ProgressType.Linear
+
+          Slider({
+            value: this.getChapterProgress(),
+            min: 0,
+            max: 100,
+            step: 1,
+            style: SliderStyle.OutSet
           })
-            .width(120)
+            .width('100%')
             .height(4)
             .margin({ top: 4 })
-            .color(DesignSystem.getPrimaryColor(this.isLightMode))
+            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
+            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
+            .trackThickness(4)
+            .blockSize({ width: 16, height: 16 })
+            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
+            .onChange((value: number) => {
+              const targetChapterIndex = Math.floor((value / 100) * this.chapters.length);
+              if (targetChapterIndex >= 0 && targetChapterIndex < this.chapters.length && targetChapterIndex !== this.chapterIndex) {
+                this.jumpToChapter(targetChapterIndex);
+              }
+            })
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
@@ -534,8 +706,17 @@ struct ReadPage {
       .padding(15)
       .alignItems(VerticalAlign.Center)
 
+      TextInput({ placeholder: '搜索章节', text: this.searchKeyword })
+        .width('100%')
+        .height(40)
+        .margin({ left: 15, right: 15, bottom: 10 })
+        .backgroundColor(DesignSystem.getTertiaryBackgroundColor(this.isLightMode))
+        .onChange((value: string) => {
+          this.searchKeyword = value;
+        })
+
       List() {
-        ForEach(this.chapters, (chapter: Chapter, index: number) => {
+        ForEach(this.filteredChapters, (chapter: Chapter, index: number) => {
           ListItem() {
             Row() {
               Text(chapter.title)
@@ -693,11 +874,36 @@ struct ReadPage {
         .padding({ left: 15, right: 15, top: 10, bottom: 10 })
 
         Row() {
+          Text('背景主题')
+            .fontSize(14)
+            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+            .width(80)
+
+          Row() {
+            ForEach(['light', 'dark', 'eye-care', 'paper'] as BackgroundTheme[], (theme: BackgroundTheme) => {
+              Text(this.themeConfigs[theme].name)
+                .fontSize(12)
+                .fontColor(this.getCurrentTheme() === theme ? Color.White : DesignSystem.getPrimaryTextColor(this.isLightMode))
+                .backgroundColor(this.getCurrentTheme() === theme ? DesignSystem.getPrimaryColor(this.isLightMode) : DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
+                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .borderRadius(6)
+                .margin({ right: 8 })
+                .onClick(() => {
+                  this.changeTheme(theme);
+                })
+            })
+          }
+          .layoutWeight(1)
+        }
+        .width('100%')
+        .padding({ left: 15, right: 15, top: 10, bottom: 10 })
+
+        Row() {
           Text('夜间模式')
             .fontSize(14)
             .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
             .width(80)
-          
+
           Toggle({ type: ToggleType.Switch, isOn: this.readConfig.isNightMode })
             .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
             .onChange((isOn: boolean) => {
@@ -725,11 +931,42 @@ struct ReadPage {
         .padding({ left: 15, right: 15, top: 10, bottom: 10 })
 
         Row() {
+          Text('亮度')
+            .fontSize(14)
+            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+            .width(80)
+
+          Slider({
+            value: this.readConfig.brightness,
+            min: 0,
+            max: 1,
+            step: 0.05,
+            style: SliderStyle.OutSet
+          })
+            .width('60%')
+            .blockColor(DesignSystem.getPrimaryColor(this.isLightMode))
+            .trackColor(DesignSystem.getBorderColor(this.isLightMode))
+            .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
+            .onChange((value: number) => {
+              this.readConfig.brightness = Math.round(value * 100) / 100;
+              viewModelManager.getReadConfigViewModel().updateReadConfig(this.readConfig);
+            })
+
+          Text(`${Math.round(this.readConfig.brightness * 100)}%`)
+            .fontSize(14)
+            .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
+            .width(40)
+            .textAlign(TextAlign.End)
+        }
+        .width('100%')
+        .padding({ left: 15, right: 15, top: 10, bottom: 10 })
+
+        Row() {
           Text('音量键翻页')
             .fontSize(14)
             .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
             .width(80)
-          
+
           Toggle({ type: ToggleType.Switch, isOn: this.readConfig.volumeKeyPageTurn })
             .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
             .onChange((isOn: boolean) => {
@@ -932,6 +1169,14 @@ struct ReadPage {
             onNightModeChange: (isNight: boolean) => {
               this.readConfig.isNightMode = isNight;
               viewModelManager.getReadConfigViewModel().toggleNightMode(isNight);
+            },
+            onMenuShowComplete: () => {
+              const endTime = Date.now();
+              const elapsed = endTime - this.menuShowStartTime;
+              Logger.info('ReadPage', `菜单呼出耗时: ${elapsed}ms`);
+              if (elapsed > 100) {
+                Logger.warn('ReadPage', `菜单呼出超时: ${elapsed}ms`);
+              }
             }
           }
         })
@@ -946,7 +1191,9 @@ struct ReadPage {
         .height('100%')
         .backgroundColor('rgba(0, 0, 0, 0.5)')
         .onClick(() => {
+          this.showMenu = false;
           this.showChapterList = false;
+          this.showSettings = false;
         })
       }
 
@@ -959,6 +1206,8 @@ struct ReadPage {
         .height('100%')
         .backgroundColor('rgba(0, 0, 0, 0.5)')
         .onClick(() => {
+          this.showMenu = false;
+          this.showChapterList = false;
           this.showSettings = false;
         })
       }
