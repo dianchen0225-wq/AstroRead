@@ -28,6 +28,8 @@ export interface EnhancedHealthRecord {
   lastCheckTime: number;
   isPermanentlyDisabled: boolean; // 是否永久禁用
   disabledReason: string; // 禁用原因
+  disabledAt: number; // 禁用时间戳，用于自动恢复计算
+  failureTimestamps: number[]; // 失败时间戳列表，用于时间窗口计算
 }
 
 export interface HealthStatistics {
@@ -44,10 +46,14 @@ const MIN_SCORE = 0;
 const MAX_SCORE = 100;
 const INITIAL_SCORE = 50;
 
-// 永久性错误类型(不重试,直接禁用)
-const PERMANENT_ERROR_TYPES: string[] = ['dns', 'ssl'];
-// 临时性错误类型(可重试)
-const TEMPORARY_ERROR_TYPES: string[] = ['timeout', 'http', 'network'];
+// 永久性错误类型(不重试,直接禁用) - 仅SSL证书错误，DNS错误改为临时处理
+const PERMANENT_ERROR_TYPES: string[] = ['ssl'];
+// 临时性错误类型(可重试) - DNS错误不再永久禁用
+const TEMPORARY_ERROR_TYPES: string[] = ['timeout', 'http', 'network', 'dns'];
+// 连续失败判定的时间窗口（30分钟）
+const FAILURE_TIME_WINDOW_MS = 30 * 60 * 1000;
+// 自动恢复时间（1小时）
+const AUTO_RECOVERY_TIME_MS = 60 * 60 * 1000;
 
 export class EnhancedSourceHealthManager {
   private static instance: EnhancedSourceHealthManager | null = null;
@@ -209,7 +215,7 @@ export class EnhancedSourceHealthManager {
   }
 
   /**
-   * 记录失败(增强版)
+   * 记录失败(增强版) - 基于时间窗口的连续失败判定
    */
   recordFailure(sourceId: string, sourceName: string, sourceUrl: string, errorType: string, errorMessage: string): void {
     let record = this.healthRecords.get(sourceId);
@@ -219,41 +225,53 @@ export class EnhancedSourceHealthManager {
       this.healthRecords.set(sourceId, record);
     }
 
+    const now = Date.now();
     record.failureCount++;
-    record.lastFailureTime = Date.now();
+    record.lastFailureTime = now;
     record.lastErrorType = errorType;
     record.lastErrorMessage = errorMessage;
     record.consecutiveFailures++;
 
+    // 记录失败时间戳，用于时间窗口计算
+    record.failureTimestamps.push(now);
+    // 清理超过时间窗口的旧时间戳
+    const windowStart = now - FAILURE_TIME_WINDOW_MS;
+    record.failureTimestamps = record.failureTimestamps.filter((t: number) => t >= windowStart);
+    // 计算时间窗口内的失败次数
+    const failuresInWindow = record.failureTimestamps.length;
+
     // 根据错误类型决定禁用策略
     if (PERMANENT_ERROR_TYPES.includes(errorType)) {
-      // DNS和SSL错误直接永久禁用
+      // 仅SSL错误永久禁用
       record.isEnabled = false;
       record.isPermanentlyDisabled = true;
       record.disabledReason = `永久性错误: ${errorType} - ${errorMessage}`;
+      record.disabledAt = now;
       Logger.warn(this.TAG, `书源已永久禁用: ${sourceName}, 错误类型: ${errorType}, 原因: ${errorMessage}`);
     } else if (TEMPORARY_ERROR_TYPES.includes(errorType)) {
-      // 临时性错误,连续失败3次后禁用
-      if (record.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      // 临时性错误，基于时间窗口的连续失败判定
+      if (failuresInWindow >= MAX_CONSECUTIVE_FAILURES) {
         record.isEnabled = false;
         record.isPermanentlyDisabled = false;
-        record.disabledReason = `连续失败${record.consecutiveFailures}次: ${errorType}`;
-        Logger.warn(this.TAG, `书源已临时禁用: ${sourceName}, 连续失败次数: ${record.consecutiveFailures}`);
+        record.disabledReason = `${FAILURE_TIME_WINDOW_MS / 60000}分钟内失败${failuresInWindow}次: ${errorType}`;
+        record.disabledAt = now;
+        Logger.warn(this.TAG, `书源已临时禁用: ${sourceName}, 时间窗口内失败次数: ${failuresInWindow}`);
       }
     } else {
-      // 未知错误,连续失败3次后禁用
-      if (record.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      // 未知错误，基于时间窗口的连续失败判定
+      if (failuresInWindow >= MAX_CONSECUTIVE_FAILURES) {
         record.isEnabled = false;
         record.isPermanentlyDisabled = false;
-        record.disabledReason = `连续失败${record.consecutiveFailures}次: ${errorMessage}`;
-        Logger.warn(this.TAG, `书源已禁用: ${sourceName}, 连续失败次数: ${record.consecutiveFailures}`);
+        record.disabledReason = `${FAILURE_TIME_WINDOW_MS / 60000}分钟内失败${failuresInWindow}次: ${errorMessage}`;
+        record.disabledAt = now;
+        Logger.warn(this.TAG, `书源已禁用: ${sourceName}, 时间窗口内失败次数: ${failuresInWindow}`);
       }
     }
 
     this.updateScore(record);
     this.saveRecords();
 
-    Logger.debug(this.TAG, `书源失败: ${sourceName}, 错误: ${errorType}, 分数: ${record.score}`);
+    Logger.debug(this.TAG, `书源失败: ${sourceName}, 错误: ${errorType}, 分数: ${record.score}, 窗口内失败: ${failuresInWindow}`);
   }
 
   /**
@@ -278,7 +296,9 @@ export class EnhancedSourceHealthManager {
       consecutiveFailures: 0,
       lastCheckTime: Date.now(),
       isPermanentlyDisabled: false,
-      disabledReason: ''
+      disabledReason: '',
+      disabledAt: 0,
+      failureTimestamps: []
     };
   }
 
@@ -363,11 +383,30 @@ export class EnhancedSourceHealthManager {
   }
 
   /**
-   * 检查书源是否启用
+   * 检查书源是否启用 - 增加自动恢复机制
    */
   isSourceEnabled(sourceId: string): boolean {
     const record = this.healthRecords.get(sourceId);
-    return record ? record.isEnabled : true;
+    if (!record) {
+      return true;
+    }
+
+    // 自动恢复：若书源被临时禁用且距禁用时间超过恢复时间，自动恢复
+    if (!record.isEnabled && !record.isPermanentlyDisabled && record.disabledAt > 0) {
+      const elapsed = Date.now() - record.disabledAt;
+      if (elapsed >= AUTO_RECOVERY_TIME_MS) {
+        record.isEnabled = true;
+        record.consecutiveFailures = 0;
+        record.failureTimestamps = [];
+        record.score = 30; // 恢复时设为较低分数，允许快速重新评估
+        record.disabledReason = '';
+        record.disabledAt = 0;
+        Logger.info(this.TAG, `书源自动恢复: ${record.sourceName}, 禁用时长: ${Math.round(elapsed / 60000)}分钟`);
+        this.saveRecords();
+      }
+    }
+
+    return record.isEnabled;
   }
 
   /**

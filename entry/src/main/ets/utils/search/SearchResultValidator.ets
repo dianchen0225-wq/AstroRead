@@ -186,8 +186,23 @@ export class SearchResultValidator {
   private static isValidUrl(url: string): boolean {
     if (!url) return false;
     
-    const urlPattern = /^(https?:\/\/)?([\w-]+\.)+[\w-]+(\/[\w-./?%&=]*)?$/;
-    return urlPattern.test(url);
+    // 宽松的URL验证：支持端口号、IP地址、中文路径等
+    // 仅检查基本合理性：以http://或https://开头，不含空格和控制字符
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return false;
+    }
+    
+    // 不允许包含空格和控制字符
+    if (/[\s\x00-\x1F\x7F]/.test(url)) {
+      return false;
+    }
+    
+    // 长度合理性检查
+    if (url.length < 10 || url.length > 8192) {
+      return false;
+    }
+    
+    return true;
   }
 
   private static validateAdditionalFields(book: Book): boolean {

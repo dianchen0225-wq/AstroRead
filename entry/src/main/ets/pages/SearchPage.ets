@@ -51,6 +51,10 @@ export struct SearchPage {
   private bookSources: BookSource[] = [];
   private isComponentActive: boolean = false;
   private allSearchResults: Book[] = [];
+  private duplicateKeySet: Set<string> | null = null;
+  private lastSearchTimestamp: number = 0;
+  private readonly SEARCH_DEBOUNCE_MS: number = 500;
+  private readonly MAX_RESULTS: number = 300;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -98,23 +102,20 @@ export struct SearchPage {
   }
 
   private addBookToArray(arr: Book[], book: Book): Book[] {
-    const newArr: Book[] = [];
-    for (let i = 0; i < arr.length; i++) {
-      newArr.push(arr[i]);
+    if (arr.length >= this.MAX_RESULTS) {
+      return arr;
     }
-    newArr.push(book);
-    return newArr;
+    return arr.concat([book]);
   }
 
   private mergeBookArrays(arr1: Book[], arr2: Book[]): Book[] {
-    const result: Book[] = [];
-    for (let i = 0; i < arr1.length; i++) {
-      result.push(arr1[i]);
+    if (arr1.length >= this.MAX_RESULTS) {
+      return arr1;
     }
-    for (let i = 0; i < arr2.length; i++) {
-      result.push(arr2[i]);
-    }
-    return result;
+    const merged = arr1.concat(arr2);
+    return merged.length > this.MAX_RESULTS
+      ? merged.slice(0, this.MAX_RESULTS)
+      : merged;
   }
 
   private updateBookStatus(book: Book, status: SourceStatus): Book {
@@ -158,6 +159,14 @@ export struct SearchPage {
       return;
     }
 
+    // 防抖保护：防止快速重复点击
+    const now = Date.now();
+    if (now - this.lastSearchTimestamp < this.SEARCH_DEBOUNCE_MS) {
+      Logger.debug('SearchPage', '搜索请求被防抖阻止');
+      return;
+    }
+    this.lastSearchTimestamp = now;
+
     this.isSearching = true;
     this.hasSearched = true;
     this.errorMessage = '';
@@ -168,6 +177,7 @@ export struct SearchPage {
     if (page === 1) {
       this.searchResults = [];
       this.currentPage = 1;
+      this.duplicateKeySet = null;
     }
 
     try {
@@ -197,23 +207,22 @@ export struct SearchPage {
 
       const bookFoundCallback = (newBooks: Book[], _progress: SearchProgress): void => {
         if (this.isComponentActive && page === 1 && newBooks && newBooks.length > 0) {
-          for (const book of newBooks) {
-            if (!book) continue;
+          // 使用 Set 进行 O(1) 去重查找，替代原来的 O(n²) 遍历
+          if (!this.duplicateKeySet) {
+            this.duplicateKeySet = new Set<string>();
+            for (const b of this.searchResults) {
+              this.duplicateKeySet.add(`${b.name}_${b.author ?? ''}_${b.bookSourceId ?? ''}`);
+            }
+          }
 
-            const exists = this.searchResults.some(b => {
-              if (!b || !book) return false;
-              if (b.bookSourceId && book.bookSourceId) {
-                return b.name === book.name &&
-                       (b.author ?? '') === (book.author ?? '') &&
-                       b.bookSourceId === book.bookSourceId;
-              }
-              if (b.bookUrl && book.bookUrl) {
-                return b.bookUrl === book.bookUrl;
-              }
-              return b.name === book.name && (b.author ?? '') === (book.author ?? '');
-            });
-            if (!exists) {
+          let added = 0;
+          for (const book of newBooks) {
+            if (!book || this.searchResults.length >= this.MAX_RESULTS) break;
+            const key = `${book.name}_${book.author ?? ''}_${book.bookSourceId ?? ''}`;
+            if (!this.duplicateKeySet.has(key)) {
+              this.duplicateKeySet.add(key);
               this.searchResults = this.addBookToArray(this.searchResults, book);
+              added++;
             }
           }
           this.foundBooksCount = this.searchResults.length;
@@ -378,7 +387,6 @@ export struct SearchPage {
 
   private async openBook(book: Book): Promise<void> {
     try {
-      await this.addToBookshelf(book);
       const params: NavParams = { bookId: book.id };
       NavigationManager.getInstance().navigateTo('BookDetailPage', params);
     } catch (error) {

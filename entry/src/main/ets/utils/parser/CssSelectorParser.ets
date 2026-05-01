@@ -936,11 +936,13 @@ export class CssSelectorParser {
       let pattern: string;
 
       if (attrCondition) {
-        // 处理 @class="value" 或 contains(@class,"value")
         const attrMatch = attrCondition.match(/@([a-zA-Z-]+)=["']([^"']*)["']/);
         const containsMatch = attrCondition.match(/contains\s*\(\s*@([a-zA-Z-]+)\s*,\s*["']([^"']*)["']\s*\)/);
+        const startsWithMatch = attrCondition.match(/starts-with\s*\(\s*@([a-zA-Z-]+)\s*,\s*["']([^"']*)["']\s*\)/);
+        const positionMatch = attrCondition.match(/position\s*\(\s*\)\s*=\s*(\d+)/);
+        const lastMatch = attrCondition.match(/last\s*\(\s*\)/);
         
-        Logger.debug(CssSelectorParser.TAG, `属性匹配 - attrMatch: ${attrMatch ? '是' : '否'}, containsMatch: ${containsMatch ? '是' : '否'}`);
+        Logger.debug(CssSelectorParser.TAG, `属性匹配 - attr:${!!attrMatch}, contains:${!!containsMatch}, startsWith:${!!startsWithMatch}, position:${!!positionMatch}, last:${!!lastMatch}`);
         
         if (attrMatch) {
           const attrName = attrMatch[1];
@@ -959,6 +961,29 @@ export class CssSelectorParser {
             pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*${CssSelectorParser.escapeRegex(attrName)}=["'][^"']*${CssSelectorParser.escapeRegex(attrValue)}[^"']*["'][^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
           } else {
             pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*${CssSelectorParser.escapeRegex(attrName)}=["'][^"']*${CssSelectorParser.escapeRegex(attrValue)}[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
+          }
+        } else if (startsWithMatch) {
+          const attrName = startsWithMatch[1];
+          const attrValue = startsWithMatch[2];
+
+          if (tagName) {
+            pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*${CssSelectorParser.escapeRegex(attrName)}=["']${CssSelectorParser.escapeRegex(attrValue)}[^"']*["'][^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
+          } else {
+            pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*${CssSelectorParser.escapeRegex(attrName)}=["']${CssSelectorParser.escapeRegex(attrValue)}[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
+          }
+        } else if (positionMatch) {
+          index = parseInt(positionMatch[1], 10) - 1;
+          if (tagName) {
+            pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
+          } else {
+            pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*>([\\s\\S]*?)<\\/\\1>`;
+          }
+        } else if (lastMatch) {
+          index = -2; // -2 表示需要取最后一个
+          if (tagName) {
+            pattern = `<${CssSelectorParser.escapeRegex(tagName)}[^>]*>([\\s\\S]*?)<\\/${CssSelectorParser.escapeRegex(tagName)}>`;
+          } else {
+            pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*>([\\s\\S]*?)<\\/\\1>`;
           }
         } else {
           // 其他条件，使用通用匹配
@@ -983,7 +1008,13 @@ export class CssSelectorParser {
       }
 
       // 处理索引
-      if (index >= 0 && index < elements.length) {
+      if (index === -2) {
+        // last() - 返回最后一个元素
+        if (elements.length > 0) {
+          return [elements[elements.length - 1]];
+        }
+        return [];
+      } else if (index >= 0 && index < elements.length) {
         return [elements[index]];
       }
     } catch (error) {

@@ -136,6 +136,54 @@ interface RuleParseResult {
 
 export class BookSourceSearchEngine implements ISearchEngine {
   private static instance: BookSourceSearchEngine | null = null;
+
+  // 静态通用选择器缓存 - 避免每次调用时重新创建 Map
+  private static GENERIC_SELECTORS: Map<string, string[]> = new Map([
+    ['name', [
+      'h1 a', 'h2 a', 'h3 a', 'h4 a',
+      '.title a', '.book-name a', '.name a',
+      'h1', 'h2', 'h3', 'h4',
+      '.title', '.book-name', '.name', '.book-title',
+      '[class*="title"] a', '[class*="name"] a',
+      'a[href*="book"]', 'a[href*="novel"]',
+      '.book-item a', '.search-item a', '.list-item a'
+    ]],
+    ['author', [
+      '.author', '.writer', '.pen-name',
+      '[class*="author"]', '[class*="writer"]',
+      '.book-author', '.book-writer',
+      'span[class*="author"]', 'em[class*="author"]',
+      '.info .author', '.meta .author'
+    ]],
+    ['cover', [
+      'img[src*="cover"]', 'img[class*="cover"]',
+      'img[class*="book"]', '.book-img img',
+      '.cover img', 'img:first-child',
+      'img[data-src]', 'img[src*="img"]'
+    ]],
+    ['intro', [
+      '.intro', '.summary', '.description', '.brief',
+      '[class*="intro"]', '[class*="summary"]', '[class*="desc"]',
+      '.book-intro', '.book-summary', '.content-intro',
+      'p[class*="intro"]', 'div[class*="intro"]'
+    ]],
+    ['bookUrl', [
+      'a[href*="book"]', 'a[href*="novel"]', 'a[href*="read"]',
+      'h1 a', 'h2 a', 'h3 a', '.title a',
+      'a:first-child', '.book-item a', '.search-item a'
+    ]],
+    ['latestChapter', [
+      '.latest', '.last-chapter', '.new-chapter',
+      '[class*="latest"]', '[class*="last"]',
+      '.update', '.recent', '.newest'
+    ]],
+    ['wordCount', [
+      '.word-count', '.words', '.length',
+      '[class*="word"]', '[class*="count"]',
+      '.size', '.total', '.words-num'
+    ]]
+  ]);
+
   private htmlParser: HTMLParser;
   private jsEngine: EnhancedJSEngine;
   private asyncCssSelectorParser: AsyncCssSelectorParser;
@@ -233,6 +281,13 @@ export class BookSourceSearchEngine implements ISearchEngine {
   cancelSearch(): void {
     this.isCancelled = true;
     this.clearAllTimers();
+    Logger.info(this.TAG, '搜索已取消');
+  }
+
+  clearCache(): void {
+    searchCache.clearAll();
+    this.requestTimestamps.clear();
+    Logger.info(this.TAG, '搜索缓存已清除');
   }
 
   /**
@@ -332,6 +387,42 @@ export class BookSourceSearchEngine implements ISearchEngine {
 
     Logger.info(this.TAG, `开始渐进式搜索: "${searchKey}", 书源数: ${sortedSources.length}, 每页: ${pageSize}`);
 
+    let lastProgressUpdate = 0;
+    const THROTTLE_MS = 300;
+
+    const throttledProgressCallback = progressCallback ? (p: SearchProgress) => {
+      const now = Date.now();
+      if (now - lastProgressUpdate >= THROTTLE_MS || p.isComplete) {
+        lastProgressUpdate = now;
+        progressCallback(p);
+      }
+    } : undefined;
+
+    // 聚合缓存检查：如果所有请求的书源结果已缓存，直接返回
+    if (this.config.enableCache) {
+      const sourceIds = sortedSources.map((s: BookSource) => s.id);
+      const cachedBooks = searchCache.get(searchKey, sourceIds);
+      if (cachedBooks && cachedBooks.length > 0) {
+        Logger.info(this.TAG, `聚合缓存命中: ${cachedBooks.length} 本书`);
+        for (const book of cachedBooks) {
+          resultBuilder.addBook(book);
+        }
+        const cachedResult = resultBuilder.build(displayPage);
+        cachedResult.cacheHit = true;
+        if (throttledProgressCallback) {
+          throttledProgressCallback({
+            totalSources: sortedSources.length,
+            completedSources: sortedSources.length,
+            currentSource: '',
+            foundBooks: cachedBooks.length,
+            isComplete: true,
+            newBooks: cachedBooks
+          });
+        }
+        return cachedResult;
+      }
+    }
+
     const progress: SearchProgress = {
       totalSources: sortedSources.length,
       completedSources: 0,
@@ -343,16 +434,6 @@ export class BookSourceSearchEngine implements ISearchEngine {
 
     const startTime = Date.now();
     let shouldStop = false;
-    let lastProgressUpdate = 0;
-    const THROTTLE_MS = 300;
-
-    const throttledProgressCallback = progressCallback ? (p: SearchProgress) => {
-      const now = Date.now();
-      if (now - lastProgressUpdate >= THROTTLE_MS || p.isComplete) {
-        lastProgressUpdate = now;
-        progressCallback(p);
-      }
-    } : undefined;
 
     const checkStopCondition = (): boolean => {
       const elapsed = Date.now() - startTime;
@@ -483,6 +564,16 @@ export class BookSourceSearchEngine implements ISearchEngine {
 
     const pagedResult = resultBuilder.build(displayPage);
 
+    // 保存聚合搜索结果到缓存
+    if (this.config.enableCache && pagedResult.totalCount > 0) {
+      const allBooks = resultBuilder.getAllBooks();
+      if (allBooks.length > 0) {
+        const sourceIds = sortedSources.map((s: BookSource) => s.id);
+        searchCache.set(searchKey, sourceIds, allBooks);
+        Logger.debug(this.TAG, `聚合搜索结果已缓存: ${allBooks.length} 本书`);
+      }
+    }
+
     Logger.info(this.TAG, 
       `渐进式搜索完成: 共${pagedResult.totalCount}本书, ` +
       `第${pagedResult.currentPage}/${pagedResult.totalPages}页, ` +
@@ -572,7 +663,7 @@ export class BookSourceSearchEngine implements ISearchEngine {
   }
 
   /**
-   * 在单个书源中搜索
+   * 在单个书源中搜索（含缓存）
    */
   async searchSingleSource(
     source: BookSource,
@@ -584,6 +675,32 @@ export class BookSourceSearchEngine implements ISearchEngine {
     try {
       Logger.debug(this.TAG, `开始搜索: ${source.name}, 关键词: ${key}`);
 
+      // 搜索结果缓存检查（仅第1页使用缓存）
+      if (page === 1 && this.config.enableCache) {
+        const cachedBooks = searchCache.get(key, [source.id]);
+        if (cachedBooks && cachedBooks.length > 0) {
+          Logger.info(this.TAG, `搜索缓存命中: ${source.name}, ${cachedBooks.length} 本书`);
+          return {
+            books: cachedBooks.slice(0, this.config.maxResultsPerSource),
+            sourceName: source.name,
+            sourceUrl: source.url,
+            success: true,
+            responseTime: Date.now() - startTime
+          };
+        }
+      }
+
+      if (this.isCancelled) {
+        return {
+          books: [],
+          sourceName: source.name,
+          sourceUrl: source.url,
+          success: false,
+          error: '搜索已取消',
+          responseTime: 0
+        };
+      }
+
       const urlConfig = await this.buildSearchUrlWithConfig(source, key, page);
       if (!urlConfig.url) {
         throw new Error('无法构建搜索 URL');
@@ -591,9 +708,25 @@ export class BookSourceSearchEngine implements ISearchEngine {
 
       const html = await this.executeSearchRequestWithConfig(source, urlConfig);
 
+      if (this.isCancelled) {
+        return {
+          books: [],
+          sourceName: source.name,
+          sourceUrl: source.url,
+          success: false,
+          error: '搜索已取消',
+          responseTime: Date.now() - startTime
+        };
+      }
+
       const books = await this.parseSearchResults(source, html, key);
 
       const responseTime = Date.now() - startTime;
+
+      // 更新搜索结果缓存
+      if (page === 1 && this.config.enableCache && books.length > 0) {
+        searchCache.set(key, [source.id], books);
+      }
 
       return {
         books: books.slice(0, this.config.maxResultsPerSource),
@@ -677,14 +810,24 @@ export class BookSourceSearchEngine implements ISearchEngine {
       try {
         const urlPart = searchUrl.substring(0, commaIndex);
         const configPart = searchUrl.substring(commaIndex + 1);
-        const parsedConfig = this.parseUrlConfig(configPart, config.headers);
-        searchUrl = urlPart;
-        config.method = parsedConfig.method;
-        config.body = parsedConfig.body;
-        config.headers = parsedConfig.headers;
-        Logger.debug(this.TAG, `从URL中提取配置，方法: ${config.method}`);
+        const parsedConfig = JSON.parse(configPart) as Record<string, string | number | boolean | object | null | undefined>;
+        
+        // 验证解析结果是否为有效的URL配置（必须包含method/body/headers中至少一个）
+        const hasConfigField = parsedConfig.method !== undefined ||
+                               parsedConfig.body !== undefined ||
+                               parsedConfig.headers !== undefined;
+        
+        if (hasConfigField) {
+          searchUrl = urlPart;
+          config.method = this.parseUrlConfig(configPart, config.headers).method;
+          config.body = this.parseUrlConfig(configPart, config.headers).body;
+          config.headers = this.parseUrlConfig(configPart, config.headers).headers;
+          Logger.debug(this.TAG, `从URL中提取配置，方法: ${config.method}`);
+        } else {
+          Logger.debug(this.TAG, `URL中的,{...}不包含有效配置字段，视为URL一部分`);
+        }
       } catch {
-        Logger.warn(this.TAG, 'URL配置解析失败');
+        Logger.debug(this.TAG, `URL中的,{...}不是合法JSON，视为URL一部分`);
       }
     }
 
@@ -729,7 +872,7 @@ export class BookSourceSearchEngine implements ISearchEngine {
 
   /**
    * 编码搜索关键词 - 用于URL路径或查询参数
-   * 保留中文字符，只编码特殊字符，空格转为+号
+   * 使用标准encodeURIComponent编码，空格转为+号
    */
   private encodeSearchKeyword(keyword: string): string {
     if (!keyword) {
@@ -737,41 +880,23 @@ export class BookSourceSearchEngine implements ISearchEngine {
     }
 
     try {
-      // 先进行标准encodeURIComponent编码
+      // 使用标准encodeURIComponent编码，保持中文字符的URL编码格式
+      // 大多数服务器期望接收URL编码后的中文（如%E4%B8%AD）
       let encoded = encodeURIComponent(keyword);
 
-      // 解码中文字符（Unicode范围：\u4e00-\u9fa5）
-      // 同时保留已编码的特殊字符
-      encoded = encoded.replace(/%([0-9A-Fa-f]{2})/g, (match: string, hex: string): string => {
-        const code = parseInt(hex, 16);
-        // 中文字符范围：0x4E00-0x9FA5 (CJK统一汉字)
-        // 中文标点：0x3000-0x303F
-        // 全角字符：0xFF00-0xFFEF
-        if ((code >= 0x4E00 && code <= 0x9FA5) ||
-            (code >= 0x3000 && code <= 0x303F) ||
-            (code >= 0xFF00 && code <= 0xFFEF) ||
-            (code >= 0x3400 && code <= 0x4DBF) || // CJK扩展A
-            (code >= 0x20000 && code <= 0x2A6DF)) { // CJK扩展B
-          return String.fromCharCode(code);
-        }
-        // 空格转为+号
-        if (code === 0x20) {
-          return '+';
-        }
-        return match; // 保持其他字符编码
-      });
+      // 空格转为+号（application/x-www-form-urlencoded约定）
+      encoded = encoded.replace(/%20/g, '+');
 
       return encoded;
     } catch (error) {
       Logger.warn(this.TAG, `编码搜索关键词失败: ${error}，使用原始值`);
-      // 失败时进行简单替换
       return keyword.replace(/ /g, '+');
     }
   }
 
   /**
    * 编码表单数据 - 用于POST body (application/x-www-form-urlencoded)
-   * 保留中文字符，空格转为+号，特殊字符编码
+   * 使用标准encodeURIComponent编码，空格转为+号
    */
   private encodeFormData(value: string): string {
     if (!value) {
@@ -779,26 +904,11 @@ export class BookSourceSearchEngine implements ISearchEngine {
     }
 
     try {
-      // 对于表单数据，使用类似的编码策略
+      // 使用标准encodeURIComponent编码，保持与encodeSearchKeyword一致的策略
       let encoded = encodeURIComponent(value);
 
-      // 解码中文字符
-      encoded = encoded.replace(/%([0-9A-Fa-f]{2})/g, (match: string, hex: string): string => {
-        const code = parseInt(hex, 16);
-        // 中文字符和常见Unicode字符
-        if ((code >= 0x4E00 && code <= 0x9FA5) ||
-            (code >= 0x3000 && code <= 0x303F) ||
-            (code >= 0xFF00 && code <= 0xFFEF) ||
-            (code >= 0x3400 && code <= 0x4DBF) ||
-            (code >= 0x20000 && code <= 0x2A6DF)) {
-          return String.fromCharCode(code);
-        }
-        // 空格转为+号
-        if (code === 0x20) {
-          return '+';
-        }
-        return match;
-      });
+      // 空格转为+号
+      encoded = encoded.replace(/%20/g, '+');
 
       return encoded;
     } catch (error) {
@@ -909,16 +1019,38 @@ export class BookSourceSearchEngine implements ISearchEngine {
   ): Promise<string> {
     const url = urlConfig.url;
     const config = urlConfig.config;
+    const timeout: number = this.config.timeout;
 
-    Logger.info(this.TAG, `执行请求: ${source.name}, URL: ${url}, 方法: ${config.method}`);
+    Logger.info(this.TAG, `执行请求: ${source.name}, URL: ${url}, 方法: ${config.method}, 超时: ${timeout}ms`);
 
     try {
       let result: string;
-      if (config.method === 'POST') {
-        result = await NetworkAdapter.post(url, config.body || '', config.headers);
+
+      if (timeout > 0) {
+        const timeoutPromise = new Promise<string>((_resolve, reject) => {
+          const timerId = setTimeout(() => {
+            this.pendingTimers.delete(timerId);
+            reject(new Error(`请求超时: ${timeout}ms`));
+          }, timeout);
+          this.pendingTimers.add(timerId);
+        });
+
+        let networkPromise: Promise<string>;
+        if (config.method === 'POST') {
+          networkPromise = NetworkAdapter.post(url, config.body || '', config.headers);
+        } else {
+          networkPromise = NetworkAdapter.get(url, config.headers);
+        }
+
+        result = await Promise.race([networkPromise, timeoutPromise]);
       } else {
-        result = await NetworkAdapter.get(url, config.headers);
+        if (config.method === 'POST') {
+          result = await NetworkAdapter.post(url, config.body || '', config.headers);
+        } else {
+          result = await NetworkAdapter.get(url, config.headers);
+        }
       }
+
       Logger.info(this.TAG, `请求成功: ${source.name}, 响应长度: ${result.length}`);
       Logger.debug(this.TAG, `响应内容片段[${source.name}]: ${result.substring(0, 1000)}`);
       return result;
@@ -1090,55 +1222,10 @@ export class BookSourceSearchEngine implements ISearchEngine {
   }
 
   /**
-   * 获取通用选择器 - 用于降级解析
+   * 获取通用选择器 - 从静态缓存中获取，避免重复创建Map
    */
   private getGenericSelectors(fieldName: string): string[] {
-    const selectors: Map<string, string[]> = new Map([
-      ['name', [
-        'h1 a', 'h2 a', 'h3 a', 'h4 a',
-        '.title a', '.book-name a', '.name a',
-        'h1', 'h2', 'h3', 'h4',
-        '.title', '.book-name', '.name', '.book-title',
-        '[class*="title"] a', '[class*="name"] a',
-        'a[href*="book"]', 'a[href*="novel"]',
-        '.book-item a', '.search-item a', '.list-item a'
-      ]],
-      ['author', [
-        '.author', '.writer', '.pen-name',
-        '[class*="author"]', '[class*="writer"]',
-        '.book-author', '.book-writer',
-        'span[class*="author"]', 'em[class*="author"]',
-        '.info .author', '.meta .author'
-      ]],
-      ['cover', [
-        'img[src*="cover"]', 'img[class*="cover"]',
-        'img[class*="book"]', '.book-img img',
-        '.cover img', 'img:first-child',
-        'img[data-src]', 'img[src*="img"]'
-      ]],
-      ['intro', [
-        '.intro', '.summary', '.description', '.brief',
-        '[class*="intro"]', '[class*="summary"]', '[class*="desc"]',
-        '.book-intro', '.book-summary', '.content-intro',
-        'p[class*="intro"]', 'div[class*="intro"]'
-      ]],
-      ['bookUrl', [
-        'a[href*="book"]', 'a[href*="novel"]', 'a[href*="read"]',
-        'h1 a', 'h2 a', 'h3 a', '.title a',
-        'a:first-child', '.book-item a', '.search-item a'
-      ]],
-      ['latestChapter', [
-        '.latest', '.last-chapter', '.new-chapter',
-        '[class*="latest"]', '[class*="last"]',
-        '.update', '.recent', '.newest'
-      ]],
-      ['wordCount', [
-        '.word-count', '.words', '.length',
-        '[class*="word"]', '[class*="count"]',
-        '.size', '.total', '.words-num'
-      ]]
-    ]);
-    return selectors.get(fieldName) || [];
+    return BookSourceSearchEngine.GENERIC_SELECTORS.get(fieldName) || [];
   }
 
   /**
@@ -1969,13 +2056,6 @@ export class BookSourceSearchEngine implements ISearchEngine {
       sortByRelevance: this.paginationConfig.sortByRelevance
     };
     return config;
-  }
-
-  /**
-   * 清除缓存
-   */
-  clearCache(): void {
-    this.requestTimestamps.clear();
   }
 
   // ==================== 输入验证方法 ====================

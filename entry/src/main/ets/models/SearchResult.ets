@@ -13,6 +13,7 @@ export interface PagedSearchResult {
   totalPages: number;
   hasMore: boolean;
   sourceStats: SourceSearchStats[];
+  cacheHit?: boolean;
 }
 
 export interface SourceSearchStats {
@@ -248,6 +249,26 @@ export class SearchResultBuilder {
 
   getTotalCount(): number {
     return this.allBooks.length;
+  }
+
+  addBook(book: Book): void {
+    if (!book.name || book.name.trim().length === 0) {
+      return;
+    }
+    const normalizedName = this.normalizeText(book.name);
+    const normalizedAuthor = this.normalizeText(book.author || '');
+    const key = `${normalizedName}_${normalizedAuthor}`;
+    if (!this.seenKeys.has(key)) {
+      this.seenKeys.add(key);
+      if (!book.author || book.author.trim().length === 0) {
+        book.author = '未知作者';
+      }
+      this.allBooks.push(book);
+    }
+  }
+
+  getAllBooks(): Book[] {
+    return this.allBooks;
   }
 
   getSourceStats(): SourceSearchStats[] {

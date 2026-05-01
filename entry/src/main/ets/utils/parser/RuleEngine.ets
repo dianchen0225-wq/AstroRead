@@ -25,6 +25,10 @@ export class RuleEngine {
     html: ''
   };
 
+  // 正则模式缓存 - 避免重复净化
+  private static regexCache: Map<string, string> = new Map();
+  private static readonly MAX_REGEX_CACHE = 200;
+
   static setContext(context: Partial<RuleContext>): void {
     if (context.variables !== undefined) {
       RuleEngine.context.variables = context.variables;
@@ -48,11 +52,22 @@ export class RuleEngine {
   }
 
   static parseRule(rule: string, html: string): string {
-    if (!rule || !html) {
+    return RuleEngine.parseRuleWithContext(rule, RuleEngine.context, html);
+  }
+
+  /**
+   * 不可变版本：接受显式上下文，不修改全局状态
+   * 推荐新代码使用此方法以避免并发问题
+   */
+  static parseRuleWithContext(rule: string, context: RuleContext, html?: string): string {
+    if (!rule) {
       return '';
     }
 
-    RuleEngine.context.html = html;
+    const actualHtml = html || context.html;
+    if (!actualHtml) {
+      return '';
+    }
 
     let processedRule = rule.trim();
 
@@ -62,26 +77,44 @@ export class RuleEngine {
     }
 
     if (processedRule.startsWith('@json:') || processedRule.includes('$.')) {
-      return RuleEngine.parseJsonRule(html, processedRule);
+      return RuleEngine.parseJsonRule(actualHtml, processedRule);
     }
 
     if (processedRule.startsWith('##') || processedRule.startsWith('@regex:')) {
-      return RuleEngine.parseRegexRule(html, processedRule);
-    }
-
-    if (processedRule.includes('&&') || processedRule.includes('||')) {
-      return RuleEngine.parseCombinedRule(html, processedRule);
-    }
-
-    if (processedRule.includes('##')) {
-      return RuleEngine.parseRuleWithReplace(html, processedRule);
+      return RuleEngine.parseRegexRule(actualHtml, processedRule);
     }
 
     if (processedRule.includes('@put:') || processedRule.includes('@get:')) {
-      return RuleEngine.parseVariableRule(html, processedRule);
+      return RuleEngine.parseVariableRule(actualHtml, processedRule);
     }
 
-    return CssSelectorParser.extractValue(html, processedRule);
+    if (RuleEngine.isCombinedRule(processedRule)) {
+      return RuleEngine.parseCombinedRule(actualHtml, processedRule);
+    }
+
+    return CssSelectorParser.extractValue(actualHtml, processedRule);
+  }
+
+  /**
+   * 判断是否为组合规则（|| 或 && 分隔），排除 CSS 选择器内部误判
+   */
+  private static isCombinedRule(rule: string): boolean {
+    if (!rule.includes('||') && !rule.includes('&&')) {
+      return false;
+    }
+    // 如果以 // 开头，说明是 XPath，直接认为是组合规则
+    if (rule.startsWith('//') || rule.startsWith('./')) {
+      return true;
+    }
+    // CSS 选择器如果包含 || 或 &&，可能是误判（如 .class-1||.class-2 实际是或运算）
+    if (rule.includes('||')) {
+      return true;
+    }
+    // 对于 &&，需要排除 CSS 类名中的误判，粗略判断：有空格则为组合规则
+    if (rule.includes('&&') && rule.includes(' ')) {
+      return true;
+    }
+    return false;
   }
 
   static parseRuleList(rule: string, html: string): string[] {
@@ -434,20 +467,18 @@ export class RuleEngine {
         pattern = pattern.substring(7);
       }
 
-      // 验证输入安全性
       if (!SafeRegex.isInputSafe(html)) {
         Logger.warn(RuleEngine.TAG, '输入内容未通过安全检查');
         return '';
       }
 
-      // 净化正则表达式模式
-      const sanitizedPattern: string = SafeRegex.sanitizePattern(pattern);
+      // 使用缓存的净化正则
+      const sanitizedPattern = RuleEngine.getCachedRegex(pattern);
       if (!sanitizedPattern) {
         Logger.warn(RuleEngine.TAG, '正则表达式模式为空或无效');
         return '';
       }
 
-      // 使用安全的匹配方法
       const match: RegExpMatchArray | null = SafeRegex.safeMatch(sanitizedPattern, html, 'gi');
 
       if (match) {
@@ -470,20 +501,17 @@ export class RuleEngine {
         pattern = pattern.substring(7);
       }
 
-      // 验证输入安全性
       if (!SafeRegex.isInputSafe(html)) {
         Logger.warn(RuleEngine.TAG, '输入内容未通过安全检查');
         return [];
       }
 
-      // 净化正则表达式模式
-      const sanitizedPattern: string = SafeRegex.sanitizePattern(pattern);
+      const sanitizedPattern = RuleEngine.getCachedRegex(pattern);
       if (!sanitizedPattern) {
         Logger.warn(RuleEngine.TAG, '正则表达式模式为空或无效');
         return [];
       }
 
-      // 使用安全的全局匹配方法
       const matches: RegexMatchResult[] = SafeRegex.safeMatchAll(sanitizedPattern, html, 'gi');
       const results: string[] = [];
 
@@ -498,6 +526,31 @@ export class RuleEngine {
       Logger.error(RuleEngine.TAG, `正则规则列表解析失败: ${error}`);
       return [];
     }
+  }
+
+  /**
+   * 获取缓存的正则模式 - 避免重复净化
+   */
+  private static getCachedRegex(pattern: string): string {
+    const cached = RuleEngine.regexCache.get(pattern);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const sanitized = SafeRegex.sanitizePattern(pattern);
+    if (sanitized) {
+      if (RuleEngine.regexCache.size >= RuleEngine.MAX_REGEX_CACHE) {
+        const keysIter: IterableIterator<string> = RuleEngine.regexCache.keys();
+        const firstEntry: IteratorResult<string> = keysIter.next();
+        const firstKey: string | undefined = firstEntry.value;
+        if (firstKey !== undefined) {
+          RuleEngine.regexCache.delete(firstKey);
+        }
+      }
+      RuleEngine.regexCache.set(pattern, sanitized);
+    }
+
+    return sanitized || '';
   }
 
   static parseSearchUrl(searchUrl: string, keyword: string, page: number, baseUrl: string = ''): ParsedUrl {

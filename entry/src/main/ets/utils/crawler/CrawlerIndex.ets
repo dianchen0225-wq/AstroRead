@@ -3,3 +3,11 @@ export { RequestThrottler, ThrottleConfig, DomainStats, ThrottleResult } from ".
 export { DataValidator, ValidationRule, ValidationResult, CleaningOptions } from "../validation/DataValidator";
 export { CrawlerMonitor, CrawlerLogEntry, CrawlerSession, CrawlerStatistics, AlertConfig, CrawlerAlert } from "./CrawlerMonitor";
 export { CrawlerRequestHandler, CrawlerRequestOptions, CrawlerResponse, BatchRequestOptions, BatchResult } from "./CrawlerRequestHandler";
+export {
+  NovelCrawler,
+  CrawlProgress,
+  CrawlResult,
+  CrawlConfig,
+  CrawlChapterError,
+  CrawlProgressCallback
+} from "./NovelCrawler";

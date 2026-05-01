@@ -136,14 +136,22 @@ export class BookSourceManager {
       // 1. 如果是 URL，先获取内容
       if (input.startsWith('http')) {
         const httpRequest = http.createHttp();
-        const response = await httpRequest.request(input, {
-          method: http.RequestMethod.GET,
-          header: {
-            'User-Agent': 'Mozilla/5.0'
-          }
-        });
-        input = response.result as string;
-        httpRequest.destroy();
+        try {
+          const response = await httpRequest.request(input, {
+            method: http.RequestMethod.GET,
+            header: {
+              'User-Agent': 'Mozilla/5.0'
+            },
+            connectTimeout: 15000,
+            readTimeout: 30000
+          });
+          input = response.result as string;
+        } catch (httpError) {
+          Logger.error(this.TAG, `获取书源URL失败: ${httpError instanceof Error ? httpError.message : String(httpError)}`);
+          return [];
+        } finally {
+          httpRequest.destroy();
+        }
       }
 
       // 2. 尝试解析为 JSON
@@ -313,7 +321,7 @@ export class BookSourceManager {
    * 生成唯一 ID
    */
   private generateId(): string {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    return Date.now().toString(36) + Math.random().toString(36).substring(2);
   }
 
   /**
@@ -357,8 +365,10 @@ export class BookSourceManager {
       }
     }
 
-    if (!source.legacy.searchUrl || source.legacy.searchUrl.trim().length === 0) {
+    if (source.legacy?.searchUrl && source.legacy.searchUrl.trim().length === 0) {
       errors.push('搜索URL不能为空');
+    } else if (!source.legacy?.searchUrl) {
+      errors.push('搜索URL未配置');
     }
 
     if (!source.rules.searchRule) {
@@ -388,10 +398,97 @@ export class BookSourceManager {
       }
     }
 
+    // 规则语法校验
+    this.validateRuleSyntax(source, errors);
+
     return {
       valid: errors.length === 0,
       errors
     };
+  }
+
+  /**
+   * 验证规则表达式语法
+   */
+  private validateRuleSyntax(source: BookSource, errors: string[]): void {
+    const searchRule = source.rules.searchRule;
+    const tocRule = source.rules.tocRule;
+    const contentRule = source.rules.contentRule;
+
+    // 验证搜索规则字段
+    if (searchRule) {
+      this.checkRuleExpression(searchRule.bookList, '搜索规则 bookList', errors);
+      this.checkRuleExpression(searchRule.name, '搜索规则 name', errors);
+      if (searchRule.author) this.checkRuleExpression(searchRule.author, '搜索规则 author', errors);
+      if (searchRule.cover) this.checkRuleExpression(searchRule.cover, '搜索规则 cover', errors);
+      if (searchRule.intro) this.checkRuleExpression(searchRule.intro, '搜索规则 intro', errors);
+      if (searchRule.bookUrl) this.checkRuleExpression(searchRule.bookUrl, '搜索规则 bookUrl', errors);
+    }
+
+    if (tocRule) {
+      this.checkRuleExpression(tocRule.chapterList, '目录规则 chapterList', errors);
+      if (tocRule.chapterName) this.checkRuleExpression(tocRule.chapterName, '目录规则 chapterName', errors);
+      if (tocRule.chapterUrl) this.checkRuleExpression(tocRule.chapterUrl, '目录规则 chapterUrl', errors);
+      if (tocRule.isVip) this.checkRuleExpression(tocRule.isVip, '目录规则 isVip', errors);
+      if (tocRule.nextUrl) this.checkRuleExpression(tocRule.nextUrl, '目录规则 nextUrl', errors);
+    }
+
+    if (contentRule) {
+      this.checkRuleExpression(contentRule.content, '内容规则 content', errors);
+      if (contentRule.nextUrl) this.checkRuleExpression(contentRule.nextUrl, '内容规则 nextUrl', errors);
+      if (contentRule.replaceRule) this.checkRegexReplaceRule(contentRule.replaceRule, '内容规则 replaceRule', errors);
+    }
+  }
+
+  /**
+   * 检查单条规则表达式语法
+   */
+  private checkRuleExpression(rule: string, fieldName: string, errors: string[]): void {
+    if (!rule || rule.trim().length === 0) return;
+
+    const trimmed = rule.trim();
+
+    if (trimmed.startsWith('##')) {
+      // Regex规则：尝试编译
+      try {
+        const pattern = trimmed.substring(2);
+        new RegExp(pattern);
+      } catch (e) {
+        errors.push(`${fieldName} 正则表达式语法错误: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    } else if (trimmed.startsWith('//') || trimmed.startsWith('./')) {
+      // XPath规则：基础检查
+      if (trimmed.includes('[unclosed')) {
+        errors.push(`${fieldName} XPath表达式括号未闭合`);
+      }
+    } else if (trimmed.startsWith('$') || trimmed.includes('$.')) {
+      // JSONPath规则：基础检查
+      if (trimmed.includes('{') || trimmed.includes('}')) {
+        errors.push(`${fieldName} JSONPath表达式可能包含非法字符`);
+      }
+    }
+    // CSS选择器规则不做语法校验（太复杂，依赖运行时）
+  }
+
+  /**
+   * 检查正则替换规则语法
+   */
+  private checkRegexReplaceRule(rule: string, fieldName: string, errors: string[]): void {
+    if (!rule) return;
+
+    try {
+      // replaceRegex 可能是JSON数组或单个正则字符串
+      if (rule.startsWith('[')) {
+        const parsed = JSON.parse(rule) as string[];
+        if (!Array.isArray(parsed)) {
+          errors.push(`${fieldName} 必须是JSON数组格式`);
+        }
+      } else {
+        new RegExp(rule);
+      }
+    } catch (e) {
+      errors.push(`${fieldName} 正则替换规则语法错误: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   /**

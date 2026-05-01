@@ -4,6 +4,7 @@
  */
 
 import { http } from '@kit.NetworkKit';
+import { util } from '@kit.ArkTS';
 import { Logger } from "../performance/Logger";
 
 export enum NetworkType {
@@ -275,7 +276,11 @@ export class NetworkAdapter {
       httpRequest.request(url, requestOptions, (err: Error | null, data: http.HttpResponse) => {
         if (!err && data) {
           const responseCode = data.responseCode;
-          const result = data.result.toString();
+          let result = data.result.toString();
+          
+          // 编码检测与转码：处理GBK等非UTF-8编码的响应
+          result = this.detectAndConvertEncoding(result, data, options.charset);
+          
           Logger.debug(this.TAG, `请求完成: ${url}, 状态码: ${responseCode}, 响应长度: ${result.length}`);
           
           if (responseCode >= 200 && responseCode < 300) {
@@ -343,6 +348,105 @@ export class NetworkAdapter {
         httpRequest.destroy();
       });
     });
+  }
+
+  /**
+   * 检测并转换响应编码
+   * 优先级：1.调用者指定的charset → 2.Content-Type头中的charset → 3.内容特征自动检测
+   */
+  private detectAndConvertEncoding(
+    result: string,
+    data: http.HttpResponse,
+    specifiedCharset?: string
+  ): string {
+    try {
+      // 1. 优先使用调用者指定的charset
+      if (specifiedCharset && specifiedCharset.toLowerCase() !== 'utf-8' && specifiedCharset.toLowerCase() !== 'utf8') {
+        Logger.debug(this.TAG, `使用指定编码: ${specifiedCharset}`);
+        return this.tryDecodeWithCharset(data, specifiedCharset);
+      }
+
+      // 2. 从Content-Type头中提取charset
+      const headers = data.header as Record<string, string>;
+      let contentType = '';
+      if (headers) {
+        // header的key可能大小写不一致
+        const keys = Object.keys(headers);
+        for (const key of keys) {
+          if (key.toLowerCase() === 'content-type') {
+            contentType = headers[key];
+            break;
+          }
+        }
+      }
+      
+      if (contentType) {
+        const charsetMatch = contentType.match(/charset\s*=\s*["']?([^;"'\s]+)/i);
+        if (charsetMatch && charsetMatch[1]) {
+          const charset = charsetMatch[1].toLowerCase();
+          if (charset !== 'utf-8' && charset !== 'utf8') {
+            Logger.debug(this.TAG, `从Content-Type检测到编码: ${charset}`);
+            return this.tryDecodeWithCharset(data, charset);
+          }
+        }
+      }
+
+      // 3. 自动检测：检查是否包含大量UTF-8替换字符（乱码特征）
+      if (this.hasGarbledContent(result)) {
+        Logger.debug(this.TAG, `检测到乱码特征，尝试GBK解码`);
+        const gbkResult = this.tryDecodeWithCharset(data, 'gbk');
+        if (gbkResult && !this.hasGarbledContent(gbkResult)) {
+          return gbkResult;
+        }
+      }
+
+      return result;
+    } catch (error) {
+      Logger.warn(this.TAG, `编码检测转码失败: ${error}，使用原始结果`);
+      return result;
+    }
+  }
+
+  /**
+   * 检查内容是否包含乱码特征（大量UTF-8替换字符U+FFFD）
+   */
+  private hasGarbledContent(text: string): boolean {
+    if (!text || text.length < 100) {
+      return false;
+    }
+    // 统计替换字符出现频率
+    let replacementCount = 0;
+    const sampleLength = Math.min(text.length, 2000);
+    for (let i = 0; i < sampleLength; i++) {
+      if (text.charCodeAt(i) === 0xFFFD) {
+        replacementCount++;
+      }
+    }
+    // 如果替换字符占比超过5%，认为是乱码
+    const ratio = replacementCount / sampleLength;
+    return ratio > 0.05;
+  }
+
+  /**
+   * 尝试使用指定编码重新解码响应
+   */
+  private tryDecodeWithCharset(data: http.HttpResponse, charset: string): string {
+    try {
+      // 鸿蒙的HttpResponse.result可能是string或Object
+      // 对于非UTF-8编码，需要将result作为ArrayBuffer获取后重新解码
+      const resultData = data.result;
+      if (resultData instanceof ArrayBuffer) {
+        const textDecoder = util.TextDecoder.create(charset, { fatal: false, ignoreBOM: true });
+        const decoded = textDecoder.decodeToString(new Uint8Array(resultData));
+        return decoded;
+      }
+      // 如果result不是ArrayBuffer（已经是string），无法重新解码
+      Logger.debug(this.TAG, `响应result非ArrayBuffer，无法用${charset}重新解码`);
+      return data.result.toString();
+    } catch (error) {
+      Logger.warn(this.TAG, `使用${charset}解码失败: ${error}`);
+      return data.result.toString();
+    }
   }
 
   parseNetworkError(errorMsg: string): NetworkError {
