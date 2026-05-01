@@ -8,8 +8,11 @@ import { HTMLParser, ParseResult } from '../utils/parser/HTMLParser';
 import { ContentParser, ParsedBookItem, ParsedChapterItem, ReplaceRuleConfig } from '../utils/parser/ContentParser';
 import { RuleEngine, RuleContext, ParsedUrl } from '../utils/parser/RuleEngine';
 import { BookSourceManager, SearchBooksResult } from '../utils/validation/BookSourceManager';
-import { BookSourceSearchEngine, SearchOptions, SearchResult, SearchConfig } from '../utils/search/BookSourceSearchEngine';
+import { BookSourceSearchEngine, SearchOptions, SearchResult } from '../utils/search/BookSourceSearchEngine';
+import { SearchEngineConfig } from '../core/interfaces/ISearchEngine';
 import NetworkAdapter, { NetworkRequestOptions } from '../utils/network/NetworkAdapter';
+import { NovelCrawler, CrawlProgress, CrawlResult, CrawlConfig, CrawlProgressCallback, CrawlChapterError, ChapterListResult, SpecificDownloadResult } from '../utils/crawler/NovelCrawler';
+import { Book, Chapter, ChapterContent } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { DebugResult, ValidationResult } from '../utils/validation/BookSourceDebugger';
 
@@ -19,11 +22,13 @@ export class AstroReadFacade {
   private htmlParser: HTMLParser;
   private sourceManager: BookSourceManager;
   private searchEngine: BookSourceSearchEngine;
+  private crawler: NovelCrawler;
 
   private constructor() {
     this.htmlParser = HTMLParser.getInstance();
     this.sourceManager = BookSourceManager.getInstance();
     this.searchEngine = BookSourceSearchEngine.getInstance();
+    this.crawler = NovelCrawler.getInstance();
   }
 
   static getInstance(): AstroReadFacade {
@@ -234,7 +239,7 @@ export class AstroReadFacade {
   /**
    * 设置搜索配置
    */
-  setSearchConfig(config: Partial<SearchConfig>): void {
+  setSearchConfig(config: SearchEngineConfig): void {
     this.searchEngine.setConfig(config);
   }
 
@@ -262,7 +267,7 @@ export class AstroReadFacade {
   }
 
   validateSource(source: BookSource): ValidationResult {
-    return this.sourceManager.validateSource(source);
+    return this.sourceManager.validateSourceWithDebugger(source);
   }
 
   async get(url: string, headers?: Record<string, string>): Promise<string> {
@@ -288,6 +293,77 @@ export class AstroReadFacade {
     NetworkAdapter.removeDefaultHeader(key);
   }
 
+  // ==================== 小说爬取接口 ====================
+
+  /**
+   * 爬取完整书籍（搜索→详情→章节列表→章节内容）
+   */
+  async crawlBook(
+    book: Book,
+    source: BookSource,
+    onProgress?: CrawlProgressCallback
+  ): Promise<CrawlResult> {
+    return this.crawler.crawlBook(book, source, onProgress);
+  }
+
+  /**
+   * 从URL直接爬取小说
+   */
+  async crawlFromUrl(
+    bookUrl: string,
+    bookName: string,
+    source: BookSource,
+    onProgress?: CrawlProgressCallback
+  ): Promise<CrawlResult> {
+    return this.crawler.crawlFromUrl(bookUrl, bookName, source, onProgress);
+  }
+
+  /**
+   * 仅获取章节列表
+   */
+  async fetchChaptersOnly(
+    book: Book,
+    source: BookSource,
+    onProgress?: CrawlProgressCallback
+  ): Promise<ChapterListResult> {
+    return this.crawler.fetchChaptersOnly(book, source, onProgress);
+  }
+
+  /**
+   * 下载指定章节内容
+   */
+  async downloadSpecificChapters(
+    book: Book,
+    source: BookSource,
+    targetChapters: Chapter[],
+    onProgress?: CrawlProgressCallback
+  ): Promise<SpecificDownloadResult> {
+    return this.crawler.downloadSpecificChapters(book, source, targetChapters, onProgress);
+  }
+
+  /**
+   * 取消当前爬取任务
+   */
+  cancelCrawl(): void {
+    this.crawler.cancel();
+  }
+
+  /**
+   * 获取爬取配置
+   */
+  getCrawlerConfig(): CrawlConfig {
+    return this.crawler.getConfig();
+  }
+
+  /**
+   * 设置爬取配置
+   */
+  setCrawlerConfig(config: Partial<CrawlConfig>): void {
+    this.crawler.setConfig(config);
+  }
+
+  // ==================== 清理接口 ====================
+
   cleanText(text: string): string {
     return RuleEngine.cleanText(text);
   }
@@ -296,19 +372,12 @@ export class AstroReadFacade {
     this.sourceManager.clearCache();
     this.searchEngine.clearCache();
     RuleEngine.clearContext();
-    if (this.htmlParser && typeof this.htmlParser.clearCache === 'function') {
-      this.htmlParser.clearCache();
-    }
   }
 
   destroy(): void {
     this.clearCache();
-    if (this.sourceManager && typeof this.sourceManager.destroy === 'function') {
-      this.sourceManager.destroy();
-    }
-    if (this.searchEngine && typeof this.searchEngine.destroy === 'function') {
-      this.searchEngine.destroy();
-    }
+    this.searchEngine.cancelSearch();
+    this.htmlParser = HTMLParser.getInstance();
     AstroReadFacade.instance = null;
   }
 }

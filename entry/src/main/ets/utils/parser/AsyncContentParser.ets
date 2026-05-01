@@ -443,7 +443,20 @@ function parseContentInWorker(params: ContentParseParams): ContentParseResult {
     purified = purified.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
     purified = purified.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
     purified = purified.replace(/<!--[\s\S]*?-->/g, '');
+
+    const IMG_PLACEHOLDER_PREFIX = '___IMG_PLACEHOLDER_';
+    const imgPlaceholders: string[] = [];
+    purified = purified.replace(/<img\s+[^>]*\/?>/gi, (match: string) => {
+      const idx = imgPlaceholders.length;
+      imgPlaceholders.push(match);
+      return IMG_PLACEHOLDER_PREFIX + idx + '___';
+    });
+
     purified = purified.replace(/<[^>]+>/g, '');
+
+    for (let i = 0; i < imgPlaceholders.length; i++) {
+      purified = purified.replace(IMG_PLACEHOLDER_PREFIX + i + '___', imgPlaceholders[i]);
+    }
 
     if (replaceRule) {
       try {

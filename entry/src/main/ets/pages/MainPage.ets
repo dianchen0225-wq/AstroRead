@@ -57,8 +57,9 @@ struct MainPage {
       this.dockVisible = !this.dockVisible;
     }
   };
-  private visibilityHandler: (visibility: UIVisibility) => void = (visibility: UIVisibility) => {
-    this.dockVisible = visibility.dockVisible;
+  private visibilityHandler: (visibility: UIVisibility) => void = (_visibility: UIVisibility) => {
+    // Dock remains by user control only (via swipe gesture)
+    // Immersive UI scroll behavior must not hide the main navigation
   };
 
   private dockItems: DockItem[] = [

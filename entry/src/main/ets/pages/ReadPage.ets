@@ -16,6 +16,9 @@ import { common } from '@kit.AbilityKit';
 import { display } from '@kit.ArkUI';
 import { ReadToolbarOverlay } from '../components/ReadToolbar';
 import { BackButton } from '../components/BackButton';
+import { immersiveUI, UIVisibility } from '../utils/ui/ImmersiveUIManager';
+import { gestureController, GestureEvent } from '../utils/ui/GestureController';
+import { LiquidGlassCard } from '../components/LiquidGlassEffect';
 
 type PageTurnDirection = 'prev' | 'next' | 'none';
 type BackgroundTheme = 'light' | 'dark' | 'eye-care' | 'paper';
@@ -24,6 +27,11 @@ interface ThemeConfig {
   name: string;
   backgroundColor: string;
   textColor: string;
+}
+
+interface ContentSegment {
+  type: 'text' | 'image';
+  value: string;
 }
 
 @Entry
@@ -43,11 +51,18 @@ struct ReadPage {
   @Local showChapterList: boolean = false;
   @Local showMenu: boolean = false;
   @Local showSettings: boolean = false;
+  @Local menuOpacity: number = 0;
+  @Local menuTranslateY: number = 30;
   @Local readConfig: ReadConfig = ReadConfigViewModel.DEFAULT_READ_CONFIG;
   @Local loadError: string = '';
   @Local showRetryCount: number = 0;
   @Local scrollOffset: number = 0;
   @Local maxScrollOffset: number = 0;
+  @Local isProgrammaticScroll: boolean = false;
+
+  private lastScrollY: number = 0;
+  private lastScrollTime: number = 0;
+  private scrollThrottleMs: number = 100;
   @Local pageTurnDirection: PageTurnDirection = 'none';
   @Local pageTurnProgress: number = 0;
   @Local menuShowStartTime: number = 0;
@@ -55,6 +70,7 @@ struct ReadPage {
   @Local isBookmarked: boolean = false;
   @Local isCaching: boolean = false;
   @Local cachedChapterCount: number = 0;
+  @Local contentSegments: ContentSegment[] = [];
 
   private bookSource: BookSource | null = null;
   private readonly themeConfigs: Record<BackgroundTheme, ThemeConfig> = {
@@ -76,11 +92,29 @@ struct ReadPage {
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
+  private immersiveHandler: (visibility: UIVisibility) => void = (visibility: UIVisibility) => {
+    if (!visibility.dockVisible && this.showMenu) {
+      this.hideMenu();
+    }
+  };
+  private gestureHandler: (event: GestureEvent) => void = (event: GestureEvent) => {
+    if (event.type === 'swipe_up_hold' && event.isComplete) {
+      if (this.showMenu) {
+        this.hideMenu();
+      } else {
+        this.showMenuAnimated();
+      }
+    }
+  };
 
   aboutToAppear(): void {
     this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
+
+    immersiveUI.addCallback(this.immersiveHandler);
+    gestureController.addCallback(this.gestureHandler);
+    gestureController.setKioskMode(false);
 
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
@@ -105,6 +139,8 @@ struct ReadPage {
   aboutToDisappear(): void {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
+    immersiveUI.removeCallback(this.immersiveHandler);
+    gestureController.removeCallback(this.gestureHandler);
 
     this.chapterContent = null;
     this.chapters = [];
@@ -114,6 +150,16 @@ struct ReadPage {
     this.chapterLoadOptimizer.clearCache();
     this.animationOptimizer.clearPreRenderCache();
     this.memoryManager.stopMonitoring();
+  }
+
+  private hideMenu(): void {
+    this.showMenu = false;
+    this.menuOpacity = 0;
+  }
+
+  private showMenuAnimated(): void {
+    this.showMenu = true;
+    this.menuOpacity = 1;
   }
 
   async loadReadConfig(): Promise<void> {
@@ -179,6 +225,7 @@ struct ReadPage {
           this.chapterUrl,
           this.bookSource
         );
+        this.contentSegments = this.parseContentSegments(this.chapterContent.content);
         this.showRetryCount = 0;
         this.scroller.scrollToIndex(0);
         this.scrollOffset = 0;
@@ -212,6 +259,51 @@ struct ReadPage {
     } catch (error) {
       Logger.error('ReadPage', `加载书签状态失败: ${error}`);
     }
+  }
+
+  private parseContentSegments(content: string): ContentSegment[] {
+    const segments: ContentSegment[] = [];
+    if (!content) {
+      return segments;
+    }
+
+    const imgRegex = /<img\s+[^>]*\/?>/gi;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = imgRegex.exec(content)) !== null) {
+      const matchIndex = match.index;
+      const imgTag = match[0];
+
+      if (matchIndex > lastIndex) {
+        const textContent = content.substring(lastIndex, matchIndex);
+        if (textContent.trim().length > 0) {
+          segments.push({ type: 'text', value: textContent.trim() });
+        }
+      }
+
+      segments.push({ type: 'image', value: imgTag });
+
+      lastIndex = matchIndex + imgTag.length;
+    }
+
+    if (lastIndex < content.length) {
+      const remaining = content.substring(lastIndex);
+      if (remaining.trim().length > 0) {
+        segments.push({ type: 'text', value: remaining.trim() });
+      }
+    }
+
+    if (segments.length === 0 && content.trim().length > 0) {
+      segments.push({ type: 'text', value: content.trim() });
+    }
+
+    return segments;
+  }
+
+  private extractImageSrc(imgTag: string): string {
+    const srcMatch = imgTag.match(/src=["']([^"']+)["']/i);
+    return srcMatch ? srcMatch[1] : '';
   }
 
   async toggleBookmark(): Promise<void> {
@@ -1080,20 +1172,30 @@ struct ReadPage {
             }
             Scroll(this.scroller) {
               Column() {
-                Text(this.chapterContent.content)
-                  .fontSize(this.readConfig.fontSize)
-                  .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-                  .lineHeight(this.readConfig.fontSize * this.readConfig.lineSpacing)
-                  .width('100%')
-                  .padding({
-                    left: this.readConfig.margins.left,
-                    right: this.readConfig.margins.right,
-                    top: this.readConfig.margins.top,
-                    bottom: this.readConfig.margins.bottom
-                  })
-                  .letterSpacing(this.readConfig.letterSpacing)
+                ForEach(this.contentSegments, (segment: ContentSegment, index: number) => {
+                  if (segment.type === 'text') {
+                    Text(segment.value)
+                      .fontSize(this.readConfig.fontSize)
+                      .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
+                      .lineHeight(this.readConfig.fontSize * this.readConfig.lineSpacing)
+                      .width('100%')
+                      .letterSpacing(this.readConfig.letterSpacing)
+                  } else {
+                    Image(this.extractImageSrc(segment.value))
+                      .objectFit(ImageFit.Contain)
+                      .width('100%')
+                      .constraintSize({ maxHeight: 600 })
+                      .margin({ top: 12, bottom: 12 })
+                  }
+                }, (segment: ContentSegment, index: number) => `${segment.type}_${index}`)
               }
               .width('100%')
+              .padding({
+                left: this.readConfig.margins.left,
+                right: this.readConfig.margins.right,
+                top: this.readConfig.margins.top,
+                bottom: this.readConfig.margins.bottom
+              })
             }
             .width('100%')
             .layoutWeight(1)
@@ -1101,7 +1203,22 @@ struct ReadPage {
             .scrollable(ScrollDirection.Vertical)
             .edgeEffect(EdgeEffect.Spring)
             .onScroll(() => {
-              this.scrollOffset = this.scroller.currentOffset().yOffset;
+              const now = Date.now();
+              if (now - this.lastScrollTime < this.scrollThrottleMs) {
+                return;
+              }
+              this.lastScrollTime = now;
+
+              const currentY = this.scroller.currentOffset().yOffset;
+              this.scrollOffset = currentY;
+
+              // 通知沉浸式UI管理器
+              const scrollDelta = currentY - this.lastScrollY;
+              this.lastScrollY = currentY;
+
+              if (Math.abs(scrollDelta) > 10) {
+                immersiveUI.onScroll(currentY);
+              }
             })
             .onScrollEnd(() => {
               this.maxScrollOffset = Math.max(this.maxScrollOffset, this.scrollOffset);

@@ -23,6 +23,18 @@ interface ParseTaskResult {
   error?: string;
 }
 
+interface CompoundSelector {
+  tag: string;
+  classes: string[];
+  id: string;
+  attributes: AttributePair[];
+}
+
+interface AttributePair {
+  name: string;
+  value: string;
+}
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -50,6 +62,144 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
   // 辅助函数：转义正则
   const escapeRegexLocal = (str: string): string => {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  };
+
+  // 辅助函数：XPath转CSS选择器
+  const convertXPathToCssLocal = (xpath: string): string => {
+    try {
+      let result = xpath;
+      if (result.startsWith('//')) {
+        result = result.substring(2);
+      } else if (result.startsWith('./')) {
+        result = result.substring(2);
+      }
+      const segments = result.split('/');
+      const cssParts: string[] = [];
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed) continue;
+        const attrClassMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\[@class=["']([^"']+)["']\]$/);
+        if (attrClassMatch) { cssParts.push(`${attrClassMatch[1]}.${attrClassMatch[2]}`); continue; }
+        const attrIdMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\[@id=["']([^"']+)["']\]$/);
+        if (attrIdMatch) { cssParts.push(`${attrIdMatch[1]}#${attrIdMatch[2]}`); continue; }
+        const attrMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\[@([a-zA-Z][a-zA-Z0-9_-]*)=["']([^"']+)["']\]$/);
+        if (attrMatch) { cssParts.push(`${attrMatch[1]}[${attrMatch[2]}="${attrMatch[3]}"]`); continue; }
+        const tagMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)$/);
+        if (tagMatch) { cssParts.push(tagMatch[1]); continue; }
+        const fallbackMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)/);
+        if (fallbackMatch) { cssParts.push(fallbackMatch[1]); }
+      }
+      return cssParts.join(' ');
+    } catch {
+      const xpathMatch = xpath.match(/\/\/([a-zA-Z][a-zA-Z0-9]*)/);
+      return xpathMatch ? xpathMatch[1] : '';
+    }
+  };
+
+  // 辅助函数：解析复合选择器
+  const parseCompoundSelectorLocal = (selector: string): CompoundSelector => {
+    const result: CompoundSelector = { tag: '', classes: [], id: '', attributes: [] };
+    if (!selector) return result;
+    let i = 0;
+    const len = selector.length;
+    while (i < len && /[a-zA-Z]/.test(selector[i])) { result.tag += selector[i]; i++; }
+    while (i < len) {
+      if (selector[i] === '.') {
+        i++; let cn = '';
+        while (i < len && /[a-zA-Z0-9_-]/.test(selector[i])) { cn += selector[i]; i++; }
+        if (cn) result.classes.push(cn);
+      } else if (selector[i] === '#') {
+        i++; let id = '';
+        while (i < len && /[a-zA-Z0-9_-]/.test(selector[i])) { id += selector[i]; i++; }
+        if (id) result.id = id;
+      } else if (selector[i] === '[') {
+        i++; let attrName = '';
+        while (i < len && selector[i] !== '=' && selector[i] !== ']' && selector[i] !== '"') { attrName += selector[i]; i++; }
+        attrName = attrName.trim();
+        let attrValue = '';
+        if (i < len && selector[i] === '=') {
+          i++;
+          if (i < len && (selector[i] === '"' || selector[i] === "'")) {
+            const q = selector[i]; i++;
+            while (i < len && selector[i] !== q) { attrValue += selector[i]; i++; }
+            if (i < len) i++;
+          } else {
+            while (i < len && selector[i] !== ']') { attrValue += selector[i]; i++; }
+          }
+        }
+        if (i < len && selector[i] === ']') i++;
+        if (attrName && attrValue) {
+          const attrPair: AttributePair = { name: attrName, value: attrValue };
+          result.attributes.push(attrPair);
+        }
+      } else { i++; }
+    }
+    return result;
+  };
+
+  // 辅助函数：分割后代选择器
+  const splitDescendantSelectorLocal = (selector: string): string[] => {
+    const parts: string[] = [];
+    let current = '';
+    let inBrackets = 0;
+    let inQuote = '';
+    for (let i = 0; i < selector.length; i++) {
+      const ch = selector[i];
+      if (inQuote) { current += ch; if (ch === inQuote) inQuote = ''; continue; }
+      if (ch === '"' || ch === "'") { inQuote = ch; current += ch; continue; }
+      if (ch === '[') { inBrackets++; current += ch; continue; }
+      if (ch === ']') { inBrackets--; current += ch; continue; }
+      if (ch === ' ' && inBrackets === 0) { if (current.trim().length > 0) { parts.push(current.trim()); current = ''; } continue; }
+      current += ch;
+    }
+    if (current.trim().length > 0) parts.push(current.trim());
+    return parts;
+  };
+
+  // 辅助函数：单层选择器匹配
+  const selectElementsSingleLevelLocal = (html: string, selector: string): string[] => {
+    const elements: string[] = [];
+    if (!html || !selector) return elements;
+    const compound = parseCompoundSelectorLocal(selector);
+    if (compound.id) {
+      const regex = new RegExp(`<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${escapeRegexLocal(compound.id)}["'][^>]*>([\\s\\S]*?)(?:<\\/\\1>|(?=<[a-zA-Z]|$))`, 'i');
+      const match = regex.exec(html);
+      if (match) elements.push(match[0]);
+    } else if (compound.classes.length > 0 && !compound.tag) {
+      let pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["'][^"']*`;
+      for (const cn of compound.classes) { pattern += `(?=.*\\b${escapeRegexLocal(cn)}\\b)`; }
+      pattern += `[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
+      const regex = new RegExp(pattern, 'gi');
+      for (const match of html.matchAll(regex)) elements.push(match[0]);
+    } else if (compound.tag) {
+      if (compound.classes.length > 0) {
+        let pattern = `<${compound.tag}[^>]*class=["'][^"']*`;
+        for (const cn of compound.classes) { pattern += `(?=.*\\b${escapeRegexLocal(cn)}\\b)`; }
+        pattern += `[^"']*["'][^>]*>([\\s\\S]*?)<\\/${compound.tag}>`;
+        const regex = new RegExp(pattern, 'gi');
+        for (const match of html.matchAll(regex)) elements.push(match[0]);
+      } else if (compound.attributes.length > 0) {
+        const attr = compound.attributes[0];
+        const pattern = `<${compound.tag}[^>]*${escapeRegexLocal(attr.name)}\\s*=\\s*["']${escapeRegexLocal(attr.value)}["'][^>]*>([\\s\\S]*?)<\\/${compound.tag}>`;
+        const regex = new RegExp(pattern, 'gi');
+        for (const match of html.matchAll(regex)) elements.push(match[0]);
+      } else {
+        const regex = new RegExp(`<${compound.tag}[^>]*>([\\s\\S]*?)<\\/${compound.tag}>`, 'gi');
+        for (const match of html.matchAll(regex)) elements.push(match[0]);
+      }
+    } else if (selector.startsWith('.')) {
+      const classNames: string[] = [];
+      const classMatches = selector.match(/\.[a-zA-Z0-9_-]+/g);
+      if (classMatches) for (const cm of classMatches) classNames.push(cm.substring(1));
+      if (classNames.length > 0) {
+        let pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["'][^"']*`;
+        for (const cn of classNames) { pattern += `(?=.*\\b${escapeRegexLocal(cn)}\\b)`; }
+        pattern += `[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
+        const regex = new RegExp(pattern, 'gi');
+        for (const match of html.matchAll(regex)) elements.push(match[0]);
+      }
+    }
+    return elements;
   };
 
   // 辅助函数：同步选择元素
@@ -102,12 +252,10 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
       processedSelector = '#' + processedSelector.substring(3);
     }
 
-    // 处理XPath格式 - 简化为类选择器处理
+    // 处理XPath格式 - 转换为CSS选择器
     if (processedSelector.startsWith('//') || processedSelector.startsWith('./')) {
-      const xpathMatch = processedSelector.match(/\/\/([a-zA-Z][a-zA-Z0-9]*)/);
-      if (xpathMatch) {
-        processedSelector = xpathMatch[1];
-      } else {
+      processedSelector = convertXPathToCssLocal(processedSelector);
+      if (!processedSelector) {
         return elements;
       }
     }
@@ -150,57 +298,25 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
       return elements;
     }
 
-    // 处理类选择器 .className 或 .class1.class2（支持多class）
-    if (processedSelector.startsWith('.')) {
-      // 提取所有class名（支持多class如 .class1.class2）
-      const classNames: string[] = [];
-      const classMatches = processedSelector.match(/\.[a-zA-Z0-9_-]+/g);
-      if (classMatches) {
-        for (const cm of classMatches) {
-          classNames.push(cm.substring(1)); // 移除前面的点
+    // 后代选择器支持：检测空格分隔的多层选择器
+    const descendantParts = splitDescendantSelectorLocal(processedSelector);
+    if (descendantParts.length > 1) {
+      let currentElements: string[] = [html];
+      for (let di = 0; di < descendantParts.length; di++) {
+        const partSelector = descendantParts[di];
+        const nextElements: string[] = [];
+        for (const currentHtml of currentElements) {
+          const matched = selectElementsSingleLevelLocal(currentHtml, partSelector);
+          for (const m of matched) nextElements.push(m);
         }
+        currentElements = nextElements;
+        if (currentElements.length === 0) break;
       }
-
-      if (classNames.length > 0) {
-        // 构建多class匹配正则 - 使用正向前瞻确保所有class都存在
-        let pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["'][^"']*`;
-        for (const cn of classNames) {
-          pattern += `(?=.*\\b${escapeRegexLocal(cn)}\\b)`;
-        }
-        pattern += `[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
-
-        const regex = new RegExp(pattern, 'gi');
-        const matches = html.matchAll(regex);
-        for (const match of matches) {
-          elements.push(match[0]);
-        }
-      }
-    }
-    // 处理ID选择器 #id
-    else if (processedSelector.startsWith('#')) {
-      const id = processedSelector.substring(1).split(/[.\s#\[]/)[0];
-      const regex = new RegExp(
-        `<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${escapeRegexLocal(id)}["'][^>]*>([\\s\\S]*?)(?:<\\/\\1>|(?=<[a-zA-Z]|$))`,
-        'i'
-      );
-      const match = regex.exec(html);
-      if (match) {
-        elements.push(match[0]);
-      }
-    }
-    // 处理标签选择器
-    else {
-      const tagName = processedSelector.split(/[.\s#\[]/)[0];
-      if (tagName) {
-        const regex = new RegExp(
-          `<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`,
-          'gi'
-        );
-        const matches = html.matchAll(regex);
-        for (const match of matches) {
-          elements.push(match[0]);
-        }
-      }
+      for (const e of currentElements) elements.push(e);
+    } else {
+      // 单层选择器（支持复合选择器）
+      const singleResults = selectElementsSingleLevelLocal(html, processedSelector);
+      for (const r of singleResults) elements.push(r);
     }
 
     // 应用索引过滤
@@ -295,7 +411,6 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
 
     // 提取所有文本节点（标签之间的内容）
     const textParts: string[] = [];
-    let lastIndex = 0;
     let depth = 0;
     let textStart = 0;
 
@@ -371,11 +486,11 @@ function parseInWorker(params: ParseTaskParams): ParseTaskResult {
     }
 
     // 处理数字实体
-    result = result.replace(/&#(\d+);/g, (match: string, dec: string) => {
+    result = result.replace(/&#(\d+);/g, (_match: string, dec: string) => {
       return String.fromCharCode(parseInt(dec, 10));
     });
 
-    result = result.replace(/&#x([0-9a-fA-F]+);/g, (match: string, hex: string) => {
+    result = result.replace(/&#x([0-9a-fA-F]+);/g, (_match: string, hex: string) => {
       return String.fromCharCode(parseInt(hex, 16));
     });
 
@@ -504,11 +619,10 @@ export class AsyncCssSelectorParser {
       processedSelector = '#' + processedSelector.substring(3);
     }
 
+    // 改进的XPath处理：转换为CSS选择器而非仅提取标签名
     if (processedSelector.startsWith('//') || processedSelector.startsWith('./')) {
-      const xpathMatch = processedSelector.match(/\/\/([a-zA-Z][a-zA-Z0-9]*)/);
-      if (xpathMatch) {
-        processedSelector = xpathMatch[1];
-      } else {
+      processedSelector = this.convertXPathToCss(processedSelector);
+      if (!processedSelector) {
         return elements;
       }
     }
@@ -548,18 +662,176 @@ export class AsyncCssSelectorParser {
       return elements;
     }
 
-    if (processedSelector.startsWith('.')) {
-      // 提取所有class名（支持多class如 .class1.class2）
+    // 后代选择器支持：检测空格分隔的多层选择器（不在引号/方括号内）
+    const descendantParts = this.splitDescendantSelector(processedSelector);
+    if (descendantParts.length > 1) {
+      // 逐层查找后代元素
+      let currentElements: string[] = [html]; // 初始为完整HTML
+      for (let i = 0; i < descendantParts.length; i++) {
+        const partSelector = descendantParts[i];
+        const nextElements: string[] = [];
+        for (const currentHtml of currentElements) {
+          const matched = this.selectElementsSingleLevel(currentHtml, partSelector);
+          nextElements.push(...matched);
+        }
+        currentElements = nextElements;
+        if (currentElements.length === 0) {
+          break;
+        }
+      }
+      elements.push(...currentElements);
+    } else {
+      // 单层选择器
+      const singleResults = this.selectElementsSingleLevel(html, processedSelector);
+      elements.push(...singleResults);
+    }
+
+    if (index >= 0 && index < elements.length) {
+      return [elements[index]];
+    }
+
+    if (skipFirst > 0 && elements.length > skipFirst) {
+      return elements.slice(skipFirst);
+    }
+
+    return elements;
+  }
+
+  /**
+   * 分割后代选择器（按空格分割，但忽略引号和方括号内的空格）
+   */
+  private splitDescendantSelector(selector: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    let inBrackets = 0;
+    let inQuote = '';
+
+    for (let i = 0; i < selector.length; i++) {
+      const ch = selector[i];
+
+      if (inQuote) {
+        current += ch;
+        if (ch === inQuote) {
+          inQuote = '';
+        }
+        continue;
+      }
+
+      if (ch === '"' || ch === "'") {
+        inQuote = ch;
+        current += ch;
+        continue;
+      }
+
+      if (ch === '[') {
+        inBrackets++;
+        current += ch;
+        continue;
+      }
+
+      if (ch === ']') {
+        inBrackets--;
+        current += ch;
+        continue;
+      }
+
+      if (ch === ' ' && inBrackets === 0) {
+        if (current.trim().length > 0) {
+          parts.push(current.trim());
+          current = '';
+        }
+        continue;
+      }
+
+      current += ch;
+    }
+
+    if (current.trim().length > 0) {
+      parts.push(current.trim());
+    }
+
+    return parts;
+  }
+
+  /**
+   * 单层选择器匹配（不含后代选择器）
+   */
+  private selectElementsSingleLevel(html: string, selector: string): string[] {
+    const elements: string[] = [];
+    if (!html || !selector) return elements;
+
+    // 解析复合选择器
+    const compound = this.parseCompoundSelector(selector);
+
+    if (compound.id) {
+      // ID选择器优先
+      const regex = new RegExp(
+        `<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${escapeRegex(compound.id)}["'][^>]*>([\\s\\S]*?)(?:<\\/\\1>|(?=<[a-zA-Z]|$))`,
+        'i'
+      );
+      const match = regex.exec(html);
+      if (match) {
+        elements.push(match[0]);
+      }
+    } else if (compound.classes.length > 0 && !compound.tag) {
+      // 纯类选择器（如 .class1.class2）
+      let pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["'][^"']*`;
+      for (const cn of compound.classes) {
+        pattern += `(?=.*\\b${escapeRegex(cn)}\\b)`;
+      }
+      pattern += `[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`;
+
+      const regex = new RegExp(pattern, 'gi');
+      const matches = html.matchAll(regex);
+      for (const match of matches) {
+        elements.push(match[0]);
+      }
+    } else if (compound.tag) {
+      // 标签选择器（可能带class约束）
+      if (compound.classes.length > 0) {
+        // 复合选择器：tag.class1.class2
+        let pattern = `<${compound.tag}[^>]*class=["'][^"']*`;
+        for (const cn of compound.classes) {
+          pattern += `(?=.*\\b${escapeRegex(cn)}\\b)`;
+        }
+        pattern += `[^"']*["'][^>]*>([\\s\\S]*?)<\\/${compound.tag}>`;
+
+        const regex = new RegExp(pattern, 'gi');
+        const matches = html.matchAll(regex);
+        for (const match of matches) {
+          elements.push(match[0]);
+        }
+      } else if (compound.attributes.length > 0) {
+        // 带属性选择器的标签：tag[attr="val"]
+        const attr = compound.attributes[0];
+        const pattern = `<${compound.tag}[^>]*${escapeRegex(attr.name)}\\s*=\\s*["']${escapeRegex(attr.value)}["'][^>]*>([\\s\\S]*?)<\\/${compound.tag}>`;
+        const regex = new RegExp(pattern, 'gi');
+        const matches = html.matchAll(regex);
+        for (const match of matches) {
+          elements.push(match[0]);
+        }
+      } else {
+        // 纯标签选择器
+        const regex = new RegExp(
+          `<${compound.tag}[^>]*>([\\s\\S]*?)<\\/${compound.tag}>`,
+          'gi'
+        );
+        const matches = html.matchAll(regex);
+        for (const match of matches) {
+          elements.push(match[0]);
+        }
+      }
+    } else if (selector.startsWith('.')) {
+      // 降级：纯类选择器（parseCompoundSelector未正确解析时）
       const classNames: string[] = [];
-      const classMatches = processedSelector.match(/\.[a-zA-Z0-9_-]+/g);
+      const classMatches = selector.match(/\.[a-zA-Z0-9_-]+/g);
       if (classMatches) {
         for (const cm of classMatches) {
-          classNames.push(cm.substring(1)); // 移除前面的点
+          classNames.push(cm.substring(1));
         }
       }
 
       if (classNames.length > 0) {
-        // 构建多class匹配正则 - 使用正向前瞻确保所有class都存在
         let pattern = `<([a-zA-Z][a-zA-Z0-9]*)[^>]*class=["'][^"']*`;
         for (const cn of classNames) {
           pattern += `(?=.*\\b${escapeRegex(cn)}\\b)`;
@@ -572,39 +844,172 @@ export class AsyncCssSelectorParser {
           elements.push(match[0]);
         }
       }
-    } else if (processedSelector.startsWith('#')) {
-      const id = processedSelector.substring(1).split(/[.\s#\[]/)[0];
-      const regex = new RegExp(
-        `<([a-zA-Z][a-zA-Z0-9]*)[^>]*\\bid\\s*=\\s*["']${escapeRegex(id)}["'][^>]*>([\\s\\S]*?)(?:<\\/\\1>|(?=<[a-zA-Z]|$))`,
-        'i'
-      );
-      const match = regex.exec(html);
-      if (match) {
-        elements.push(match[0]);
-      }
-    } else {
-      const tagName = processedSelector.split(/[.\s#\[]/)[0];
-      if (tagName) {
-        const regex = new RegExp(
-          `<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`,
-          'gi'
-        );
-        const matches = html.matchAll(regex);
-        for (const match of matches) {
-          elements.push(match[0]);
-        }
-      }
-    }
-
-    if (index >= 0 && index < elements.length) {
-      return [elements[index]];
-    }
-
-    if (skipFirst > 0 && elements.length > skipFirst) {
-      return elements.slice(skipFirst);
     }
 
     return elements;
+  }
+
+  /**
+   * 解析复合选择器：提取标签名、类名列表、ID、属性选择器
+   * 例如: "div.book#main[href='/list']" → {tag:"div", classes:["book"], id:"main", attributes:[{name:"href",value:"/list"}]}
+   */
+  private parseCompoundSelector(selector: string): CompoundSelector {
+    const result: CompoundSelector = {
+      tag: '',
+      classes: [],
+      id: '',
+      attributes: []
+    };
+
+    if (!selector) return result;
+
+    let i = 0;
+    const len = selector.length;
+
+    // 提取标签名（开头的字母序列）
+    while (i < len && /[a-zA-Z]/.test(selector[i])) {
+      result.tag += selector[i];
+      i++;
+    }
+
+    // 提取类名、ID、属性
+    while (i < len) {
+      if (selector[i] === '.') {
+        // 类名
+        i++;
+        let className = '';
+        while (i < len && /[a-zA-Z0-9_-]/.test(selector[i])) {
+          className += selector[i];
+          i++;
+        }
+        if (className) {
+          result.classes.push(className);
+        }
+      } else if (selector[i] === '#') {
+        // ID
+        i++;
+        let id = '';
+        while (i < len && /[a-zA-Z0-9_-]/.test(selector[i])) {
+          id += selector[i];
+          i++;
+        }
+        if (id) {
+          result.id = id;
+        }
+      } else if (selector[i] === '[') {
+        // 属性选择器 [attr="value"] 或 [attr='value']
+        i++;
+        let attrName = '';
+        while (i < len && selector[i] !== '=' && selector[i] !== ']' && selector[i] !== '"') {
+          attrName += selector[i];
+          i++;
+        }
+        attrName = attrName.trim();
+
+        let attrValue = '';
+        if (i < len && selector[i] === '=') {
+          i++;
+          // 跳过引号
+          if (i < len && (selector[i] === '"' || selector[i] === "'")) {
+            const quote = selector[i];
+            i++;
+            while (i < len && selector[i] !== quote) {
+              attrValue += selector[i];
+              i++;
+            }
+            if (i < len) i++; // 跳过结束引号
+          } else {
+            while (i < len && selector[i] !== ']') {
+              attrValue += selector[i];
+              i++;
+            }
+          }
+        }
+
+        if (i < len && selector[i] === ']') i++;
+
+        if (attrName && attrValue) {
+          const attrPair: AttributePair = { name: attrName, value: attrValue };
+          result.attributes.push(attrPair);
+        }
+      } else {
+        // 跳过不识别的字符
+        i++;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 将XPath转换为CSS选择器
+   * 支持常见模式：//tag, //tag[@class="x"], //tag[@id="x"], //tag1/tag2
+   */
+  private convertXPathToCss(xpath: string): string {
+    try {
+      let result = xpath;
+
+      // 移除开头的 // 或 ./
+      if (result.startsWith('//')) {
+        result = result.substring(2);
+      } else if (result.startsWith('./')) {
+        result = result.substring(2);
+      }
+
+      // 处理路径中的 / 分隔符（转为空格，即后代选择器）
+      const segments = result.split('/');
+
+      const cssParts: string[] = [];
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed) continue;
+
+        // 处理属性条件 [@class="xxx"] 或 [@id="xxx"]
+        const attrClassMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\[@class=["']([^"']+)["']\]$/);
+        if (attrClassMatch) {
+          cssParts.push(`${attrClassMatch[1]}.${attrClassMatch[2]}`);
+          continue;
+        }
+
+        const attrIdMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\[@id=["']([^"']+)["']\]$/);
+        if (attrIdMatch) {
+          cssParts.push(`${attrIdMatch[1]}#${attrIdMatch[2]}`);
+          continue;
+        }
+
+        // 处理通用属性条件 [@attr="val"]
+        const attrMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\[@([a-zA-Z][a-zA-Z0-9_-]*)=["']([^"']+)["']\]$/);
+        if (attrMatch) {
+          cssParts.push(`${attrMatch[1]}[${attrMatch[2]}="${attrMatch[3]}"]`);
+          continue;
+        }
+
+        // 纯标签名
+        const tagMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)$/);
+        if (tagMatch) {
+          cssParts.push(tagMatch[1]);
+          continue;
+        }
+
+        // 无法转换的部分，尝试提取标签名作为降级
+        const fallbackMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)/);
+        if (fallbackMatch) {
+          Logger.warn(TAG, `XPath部分转换降级: "${trimmed}" → "${fallbackMatch[1]}"`);
+          cssParts.push(fallbackMatch[1]);
+        }
+      }
+
+      const cssSelector = cssParts.join(' ');
+      if (cssSelector) {
+        Logger.debug(TAG, `XPath转CSS: "${xpath}" → "${cssSelector}"`);
+      }
+      return cssSelector;
+    } catch (error) {
+      Logger.warn(TAG, `XPath转CSS失败: ${xpath}, ${error}`);
+      // 降级：提取第一个标签名
+      const xpathMatch = xpath.match(/\/\/([a-zA-Z][a-zA-Z0-9]*)/);
+      return xpathMatch ? xpathMatch[1] : '';
+    }
   }
 
   private extractValueSync(html: string, selector: string, attribute?: string): string {
