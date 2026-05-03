@@ -18,11 +18,11 @@ export class RuleAnalyzer {
   // 被处理的字符串
   private queue: string;
   // 当前处理位置
-  private pos: number = 0;
+  pos: number = 0;
   // 当前处理字段的开始
-  private start: number = 0;
+  start: number = 0;
   // 当前规则的开始
-  private startX: number = 0;
+  startX: number = 0;
 
   // 分割字符的长度
   step: number = 0;

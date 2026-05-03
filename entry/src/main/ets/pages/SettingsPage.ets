@@ -14,7 +14,6 @@
  */
 import { themeManager } from '../common/ThemeManager';
 import { DesignSystem } from '../common/DesignSystem';
-import { NavigationManager } from '../common/NavigationManager';
 
 interface SettingItem {
   icon: string;
@@ -98,8 +97,6 @@ export struct SettingsPage {
   
   build() {
     Column() {
-      this.buildHeader()
-
       Scroll() {
         Column() {
           this.buildSection('阅读设置', this.getReadingSettings())
@@ -119,48 +116,6 @@ export struct SettingsPage {
     .width('100%')
     .height('100%')
     .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-  }
-
-  @Builder
-  buildHeader() {
-    Row() {
-      Row() {
-        Text('‹')
-          .fontSize(DesignSystem.Typography.size.xl)
-          .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-      }
-      .width(40)
-      .height(40)
-      .borderRadius(DesignSystem.BorderRadius.md)
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-      .justifyContent(FlexAlign.Center)
-      .border({
-        width: 1,
-        color: DesignSystem.getBorderColor(this.isLightMode)
-      })
-      .onClick(() => {
-        NavigationManager.getInstance().navigateBack();
-      })
-
-      Text($r('app.string.settings'))
-        .fontSize(DesignSystem.Typography.size.xl)
-        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-        .fontWeight(DesignSystem.Typography.weight.bold)
-        .layoutWeight(1)
-        .margin({ left: DesignSystem.Spacing.md })
-    }
-    .width('100%')
-    .padding({
-      left: DesignSystem.Spacing.xl,
-      right: DesignSystem.Spacing.xl,
-      top: this.safeAreaTop + DesignSystem.Spacing.lg,
-      bottom: DesignSystem.Spacing.lg
-    })
-    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-    .border({
-      width: { bottom: 1 },
-      color: DesignSystem.getBorderColor(this.isLightMode)
-    })
   }
 
   @Builder
@@ -331,7 +286,7 @@ export struct SettingsPage {
         this.cacheSize = '0MB';
         break;
       case '调试日志':
-        NavigationManager.getInstance().navigateTo('DebugLogPage');
+        // TODO: navigate to DebugLogPage
         break;
       case '关于我们':
         break;

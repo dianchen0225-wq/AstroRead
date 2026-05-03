@@ -4,7 +4,6 @@ import { LocalBook, LocalChapter } from '../models/LocalBook';
 import { LocalFileParser } from '../utils/parser/LocalFileParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Logger } from '../utils/performance/Logger';
-import { NavigationManager } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
@@ -102,36 +101,6 @@ struct LocalBookPage {
 
   build() {
     Column() {
-      Row() {
-        Row() {
-          Text('‹')
-            .fontSize(20)
-            .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-        }
-        .width(32)
-        .height(32)
-        .borderRadius(16)
-        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-        .justifyContent(FlexAlign.Center)
-        .margin({ right: 15 })
-        .onClick(() => {
-          NavigationManager.getInstance().navigateBack();
-        })
-
-        Text('本地书籍')
-          .fontSize(18)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(600)
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .padding({ left: 15, right: 20, top: 15, bottom: 15 })
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-      .border({
-        width: { bottom: 1 },
-        color: DesignSystem.getBorderColor(this.isLightMode)
-      })
-
       Row() {
         Button('选择文件')
           .fontSize(14)
@@ -302,9 +271,7 @@ struct LocalBookPage {
               .borderRadius(12)
               .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
               .onClick(() => {
-                NavigationManager.getInstance().navigateTo('BookDetailPage', {
-                  bookId: book.id
-                });
+                // TODO: navigate to BookDetailPage
               })
             }
           }, (book: LocalBook) => book.id)

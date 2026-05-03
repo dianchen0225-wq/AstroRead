@@ -305,11 +305,10 @@ export struct OptimizedBookSourceItem {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Toggle({ type: ToggleType.Switch, isOn: this.source.enabled })
+      Toggle({ type: ToggleType.Switch, isOn: this.source.metadata.enabled })
         .selectedColor(DesignSystem.getPrimaryColor(this.isLightMode))
         .onChange((isOn: boolean) => {
-          // 处理开关状态变化
-          this.source.enabled = isOn;
+          this.source.metadata.enabled = isOn;
         })
     }
     .width('100%')

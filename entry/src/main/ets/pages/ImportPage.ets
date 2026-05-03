@@ -12,7 +12,6 @@ import { EPUBParser } from '../utils/parser/EPUBParser';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book, Chapter } from '../models/Book';
 import { Logger } from '../utils/performance/Logger';
-import NavigationManager, { NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 
 @Entry
@@ -209,8 +208,7 @@ struct ImportPage {
 
     if (book) {
       try {
-        const navParams: NavParams = { bookId: book.id };
-        NavigationManager.navigateTo('ReadPage', navParams);
+        // TODO: navigate to ReadPage
       } catch (error) {
         Logger.error('ImportPage', `打开书籍失败: ${error}`);
       }

@@ -5,13 +5,13 @@ import { BookSource } from '../models/BookSource';
 import { Book, SourceStatus } from '../models/Book';
 import { PagedSearchResult, SearchProgress } from '../models/SearchResult';
 import { Logger } from '../utils/performance/Logger';
-import { NavigationManager, NavParams } from '../common/NavigationManager';
+import { DebounceThrottleUtil, DebounceHandle } from '../utils/performance/DebounceThrottleUtil';
+import { ParseTaskQueue, ParseTaskType, ParseTaskPriority } from '../utils/performance/ParseTaskQueue';
 import { common } from '@kit.AbilityKit';
 import { NetworkManager } from '../utils/network/NetworkManager';
 import { purifyIntro } from '../utils/content/ContentPurifier';
 import { sourceValidatorService, BatchValidationProgress } from '../utils/validation/SourceValidatorService';
 import { searchFixer, FixReport } from '../utils/SearchFixer';
-import { BackButton } from '../components/BackButton';
 
 export interface RankColor {
   light: string;
@@ -53,8 +53,10 @@ export struct SearchPage {
   private allSearchResults: Book[] = [];
   private duplicateKeySet: Set<string> | null = null;
   private lastSearchTimestamp: number = 0;
-  private readonly SEARCH_DEBOUNCE_MS: number = 500;
+  private readonly SEARCH_DEBOUNCE_MS: number = 300;
   private readonly MAX_RESULTS: number = 300;
+  private searchDebouncer: DebounceHandle | null = null;
+  private parseTaskQueue: ParseTaskQueue = ParseTaskQueue.getInstance();
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -63,6 +65,10 @@ export struct SearchPage {
     this.isComponentActive = true;
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
+
+    this.searchDebouncer = DebounceThrottleUtil.debounce(() => {
+      this.performSearch(1);
+    }, this.SEARCH_DEBOUNCE_MS);
     
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     viewModelManager.setContext(context);
@@ -75,6 +81,8 @@ export struct SearchPage {
   aboutToDisappear(): void {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
+    this.searchDebouncer?.cancel();
+    this.searchDebouncer = null;
     this.searchResults = [];
     this.bookSources = [];
   }
@@ -387,16 +395,14 @@ export struct SearchPage {
 
   private async openBook(book: Book): Promise<void> {
     try {
-      const params: NavParams = { bookId: book.id };
-      NavigationManager.getInstance().navigateTo('BookDetailPage', params);
+      // TODO: navigate to BookDetailPage
     } catch (error) {
       Logger.error('SearchPage', `打开书籍失败: ${error}`);
     }
   }
 
   private navigateToSourcePage(): void {
-    const params: NavParams = { tabIndex: 3 };
-    NavigationManager.getInstance().navigateTo('MainPage', params);
+    // TODO: navigate to MainPage
   }
 
   private async clearSearchHistory(): Promise<void> {
@@ -411,8 +417,6 @@ export struct SearchPage {
 
   build() {
     Column() {
-      this.buildHeader()
-      
       Scroll() {
         Column() {
           this.buildSearchBar()
@@ -451,34 +455,6 @@ export struct SearchPage {
   }
 
   @Builder
-  buildHeader() {
-    Row() {
-      BackButton({
-        buttonSize: 'medium',
-        style: 'default',
-        onBack: () => {
-          NavigationManager.getInstance().navigateBack();
-        }
-      })
-
-      Text($r('app.string.search_books'))
-        .fontSize(DesignSystem.Typography.size.xl)
-        .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-        .fontWeight(DesignSystem.Typography.weight.bold)
-        .layoutWeight(1)
-        .margin({ left: DesignSystem.Spacing.md })
-    }
-    .width('100%')
-    .padding({
-      left: DesignSystem.Spacing.md,
-      right: DesignSystem.Spacing.lg,
-      top: this.safeAreaTop + DesignSystem.Spacing.md,
-      bottom: DesignSystem.Spacing.md
-    })
-    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-  }
-
-  @Builder
   buildSearchBar() {
     Row() {
       Text('🔍')
@@ -494,8 +470,10 @@ export struct SearchPage {
         .placeholderColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
         .onChange((value: string) => {
           this.searchText = value;
+          this.searchDebouncer?.call();
         })
         .onSubmit(() => {
+          this.searchDebouncer?.cancel();
           this.performSearch();
         })
 

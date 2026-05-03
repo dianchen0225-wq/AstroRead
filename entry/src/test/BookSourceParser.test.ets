@@ -1,7 +1,7 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 import { ContentParser, ParsedBookItem, ParsedChapterItem, ReplaceRuleConfig, ReplaceRuleItem } from '../main/ets/utils/ContentParser';
 import { NetworkManager } from '../main/ets/utils/NetworkManager';
-import { BookSource, SearchRule, ChapterRule, ContentRule } from '../main/ets/models/BookSource';
+import { BookSource, SearchRule, TocRule, ContentRule } from '../main/ets/models/BookSource';
 import { EntityDecoder } from '../main/ets/core/utils/EntityDecoder';
 
 interface JsonBookItem {
@@ -65,7 +65,7 @@ export default function bookSourceParserTest() {
         nextUrl: undefined
       };
       
-      const chapterRule: ChapterRule = {
+      const chapterRule: TocRule = {
         chapterList: '//div[@class="chapter-item"]',
         chapterName: '//a/text()',
         chapterUrl: '//a/@href',
@@ -83,16 +83,28 @@ export default function bookSourceParserTest() {
         id: 'test',
         name: '测试书源',
         url: 'https://example.com',
-        enabled: true,
-        header: undefined,
-        searchUrl: 'https://example.com/search?key={{key}}',
-        searchRule: searchRule,
-        findRule: undefined,
-        chapterRule: chapterRule,
-        contentRule: contentRule,
-        ruleType: 'xpath',
+        metadata: {
+          enabled: true,
+          enabledExplore: false
+        },
+        visualConfig: {
+          bookSourceType: 'text',
+          customOrder: 0,
+          weight: 0,
+          respondTime: 180000,
+          lastUpdateTime: Date.now()
+        },
+        rules: {
+          searchRule: searchRule,
+          exploreRule: undefined,
+          tocRule: chapterRule,
+          contentRule: contentRule
+        },
+        legacy: {
+          searchUrl: 'https://example.com/search?key={{key}}',
+          ruleType: 'xpath'
+        },
         sort: 0,
-        lastUpdateTime: Date.now(),
         addTime: Date.now()
       };
       
@@ -136,7 +148,7 @@ export default function bookSourceParserTest() {
         nextUrl: undefined
       };
       
-      const chapterRule: ChapterRule = {
+      const chapterRule: TocRule = {
         chapterList: '$.data.chapters',
         chapterName: '$.title',
         chapterUrl: '$.url',
@@ -154,16 +166,28 @@ export default function bookSourceParserTest() {
         id: 'test-json',
         name: 'JSON测试书源',
         url: 'https://example.com',
-        enabled: true,
-        header: undefined,
-        searchUrl: 'https://example.com/search?key={{key}}',
-        searchRule: searchRule,
-        findRule: undefined,
-        chapterRule: chapterRule,
-        contentRule: contentRule,
-        ruleType: 'jsonpath',
+        metadata: {
+          enabled: true,
+          enabledExplore: false
+        },
+        visualConfig: {
+          bookSourceType: 'text',
+          customOrder: 0,
+          weight: 0,
+          respondTime: 180000,
+          lastUpdateTime: Date.now()
+        },
+        rules: {
+          searchRule: searchRule,
+          exploreRule: undefined,
+          tocRule: chapterRule,
+          contentRule: contentRule
+        },
+        legacy: {
+          searchUrl: 'https://example.com/search?key={{key}}',
+          ruleType: 'jsonpath'
+        },
         sort: 0,
-        lastUpdateTime: Date.now(),
         addTime: Date.now()
       };
       
@@ -204,7 +228,7 @@ export default function bookSourceParserTest() {
         nextUrl: undefined
       };
       
-      const chapterRule: ChapterRule = {
+      const chapterRule: TocRule = {
         chapterList: '<div class="chapter-item">[\\s\\S]*?</div>',
         chapterName: '<a>([\\s\\S]*?)</a>',
         chapterUrl: '<a href="([\\s\\S]*?)">',
@@ -222,16 +246,28 @@ export default function bookSourceParserTest() {
         id: 'test-regex',
         name: '正则测试书源',
         url: 'https://example.com',
-        enabled: true,
-        header: undefined,
-        searchUrl: 'https://example.com/search?key={{key}}',
-        searchRule: searchRule,
-        findRule: undefined,
-        chapterRule: chapterRule,
-        contentRule: contentRule,
-        ruleType: 'regex',
+        metadata: {
+          enabled: true,
+          enabledExplore: false
+        },
+        visualConfig: {
+          bookSourceType: 'text',
+          customOrder: 0,
+          weight: 0,
+          respondTime: 180000,
+          lastUpdateTime: Date.now()
+        },
+        rules: {
+          searchRule: searchRule,
+          exploreRule: undefined,
+          tocRule: chapterRule,
+          contentRule: contentRule
+        },
+        legacy: {
+          searchUrl: 'https://example.com/search?key={{key}}',
+          ruleType: 'regex'
+        },
         sort: 0,
-        lastUpdateTime: Date.now(),
         addTime: Date.now()
       };
       
@@ -287,7 +323,7 @@ export default function bookSourceParserTest() {
         nextUrl: undefined
       };
       
-      const chapterRule: ChapterRule = {
+      const chapterRule: TocRule = {
         chapterList: '//a',
         chapterName: '//text()',
         chapterUrl: '//@href',
@@ -305,16 +341,28 @@ export default function bookSourceParserTest() {
         id: 'test-chapter',
         name: '章节测试书源',
         url: 'https://example.com',
-        enabled: true,
-        header: undefined,
-        searchUrl: 'https://example.com/search?key={{key}}',
-        searchRule: searchRule,
-        findRule: undefined,
-        chapterRule: chapterRule,
-        contentRule: contentRule,
-        ruleType: 'xpath',
+        metadata: {
+          enabled: true,
+          enabledExplore: false
+        },
+        visualConfig: {
+          bookSourceType: 'text',
+          customOrder: 0,
+          weight: 0,
+          respondTime: 180000,
+          lastUpdateTime: Date.now()
+        },
+        rules: {
+          searchRule: searchRule,
+          exploreRule: undefined,
+          tocRule: chapterRule,
+          contentRule: contentRule
+        },
+        legacy: {
+          searchUrl: 'https://example.com/search?key={{key}}',
+          ruleType: 'xpath'
+        },
         sort: 0,
-        lastUpdateTime: Date.now(),
         addTime: Date.now()
       };
       

@@ -350,6 +350,102 @@ class ResponsiveValue<T> {
   }
 }
 
+export interface CapsuleAnimationConfig {
+  morphDuration: number;
+  elasticOvershoot: number;
+  elasticReturnDuration: number;
+  fadeOutOnStop: number;
+  petalPopupDuration: number;
+  bookmarkRetract: number;
+  inkRetract: number;
+  inkRelief: number;
+  breathCycleDuration: number;
+  breathCycles: number;
+  iconColorTransition: number;
+  yieldDuration: number;
+  shakeDuration: number;
+  morphOrientationDuration: number;
+}
+
+export interface CapsuleVisualConfig {
+  thinLineHeight: number;
+  thinLineOpacity: number;
+  capsuleHeight: number;
+  capsuleWidth: number;
+  airGap: number;
+  iconSpacing: number;
+  capsuleBorderRadius: number;
+}
+
+export interface CapsulePetalConfig {
+  radius: number;
+  arcStartAngle: number;
+  arcSpanAngle: number;
+  itemCount: number;
+  longPressThreshold: number;
+}
+
+export interface CapsuleDayNightConfig {
+  dayBackground: string;
+  dayShadowOpacity: number;
+  dayIconColor: string;
+  nightBackground: string;
+  nightIconColor: string;
+  nightGlowColor: string;
+  nightGlowWidth: number;
+  nightGlowOpacity: number;
+  breathMinBrightness: number;
+  breathMaxBrightness: number;
+}
+
+export interface CapsuleBookmarkConfig {
+  lineWidth: number;
+  headDiameter: number;
+  dotDiameter: number;
+  minTriggerDistance: number;
+  lineRetractDuration: number;
+}
+
+export interface CapsuleInkConfig {
+  maxRadius: number;
+  circleOpacity: number;
+  textShadowY: number;
+  textShadowBlur: number;
+  textShadowOpacity: number;
+  retractDuration: number;
+  textReliefDuration: number;
+  lowGPUMaxRadius: number;
+}
+
+export interface CapsuleSideLyingConfig {
+  minScreenWidth: number;
+  capsuleWidth: number;
+  iconSpacing: number;
+  leftMargin: number;
+  verticalBias: number;
+  morphDuration: number;
+}
+
+export interface CapsuleSVGIconConfig {
+  strokeWidth: number;
+  cornerRadius: number;
+  designSize: number;
+  renderSize: number;
+  activeFillOpacity: number;
+}
+
+export interface CapsuleGestureConfig {
+  appSwipeThreshold: number;
+  systemSwipeThreshold: number;
+  airGapFromSystemBar: number;
+  yieldTranslateY: number;
+  yieldOpacity: number;
+  yieldDuration: number;
+  shakeAmplitude: number;
+  shakeDuration: number;
+  shakeRepeatCount: number;
+}
+
 export class DesignSystem {
   // 颜色系统 - 优化后的现代配色方案
   static readonly Colors: ColorsConfig = new ColorsConfig(
@@ -600,6 +696,102 @@ export class DesignSystem {
     lg: 28,
     xl: 36,
     xxl: 48
+  };
+
+  static readonly CapsuleAnimation: CapsuleAnimationConfig = {
+    morphDuration: 400,
+    elasticOvershoot: 0.15,
+    elasticReturnDuration: 200,
+    fadeOutOnStop: 300,
+    petalPopupDuration: 300,
+    bookmarkRetract: 200,
+    inkRetract: 300,
+    inkRelief: 200,
+    breathCycleDuration: 500,
+    breathCycles: 2,
+    iconColorTransition: 300,
+    yieldDuration: 300,
+    shakeDuration: 50,
+    morphOrientationDuration: 400
+  };
+
+  static readonly CapsuleVisual: CapsuleVisualConfig = {
+    thinLineHeight: 8,
+    thinLineOpacity: 0.3,
+    capsuleHeight: 48,
+    capsuleWidth: 48,
+    airGap: 12,
+    iconSpacing: 8,
+    capsuleBorderRadius: 24
+  };
+
+  static readonly CapsulePetal: CapsulePetalConfig = {
+    radius: 60,
+    arcStartAngle: -105,
+    arcSpanAngle: 90,
+    itemCount: 4,
+    longPressThreshold: 500
+  };
+
+  static readonly CapsuleDayNight: CapsuleDayNightConfig = {
+    dayBackground: 'rgba(255,255,255,0.72)',
+    dayShadowOpacity: 0.05,
+    dayIconColor: '#333333',
+    nightBackground: 'rgba(0,0,0,0.85)',
+    nightIconColor: '#E8A849',
+    nightGlowColor: 'rgba(180,40,40,0.3)',
+    nightGlowWidth: 1,
+    nightGlowOpacity: 0.3,
+    breathMinBrightness: 0.5,
+    breathMaxBrightness: 1.0
+  };
+
+  static readonly CapsuleBookmark: CapsuleBookmarkConfig = {
+    lineWidth: 2,
+    headDiameter: 6,
+    dotDiameter: 6,
+    minTriggerDistance: 15,
+    lineRetractDuration: 200
+  };
+
+  static readonly CapsuleInk: CapsuleInkConfig = {
+    maxRadius: 30,
+    circleOpacity: 0.15,
+    textShadowY: 1,
+    textShadowBlur: 2,
+    textShadowOpacity: 0.3,
+    retractDuration: 300,
+    textReliefDuration: 200,
+    lowGPUMaxRadius: 15
+  };
+
+  static readonly CapsuleSideLying: CapsuleSideLyingConfig = {
+    minScreenWidth: 600,
+    capsuleWidth: 48,
+    iconSpacing: 8,
+    leftMargin: 12,
+    verticalBias: 1 / 3,
+    morphDuration: 400
+  };
+
+  static readonly CapsuleSVGIcon: CapsuleSVGIconConfig = {
+    strokeWidth: 1.5,
+    cornerRadius: 2,
+    designSize: 24,
+    renderSize: 22,
+    activeFillOpacity: 0.1
+  };
+
+  static readonly CapsuleGesture: CapsuleGestureConfig = {
+    appSwipeThreshold: 10,
+    systemSwipeThreshold: 25,
+    airGapFromSystemBar: 12,
+    yieldTranslateY: 8,
+    yieldOpacity: 0.5,
+    yieldDuration: 300,
+    shakeAmplitude: 2,
+    shakeDuration: 200,
+    shakeRepeatCount: 2
   };
 
   // 卡片样式

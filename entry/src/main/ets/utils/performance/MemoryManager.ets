@@ -1,6 +1,8 @@
 import { Logger } from './Logger';
 import { LRUCache } from './LRUCache';
 import { ChapterContent } from '../../models/Book';
+import { ResourceMonitor, ResourceLevel } from './ResourceMonitor';
+import { PageTurnAnimationOptimizer } from './PageTurnAnimationOptimizer';
 import image from '@kit.ArkUI';
 
 /**
@@ -30,7 +32,9 @@ export class MemoryManager {
   private chapterCache: LRUCache<string, ChapterContent>;
   private imageCache: LRUCache<string, object>;
   private monitoringTimer: number | null = null;
-  private readonly MONITORING_INTERVAL: number = 30000; // 30秒
+  private readonly MONITORING_INTERVAL: number = 30000;
+  private resourceMonitor: ResourceMonitor = ResourceMonitor.getInstance();
+  private animationOptimizer: PageTurnAnimationOptimizer = PageTurnAnimationOptimizer.getInstance();
   private constructor() {
     this.chapterCache = new LRUCache<string, ChapterContent>(5, 30 * 60 * 1000);
     this.imageCache = new LRUCache<string, object>(20, 10 * 60 * 1000);
@@ -53,8 +57,15 @@ export class MemoryManager {
     }
 
     Logger.info('MemoryManager', '启动内存监控');
+
+    this.resourceMonitor.setOnResourceWarning((level: ResourceLevel, message: string) => {
+      this.onMemoryPressure(level);
+    });
+
     this.monitoringTimer = setInterval(() => {
       this.checkMemoryUsage();
+      this.chapterCache.cleanExpired();
+      this.imageCache.cleanExpired();
     }, this.MONITORING_INTERVAL);
   }
 
@@ -156,13 +167,21 @@ export class MemoryManager {
    * 检查内存使用情况
    */
   private checkMemoryUsage(): void {
-    const memoryUsage = this.getMemoryUsage();
-    Logger.debug('MemoryManager', `内存使用: ${memoryUsage.percentage.toFixed(2)}%`);
+    const metrics = this.resourceMonitor.getCurrentMetrics();
+    const memoryUsagePercent = metrics?.memory.usagePercent ?? this.getMemoryUsage().percentage;
+    Logger.debug('MemoryManager', `内存使用: ${memoryUsagePercent.toFixed(2)}%`);
 
-    if (memoryUsage.percentage > 80) {
-      Logger.warn('MemoryManager', `内存占用过高: ${memoryUsage.percentage.toFixed(2)}%，开始清理`);
+    if (memoryUsagePercent > 80) {
+      Logger.warn('MemoryManager', `内存占用过高: ${memoryUsagePercent.toFixed(2)}%，开始清理`);
       this.cleanupMemory();
+      const level = memoryUsagePercent > 90 ? ResourceLevel.CRITICAL : ResourceLevel.LOW;
+      this.onMemoryPressure(level);
     }
+  }
+
+  onMemoryPressure(level: ResourceLevel): void {
+    Logger.warn('MemoryManager', `内存压力通知: ${level}`);
+    this.animationOptimizer.updateResourceLevel(level);
   }
 
   /**

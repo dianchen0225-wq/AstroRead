@@ -675,7 +675,7 @@ export class NovelCrawler {
     }
 
     const cleaningOpts: CleaningOptions = {
-      stripHtmlTags: false,
+      stripHtmlTags: true,
       normalizeWhitespace: true,
       removeScripts: true,
       removeStyles: true,

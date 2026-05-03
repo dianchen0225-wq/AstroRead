@@ -8,7 +8,7 @@ import { Logger } from "./Logger";
 /**
  * 信号量配置
  */
-interface SemaphoreConfig {
+export interface SemaphoreConfig {
   /** 初始许可数 */
   permits: number;
   /** 是否公平模式（按请求顺序获取许可） */

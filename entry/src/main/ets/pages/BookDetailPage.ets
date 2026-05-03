@@ -19,9 +19,7 @@ import { Book } from '../models/Book';
 import { Chapter } from '../models/Book';
 import { BookSource } from '../models/BookSource';
 import { Logger } from '../utils/performance/Logger';
-import { NavigationManager, NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
-import { BackButton } from '../components/BackButton';
 
 @Entry
 @ComponentV2
@@ -206,12 +204,7 @@ struct BookDetailPage {
 
     try {
       const chapterIndex = this.book?.lastReadChapterIndex ? this.book.lastReadChapterIndex : 0;
-      const params: NavParams = {
-        bookId: this.bookId,
-        initialChapterIndex: chapterIndex,
-        initialChapterUrl: this.chapters[chapterIndex].url
-      };
-      NavigationManager.getInstance().navigateTo('ReadPage', params);
+      // TODO: navigate to ReadPage
       Logger.info('BookDetailPage', 'push page success');
     } catch (err) {
       Logger.error('BookDetailPage', `pushPage failed: ${err}`);
@@ -220,47 +213,6 @@ struct BookDetailPage {
 
   build() {
     Column() {
-      Row() {
-        BackButton({
-          buttonSize: 'medium',
-          style: 'default',
-          onBack: () => {
-            NavigationManager.getInstance().navigateBack();
-          }
-        })
-
-        Text('书籍详情')
-          .fontSize(18)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(600)
-          .layoutWeight(1)
-          .margin({ left: DesignSystem.Spacing.sm })
-
-        Button(this.isAdded ? '已添加' : '添加书架')
-          .fontSize(14)
-          .fontColor(this.isAdded ?
-            DesignSystem.getSecondaryTextColor(this.isLightMode) :
-            DesignSystem.Colors.text.primary.light)
-          .backgroundColor(this.isAdded ?
-            DesignSystem.getSecondaryBackgroundColor(this.isLightMode) :
-            DesignSystem.getPrimaryColor(this.isLightMode))
-          .borderRadius(8)
-          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-          .margin({ left: 10 })
-          .onClick(() => {
-            if (!this.isAdded) {
-              this.addBook();
-            }
-          })
-      }
-      .width('100%')
-      .padding({ left: DesignSystem.Spacing.md, right: DesignSystem.Spacing.lg, top: 15, bottom: 15 })
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-      .border({
-        width: { bottom: 1 },
-        color: DesignSystem.getBorderColor(this.isLightMode)
-      })
-
       Scroll() {
         Column() {
           if (this.book) {
@@ -406,12 +358,7 @@ struct BookDetailPage {
                   .onClick(() => {
                     this.currentChapterIndex = index;
                     try {
-                      const params: NavParams = {
-                        bookId: this.bookId,
-                        initialChapterIndex: index,
-                        initialChapterUrl: chapter.url
-                      };
-                      NavigationManager.getInstance().navigateTo('ReadPage', params);
+                      // TODO: navigate to ReadPage
                       Logger.info('BookDetailPage', 'push page success');
                     } catch (err) {
                       Logger.error('BookDetailPage', `pushPage failed: ${err}`);

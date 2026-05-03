@@ -4,7 +4,6 @@ import { ContentFilterConfig, ReplaceRule, FilterRule, DEFAULT_FILTER_CONFIG } f
 import { ContentFilter } from '../utils/content/ContentFilter';
 import { Logger } from '../utils/performance/Logger';
 import { router } from '@kit.ArkUI';
-import { BackButton } from '../components/BackButton';
 
 interface RouterParams {
   config?: ContentFilterConfig;
@@ -164,40 +163,6 @@ struct ContentFilterPage {
 
   build() {
     Column() {
-      Row() {
-        BackButton({
-          buttonSize: 'medium',
-          style: 'default',
-          onBack: () => {
-            router.back();
-          }
-        })
-
-        Text('内容净化设置')
-          .fontSize(18)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(600)
-          .layoutWeight(1)
-          .margin({ left: DesignSystem.Spacing.sm })
-
-        Button('保存')
-          .fontSize(14)
-          .fontColor(DesignSystem.Colors.text.primary.light)
-          .backgroundColor(DesignSystem.getPrimaryColor(this.isLightMode))
-          .borderRadius(8)
-          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-          .onClick(() => {
-            this.saveConfig();
-          })
-      }
-      .width('100%')
-      .padding({ left: DesignSystem.Spacing.md, right: DesignSystem.Spacing.lg, top: 15, bottom: 15 })
-      .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-      .border({
-        width: { bottom: 1 },
-        color: DesignSystem.getBorderColor(this.isLightMode)
-      })
-
       Scroll() {
         Column() {
           Column() {

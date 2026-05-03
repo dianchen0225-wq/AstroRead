@@ -1,5 +1,6 @@
 import { themeManager } from '../../common/ThemeManager';
 import { Logger } from '../performance/Logger';
+import { ResourceLevel } from '../performance/ResourceMonitor';
 import {
   requestAnimationFrame,
   cancelAnimationFrame,
@@ -201,8 +202,58 @@ export class LiquidGlassPreset {
     reducedMotion: false
   };
 
-  static getReducedMotionConfig(base: LiquidGlassConfig): LiquidGlassConfig {
-    return {
+  static getAdaptiveConfig(base: LiquidGlassConfig, resourceLevel: ResourceLevel): LiquidGlassConfig {
+    switch (resourceLevel) {
+      case ResourceLevel.CRITICAL:
+        return {
+          fluidity: base.fluidity,
+          viscosity: base.viscosity,
+          surfaceTension: base.surfaceTension,
+          transparency: base.transparency,
+          refractionIndex: base.refractionIndex,
+          blurIntensity: 5,
+          colorTint: base.colorTint,
+          rippleEnabled: false,
+          rippleIntensity: base.rippleIntensity,
+          rippleDecay: base.rippleDecay,
+          morphEnabled: false,
+          morphSpeed: base.morphSpeed,
+          morphAmplitude: base.morphAmplitude,
+          glowEnabled: false,
+          glowIntensity: base.glowIntensity,
+          glowColor: base.glowColor,
+          shadowSoftness: 0,
+          animationFrameRate: 30,
+          reducedMotion: true
+        };
+      case ResourceLevel.LOW:
+        return {
+          fluidity: base.fluidity,
+          viscosity: base.viscosity,
+          surfaceTension: base.surfaceTension,
+          transparency: base.transparency,
+          refractionIndex: base.refractionIndex,
+          blurIntensity: 10,
+          colorTint: base.colorTint,
+          rippleEnabled: false,
+          rippleIntensity: base.rippleIntensity,
+          rippleDecay: base.rippleDecay,
+          morphEnabled: false,
+          morphSpeed: base.morphSpeed,
+          morphAmplitude: base.morphAmplitude,
+          glowEnabled: base.glowEnabled,
+          glowIntensity: base.glowIntensity * 0.5,
+          glowColor: base.glowColor,
+          shadowSoftness: 0,
+          animationFrameRate: 30,
+          reducedMotion: true
+        };
+      default:
+        return base;
+    }
+  }
+
+  static getReducedMotionConfig(base: LiquidGlassConfig): LiquidGlassConfig {    return {
       fluidity: base.fluidity,
       viscosity: base.viscosity,
       surfaceTension: base.surfaceTension,

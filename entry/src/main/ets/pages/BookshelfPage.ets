@@ -3,9 +3,9 @@ import { DesignSystem } from '../common/DesignSystem';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
 import { Book } from '../models/Book';
 import { Logger } from '../utils/performance/Logger';
-import { NavigationManager, NavParams } from '../common/NavigationManager';
 import { common } from '@kit.AbilityKit';
 import { BookCoverImage } from '../components/BookCoverImage';
+import { BookListDataSource } from '../components/OptimizedList';
 import { pageStateManager, PageIds } from '../utils/cache/PageStateManager';
 import { dataCacheManager, CacheKeys } from '../utils/cache/DataCacheManager';
 
@@ -24,6 +24,7 @@ export struct BookshelfPage {
   private isComponentActive: boolean = false;
   private isInitialized: boolean = false;
   private lastDataVersion: number = 0;
+  private bookListDataSource: BookListDataSource = new BookListDataSource();
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
@@ -96,6 +97,7 @@ export struct BookshelfPage {
     } finally {
       if (this.isComponentActive) {
         this.isLoading = false;
+        this.bookListDataSource.updateData(this.bookList);
       }
     }
   }
@@ -106,113 +108,11 @@ export struct BookshelfPage {
 
   build() {
     Column() {
-      this.buildHeader()
-      
-      this.buildTabBar()
-      
       this.buildContent()
     }
     .width('100%')
     .height('100%')
     .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-  }
-
-  @Builder
-  buildHeader() {
-    Row() {
-      Column() {
-        Text($r('app.string.bookshelf'))
-          .fontSize(DesignSystem.Typography.size.xl)
-          .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-          .fontWeight(DesignSystem.Typography.weight.bold)
-        
-        if (this.bookList.length > 0) {
-          Text(`${this.bookList.length} 本书`)
-            .fontSize(DesignSystem.Typography.size.xs)
-            .fontColor(DesignSystem.getTertiaryTextColor(this.isLightMode))
-            .margin({ top: DesignSystem.Spacing.xs })
-        }
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      
-      Row() {
-        Row() {
-          Text(this.viewMode === 'list' ? '▦' : '☰')
-            .fontSize(DesignSystem.Typography.size.base)
-            .fontColor(DesignSystem.getPrimaryColor(this.isLightMode))
-        }
-        .width(40)
-        .height(40)
-        .borderRadius(DesignSystem.BorderRadius.md)
-        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-        .justifyContent(FlexAlign.Center)
-        .border({
-          width: 1,
-          color: DesignSystem.getBorderColor(this.isLightMode)
-        })
-        .onClick(() => {
-          this.toggleViewMode();
-        })
-      }
-    }
-    .width('100%')
-    .padding({
-      left: DesignSystem.Spacing.lg,
-      right: DesignSystem.Spacing.lg,
-      top: this.safeAreaTop + DesignSystem.Spacing.md,
-      bottom: DesignSystem.Spacing.md
-    })
-    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-  }
-
-  @Builder
-  buildTabBar() {
-    Row() {
-      this.buildTabItem($r('app.string.recent_read'), 0)
-      this.buildTabItem($r('app.string.favorites'), 1)
-    }
-    .width('100%')
-    .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-    .border({
-      width: { bottom: 1 },
-      color: DesignSystem.getBorderColor(this.isLightMode)
-    })
-  }
-
-  @Builder
-  buildTabItem(title: ResourceStr, index: number) {
-    Column() {
-      Text(title)
-        .fontSize(DesignSystem.Typography.size.sm)
-        .fontColor(this.activeTabIndex === index ?
-          DesignSystem.getPrimaryColor(this.isLightMode) :
-          DesignSystem.getSecondaryTextColor(this.isLightMode))
-        .fontWeight(this.activeTabIndex === index ?
-          DesignSystem.Typography.weight.semibold :
-          DesignSystem.Typography.weight.regular)
-        .padding({
-          top: DesignSystem.Spacing.md,
-          bottom: DesignSystem.Spacing.sm
-        })
-        .onClick(() => {
-          this.activeTabIndex = index;
-        })
-      
-      Row()
-        .width(24)
-        .height(3)
-        .borderRadius(2)
-        .backgroundColor(this.activeTabIndex === index ?
-          DesignSystem.getPrimaryColor(this.isLightMode) :
-          Color.Transparent)
-        .animation({
-          duration: DesignSystem.AnimationDuration.fast,
-          curve: DesignSystem.AnimationCurve.easeOut
-        })
-    }
-    .layoutWeight(1)
-    .alignItems(HorizontalAlign.Center)
   }
 
   @Builder
@@ -283,7 +183,7 @@ export struct BookshelfPage {
   @Builder
   buildListView() {
     List({ space: DesignSystem.Spacing.md }) {
-      ForEach(this.bookList, (book: Book) => {
+      LazyForEach(this.bookListDataSource, (book: Book) => {
         ListItem() {
           this.buildBookListItem(book)
         }
@@ -403,10 +303,7 @@ export struct BookshelfPage {
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      const navParams: NavParams = {
-        bookId: book.id
-      };
-      NavigationManager.getInstance().navigateTo('BookDetailPage', navParams);
+      // TODO: navigate to BookDetailPage
     })
     .onTouch((event: TouchEvent) => {
       if (event.type === TouchType.Down) {
@@ -512,10 +409,7 @@ export struct BookshelfPage {
       curve: DesignSystem.AnimationCurve.easeOut
     })
     .onClick(() => {
-      const navParams: NavParams = {
-        bookId: book.id
-      };
-      NavigationManager.getInstance().navigateTo('BookDetailPage', navParams);
+      // TODO: navigate to BookDetailPage
     })
     .onTouch((event: TouchEvent) => {
       if (event.type === TouchType.Down) {

@@ -134,6 +134,17 @@ class Logger {
     Logger.config.level = level;
   }
 
+  static setLevel(level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'NONE'): void {
+    const levelMap: Record<string, LogLevel> = {
+      'DEBUG': LogLevel.DEBUG,
+      'INFO': LogLevel.INFO,
+      'WARN': LogLevel.WARN,
+      'ERROR': LogLevel.ERROR,
+      'NONE': LogLevel.NONE
+    };
+    Logger.config.level = levelMap[level] ?? LogLevel.WARN;
+  }
+
   /**
    * 设置是否为生产环境
    */

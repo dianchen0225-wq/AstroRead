@@ -1,9 +1,7 @@
 /**
- * AstroRead MainPage - 沉浸式悬浮交互主页面
- * 使用 FloatingDock + SideDock + GestureController 替代传统 TabBar
+ * AstroRead MainPage
  */
 
-import { HomePage } from './HomePage';
 import { SearchPage } from './SearchPage';
 import { BookshelfPage } from './BookshelfPage';
 import { SourcePage } from './SourcePage';
@@ -15,14 +13,11 @@ import { Logger } from '../utils/performance/Logger';
 import { window } from '@kit.ArkUI';
 import { display } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { NavigationManager, NavParams } from '../common/NavigationManager';
 import { BookDetailPage } from './BookDetailPage';
 import { ReadPage } from './ReadPage';
 import { ImportPage } from './ImportPage';
-import { SimpleFloatingDock, DockItem } from '../components/FloatingDock';
-import { QuickSettingsSideDock } from '../components/SideDock';
 import { gestureController, GestureEvent } from '../utils/ui/GestureController';
-import { immersiveUI, UIVisibility } from '../utils/ui/ImmersiveUIManager';
+import { getApiVersion, isApiVersionAtLeast, SystemVersion } from '../utils/SystemVersionUtils';
 
 enum PageIndex {
   Home = 0,
@@ -46,29 +41,15 @@ struct MainPage {
   @Local currentImportPage: string = '';
   @Local screenWidth: number = 360;
   @Local screenHeight: number = 780;
-  @Local dockVisible: boolean = true;
+  @Local apiVersion: number = 12;
+  @Local currentScrollOffset: number = 0;
+
+  private scroller: Scroller = new Scroller();
 
   private isComponentActive: boolean = false;
   private themeListener: (isDark: boolean) => void = (isDark: boolean) => {
     this.isLightMode = !isDark;
   };
-  private gestureHandler: (event: GestureEvent) => void = (event: GestureEvent) => {
-    if (event.type === 'swipe_up_hold' && event.isComplete) {
-      this.dockVisible = !this.dockVisible;
-    }
-  };
-  private visibilityHandler: (visibility: UIVisibility) => void = (_visibility: UIVisibility) => {
-    // Dock remains by user control only (via swipe gesture)
-    // Immersive UI scroll behavior must not hide the main navigation
-  };
-
-  private dockItems: DockItem[] = [
-    { id: 'home', icon: '🏠', label: '首页', enabled: true, route: 'MainPage' },
-    { id: 'search', icon: '🔍', label: '搜索', enabled: true, route: 'SearchPage' },
-    { id: 'shelf', icon: '📚', label: '书架', enabled: true, route: 'BookshelfPage' },
-    { id: 'source', icon: '📖', label: '书源', enabled: true, route: 'SourcePage' },
-    { id: 'settings', icon: '⚙️', label: '设置', enabled: true, route: 'SettingsPage' }
-  ];
 
   aboutToAppear(): void {
     this.isComponentActive = true;
@@ -80,57 +61,30 @@ struct MainPage {
     this.isLightMode = themeManager.isLightTheme();
     themeManager.addListener(this.themeListener);
 
+    this.apiVersion = getApiVersion();
+    Logger.info('MainPage', `API版本: ${this.apiVersion}`);
+
     // 设置手势控制器
     gestureController.setScreenSize(this.screenWidth, this.screenHeight);
     gestureController.setKioskMode(false);
-    gestureController.addCallback(this.gestureHandler);
-
-    // 设置沉浸式管理器
-    immersiveUI.addCallback(this.visibilityHandler);
 
     this.setWindowImmersive();
     this.measureScreen();
-
-    NavigationManager.getInstance().setPageChangeListener((pageName: string, params?: NavParams) => {
-      if (pageName === 'BookDetailPage') {
-        this.currentDetailPage = String(params?.bookId || '');
-      } else if (pageName === 'ReadPage') {
-        this.currentReadPage = String(params?.bookId || '');
-        this.currentReadChapterIndex = Number(params?.initialChapterIndex || 0);
-        this.currentReadChapterUrl = String(params?.initialChapterUrl || '');
-      } else if (pageName === 'ImportPage') {
-        this.currentImportPage = '';
-      } else if (pageName === 'MainPage') {
-        this.currentDetailPage = '';
-        this.currentReadPage = '';
-        this.currentReadChapterIndex = 0;
-        this.currentReadChapterUrl = '';
-        this.currentImportPage = '';
-      } else if (pageName === 'BookshelfPage') {
-        this.currentPageIndex = PageIndex.Bookshelf;
-      } else if (pageName === 'SearchPage') {
-        this.currentPageIndex = PageIndex.Search;
-      } else if (pageName === 'SourcePage') {
-        this.currentPageIndex = PageIndex.Source;
-      } else if (pageName === 'SettingsPage') {
-        this.currentPageIndex = PageIndex.Settings;
-      }
-    });
   }
 
   aboutToDisappear(): void {
     this.isComponentActive = false;
     themeManager.removeListener(this.themeListener);
-    gestureController.removeCallback(this.gestureHandler);
-    immersiveUI.removeCallback(this.visibilityHandler);
   }
 
   private measureScreen(): void {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const displayInfo = display.getDefaultDisplaySync();
-      this.screenWidth = vp2px(displayInfo.width);
-      this.screenHeight = vp2px(displayInfo.height);
+      // displayInfo.width/height 返回的是物理像素(px)，直接使用即可
+      // vp2px() 是将虚拟像素(vp)转换为物理像素(px)，不应对已经是px的值再次转换
+      this.screenWidth = displayInfo.width;
+      this.screenHeight = displayInfo.height;
       gestureController.setScreenSize(this.screenWidth, this.screenHeight);
     } catch (error) {
       Logger.error('MainPage', `测量屏幕失败: ${error}`);
@@ -147,56 +101,33 @@ struct MainPage {
         const avoidArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
         this.safeAreaTop = avoidArea.topRect.height;
         this.safeAreaBottom = avoidArea.bottomRect.height;
-
-        // 设置沉浸式导航栏 - 透明背景
-        await mainWindow.setWindowSystemBarProperties({
-          statusBarColor: DesignSystem.getPrimaryBackgroundColor(this.isLightMode),
-          statusBarContentColor: DesignSystem.getPrimaryTextColor(this.isLightMode),
-          navigationBarColor: 'rgba(0,0,0,0)',
-          navigationBarContentColor: DesignSystem.getPrimaryTextColor(this.isLightMode)
-        });
-
-        // 启用全屏布局
-        await mainWindow.setWindowLayoutFullScreen(true);
       }
     } catch (error) {
       Logger.error('MainPage', `设置窗口沉浸式失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  private handleDockItemClick(index: number, item: DockItem): void {
-    this.currentPageIndex = index;
-
-    // 路由映射到下划线页面
-    switch (index) {
-      case PageIndex.Search:
-        NavigationManager.getInstance().navigateTo('SearchPage');
-        break;
-      case PageIndex.Bookshelf:
-        NavigationManager.getInstance().navigateTo('BookshelfPage');
-        break;
-      case PageIndex.Source:
-        NavigationManager.getInstance().navigateTo('SourcePage');
-        break;
-      case PageIndex.Settings:
-        NavigationManager.getInstance().navigateTo('SettingsPage');
-        break;
-      default:
-        break;
+  private getScrollOffset(): number {
+    try {
+      const offset = this.scroller.currentOffset();
+      const newOffset = offset.yOffset;
+      const delta = newOffset - this.currentScrollOffset;
+      this.currentScrollOffset = newOffset;
+      return newOffset;
+    } catch (e) {
+      return this.currentScrollOffset;
     }
   }
 
   @Builder
   buildCurrentPage() {
     if (this.currentPageIndex === PageIndex.Home) {
-      HomePage({
-        safeAreaTop: this.safeAreaTop,
-        onNavigate: (route: string, params?: ESObject) => {
-          if (route === 'TabSwitch' && params && (params as Record<string, Object>).tabIndex !== undefined) {
-            this.currentPageIndex = (params as Record<string, number>).tabIndex as number;
-          }
-        }
-      })
+      Column() {
+        Text('Home')
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
     } else if (this.currentPageIndex === PageIndex.Search) {
       SearchPage()
     } else if (this.currentPageIndex === PageIndex.Bookshelf) {
@@ -210,34 +141,32 @@ struct MainPage {
 
   build() {
     Stack() {
-      // 主内容区 - 占据全屏，不再有固定 TabBar
-      Column() {
-        this.buildCurrentPage()
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      // 侧边 Dock
-      QuickSettingsSideDock({
-        screenWidth: this.screenWidth,
-        screenHeight: this.screenHeight,
-        safeAreaTop: this.safeAreaTop
-      })
-
-      // 悬浮底栏 - 不占用固定实体空间，基于 Stack 绝对定位
-      if (this.dockVisible) {
-        SimpleFloatingDock({
-          items: this.dockItems,
-          activeIndex: this.currentPageIndex,
-          onItemClick: (index: number, item: DockItem) => {
-            this.handleDockItemClick(index, item);
-          },
-          screenWidth: this.screenWidth,
-          screenHeight: this.screenHeight,
-          safeAreaBottom: this.safeAreaBottom
-        })
+      if (this.apiVersion >= SystemVersion.API_17) {
+        Scroll(this.scroller) {
+          Column() {
+            this.buildCurrentPage()
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
+      } else {
+        Scroll(this.scroller) {
+          Column() {
+            this.buildCurrentPage()
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor(DesignSystem.getPrimaryBackgroundColor(this.isLightMode))
+        .padding({ bottom: this.safeAreaBottom })
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
       }
 
       // 子页面覆盖层

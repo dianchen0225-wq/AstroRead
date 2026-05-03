@@ -15,7 +15,6 @@
 
 import { themeManager } from '../common/ThemeManager';
 import { viewModelManager } from '../viewmodel/ViewModelManager';
-import { NavigationManager } from '../common/NavigationManager';
 import { ImportResult, DeleteResult } from '../viewmodel/BookSourceViewModel';
 import { BookSource } from '../models/BookSource';
 import { SecurityScanResult, SecurityRisk, SecurityRiskLevel } from '../utils/security/SourceSandbox';
@@ -30,7 +29,6 @@ import { NetworkManager } from '../utils/network/NetworkManager';
 import { SourceImportTaskPool } from '../utils/validation/SourceImportTaskPool';
 import { showToast } from '../utils/content/ToastUtils';
 import { sourceCleaner, FailedSource } from '../utils/SourceCleaner';
-import { BackButton } from '../components/BackButton';
 
 export interface SourceItemData {
   name: string;
@@ -811,37 +809,6 @@ export struct SourcePage {
   build() {
     Stack() {
       Column() {
-        Row() {
-          BackButton({
-            buttonSize: 'medium',
-            style: 'default',
-            onBack: () => {
-              NavigationManager.getInstance().navigateBack();
-            }
-          })
-
-          Text($r('app.string.source_management'))
-            .fontSize(18)
-            .fontColor(DesignSystem.getPrimaryTextColor(this.isLightMode))
-            .fontWeight(600)
-            .layoutWeight(1)
-            .margin({ left: DesignSystem.Spacing.sm })
-          
-          if (this.totalCount > 0) {
-            Text(`(${this.sourceList.length}/${this.totalCount})`)
-              .fontSize(14)
-              .fontColor(DesignSystem.getSecondaryTextColor(this.isLightMode))
-              .margin({ right: 8 })
-          }
-        }
-        .width('100%')
-        .padding({ left: DesignSystem.Spacing.md, right: DesignSystem.Spacing.lg, top: 15, bottom: 15 })
-        .backgroundColor(DesignSystem.getSecondaryBackgroundColor(this.isLightMode))
-        .border({
-          width: { bottom: 1 },
-          color: DesignSystem.getBorderColor(this.isLightMode)
-        })
-
         Column() {
           Row() {
             TextInput({ placeholder: '搜索书源名称...', text: this.searchKeyword })
